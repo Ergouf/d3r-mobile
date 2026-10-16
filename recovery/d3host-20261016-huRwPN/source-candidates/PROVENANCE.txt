@@ -64,3 +64,49 @@ GAPS:
   - d3_host.h, d3_service.h, d3_table.c, guest_layout.h were not in this file-history as pre-wipe originals.
   - No line-numbered Read covered either file in one shot; completeness rests on the file-history snapshot, checked against Read windows and the first applied Edit old_string.
   - Active host tree and prod.keys were not touched.
+
+== additional candidates (headers / build scripts / jni) ==
+Transcript fa6ddb6e-577c-4353-931e-903c9fcf7111.jsonl. Live tree not modified.
+
+COMPLETE d3_jni.c
+  path: d3-android/host/d3_jni.c
+  provenance: Read result L1559, tool call L1558, ts 2026-10-15T17:44:01, start=1 num=24 total=24
+  sha256: 1b416c576de23e7c2bb7195a3792e4bedf7a11ea2d9c061c76f5da3e0b5b292b bytes: 555 newlines: 23
+  partial: false
+  note: ls at L1830 (ts of that listing is the host dir at 2026-10-16 01:52) shows 555 bytes, mtime Oct 15 13:07, unchanged through L4618. Transcript stores LF text; byte delta versus that ls size is recorded below if nonzero. Not the later jni_template.c stub.
+  delta_utf8_minus_ls555: 0
+
+COMPLETE tools/build_host.py -> tools__build_host.py
+  provenance: Read result L1980, call L1979, ts 2026-10-15T17:56:19, start=1 num=54 total=54. Same file re-read L4189.
+  sha256: 0eadb8e1d05dab3d14a732b0a6575c19291c58da07e0ca363644ce3f2663a674 bytes: 1371 newlines: 53
+  partial: false
+  ls L565: tools/build_host.py 1371 bytes, mtime Oct 15 16:06. delta_utf8_minus_ls: 0
+
+COMPLETE tools/build_apk.py -> tools__build_apk.py
+  provenance: Read result L2014, call L2013, ts 2026-10-15T17:56:58, start=1 num=130 total=130
+  sha256: d289acc1f56c47ceaed4005f5b20f1452a96f3a21e37f26be7514935ea7855b0 bytes: 3950 newlines: 129
+  partial: false
+  ls L565: tools/build_apk.py 3950 bytes, mtime Oct 15 14:08. delta_utf8_minus_ls: 0
+
+COMPLETE build_quick.py (session-created, not a pre-existing original)
+  provenance: Write tool input L2086 ts 2026-10-15T17:58:58 equals file-history 962445f7593000ff@v2 (backupTime 2026-10-15T22:17:21.897Z, version 2; version 1 had no backup file).
+  sha256: b86e8fa6c86a58080e124d4d83e99941281a00c83285fe2a099b465f13ddb18b bytes: 1978 newlines: 66
+  partial: false
+  note: file-history v3 (962445f7593000ff@v3, 2213 bytes, 70 newlines, 2026-10-15T23:30:25.672Z) is a later edit of this same script and was not copied. Not a reconstruction stub.
+
+PARTIAL guest_layout.h  (original totalLines=61 at d3-android/guest_layout.h; not in host/)
+  No full read. Not stitched. Snippets in partials/ are raw tool text only.
+  partials/guest_layout.h.read-offset52.txt from Read L2528 ts 2026-10-15T18:12:09 (tool start=52 num=10 total=61; stored text is 190 bytes, 9 newlines, begins with the typedef). sha 0fef69843eda75ad7d4a5462be86aa8befca4c92ccca27321047fa4d2497b9c8
+  partials/guest_layout.h.line17.txt from grep -n VENEER stdout L3159 (line prefixed 17:).
+  partials/guest_layout.h.line36-41.txt from grep -n D3_SYM stdout L3909 (lines 36 and 41).
+  grep -A 20 at L1234 is the same tail as the Read window and was not saved again.
+
+ABSENT (listed on disk, no Read/cat/Write of the body in this transcript or its subagents):
+  d3-android/host/d3_host.h            241 bytes  mtime Oct 15 12:54  (ls L1830, L4091, L4618)
+  d3-android/host/d3_service.h        2511 bytes  mtime Oct 15 19:23  (same listings). Later 752-byte file at Oct 16 13:10 is the post-wipe stub and was not saved.
+  d3-android/host/d3_service_names.h 11664 bytes  mtime Oct 15 20:51  (same listings). No snapshot.
+  tools/gen_service_names.py        13341 bytes  mtime Oct 15 19:39  (ls L565). Not read.
+  tools/build_guest_elf.py          43832 bytes  mtime Oct 15 20:49  (ls L565). Not read.
+  MainActivity.java: no Read/Write. A javac command at L2076 compiles a .java path; source text was not captured.
+  Native .S/.s: find at L2508 under the project, pruning external/, returned empty. No project assembly file was read.
+  Later stubs not saved: d3_service.h 28-line Write in session 7d827ccb L206, guest_layout.h 25-line file, d3_table.c 34-line file, guest_layout_new.h, d3_service_new.h, d3_host_minimal.c, build.sh Write L6191.

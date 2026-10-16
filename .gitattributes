@@ -9,7 +9,4 @@
 Makefile text eol=lf
 
 # Archival snapshots must retain the exact bytes recorded in PROVENANCE.txt.
-recovery/**/source-candidates/d3_host.c -text
-recovery/**/source-candidates/d3_host.c.last-full -text
-recovery/**/source-candidates/d3_service.c -text
-recovery/**/source-candidates/d3_service.c.last-full -text
+recovery/**/source-candidates/** -text

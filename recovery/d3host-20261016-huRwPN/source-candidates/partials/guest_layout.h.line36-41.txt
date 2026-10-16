@@ -1,0 +1,2 @@
+36:#define D3_SYM_nninitStartup 0x1000a20u
+41:#define D3_SYM_nninitInitializeSdkModule 0x2ad960u

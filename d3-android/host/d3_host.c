@@ -28,6 +28,7 @@
 
 #define LOG_TAG "D3Host"
 #define STACK_SIZE (8u * 1024u * 1024u)
+#define STACK_REGION_SIZE (1ull << 30)
 #define GUARD_SIZE 0x4000u
 #define PAGE_SIZE 0x4000u
 #define EXC_SIZE 0x2000u
@@ -38,10 +39,10 @@
 #define ALIAS_SIZE (64ull * 1024u * 1024u * 1024u)
 #define D3_TITLE_ID 0x01001b300b9be000ull
 #define TRACE_MAX 32
-#define CRASH_PATH "/data/data/com.d3mobile.host/files/d3-crash.txt"
-#define CRASH_PATH_FALLBACK "/data/data/com.d3mobile.host/cache/d3-crash.txt"
-#define CRASH_PATH_SDCARD "/sdcard/D3/logs/d3-crash.txt"
-#define PROBE_INFO_PATH "/sdcard/D3/logs/d3-sysinfo.txt"
+#define CRASH_PATH D3_PRIVATE_ROOT "/files/d3-crash.txt"
+#define CRASH_PATH_FALLBACK D3_PRIVATE_ROOT "/cache/d3-crash.txt"
+#define CRASH_PATH_SDCARD D3_DATA_ROOT "/logs/d3-crash.txt"
+#define PROBE_INFO_PATH D3_DATA_ROOT "/logs/d3-sysinfo.txt"
 #define SYS_RES_TOTAL 0x2000000ull
 #define SYS_RES_USED 0x400000ull
 
@@ -139,6 +140,7 @@ static uint64_t g_heap_cap;
 static uint64_t g_heap_cur;
 static uint64_t g_stack;
 static uint64_t g_guard;
+static uint64_t g_stack_region;
 static uint64_t g_tlr;
 static uint64_t g_alias;
 static uint64_t g_alias_cap;
@@ -177,7 +179,15 @@ static int g_regions_logged;
 static int g_found_guest;
 static uint32_t g_query_logs;
 
-enum { MAX_FIXED = 40, MAX_REG = 48 };
+enum { MAX_FIXED = 40, MAX_REG = 256, MAX_STACK_MAPS = 32 };
+typedef struct {
+    uint64_t destination;
+    uint64_t source;
+    uint64_t size;
+    uint32_t source_state;
+    uint32_t source_perm;
+} StackMap;
+static StackMap g_stack_maps[MAX_STACK_MAPS];
 static Region g_fixed[MAX_FIXED];
 static int g_nfixed;
 static Region g_reg[MAX_REG];
@@ -557,19 +567,19 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
 /* /sdcard/D3/no-handler switches the crash path over to bionic debuggerd. */
 static int tombstone_mode(void) {
     struct stat st;
-    return stat("/sdcard/D3/no-handler", &st) == 0;
+    return stat(D3_DATA_ROOT "/no-handler", &st) == 0;
 }
 
 /* /sdcard/D3/pause holds the guest thread still so its signal state can be read. */
 static int pause_requested(void) {
     struct stat st;
-    return stat("/sdcard/D3/pause", &st) == 0;
+    return stat(D3_DATA_ROOT "/pause", &st) == 0;
 }
 
 /* /sdcard/D3/selftest-crash makes the guest thread fault on purpose. */
 static int selftest_crash(void) {
     struct stat st;
-    return stat("/sdcard/D3/selftest-crash", &st) == 0;
+    return stat(D3_DATA_ROOT "/selftest-crash", &st) == 0;
 }
 
 static void install_crash_handler(void) {
@@ -617,7 +627,7 @@ static void install_crash_handler(void) {
    raw syscalls and never takes a libc lock, so cloning inside a multithreaded JVM
    cannot deadlock the guest path. Every stop lands in one of 256 fixed slots, so the
    file always holds the newest events and the fatal one is never lost. */
-#define TRACE_PATH "/sdcard/D3/logs/d3-trace.txt"
+#define TRACE_PATH D3_DATA_ROOT "/logs/d3-trace.txt"
 #define TRACE_SLOT 768
 #define TRACE_SLOTS 256
 #define TRACE_RING_OFF 0x1000
@@ -1057,7 +1067,7 @@ static void tracer_main(pid_t target) {
 
 static int trace_requested(void) {
     struct stat st;
-    return stat("/sdcard/D3/trace", &st) == 0;
+    return stat(D3_DATA_ROOT "/trace", &st) == 0;
 }
 
 /* The child is the tracer, so the guest keeps running in the process that already
@@ -1248,6 +1258,37 @@ static int region_cmp(const void *left, const void *right) {
     return 0;
 }
 
+static void overlay_region(Region overlay) {
+    Region regions[MAX_REG];
+    int count = 0;
+    uint64_t end = overlay.base + overlay.size;
+    for (int i = 0; i < g_nreg; i++) {
+        Region region = g_reg[i];
+        uint64_t region_end = region.base + region.size;
+        if (region_end <= overlay.base || region.base >= end) {
+            if (count >= MAX_REG)
+                fail("too many overlay regions");
+            regions[count++] = region;
+            continue;
+        }
+        if (region.base < overlay.base) {
+            if (count >= MAX_REG)
+                fail("too many overlay regions");
+            regions[count++] = (Region){region.base, overlay.base - region.base, region.state, region.perm};
+        }
+        if (region_end > end) {
+            if (count >= MAX_REG)
+                fail("too many overlay regions");
+            regions[count++] = (Region){end, region_end - end, region.state, region.perm};
+        }
+    }
+    if (count >= MAX_REG)
+        fail("too many overlay regions");
+    regions[count++] = overlay;
+    memcpy(g_reg, regions, (size_t)count * sizeof regions[0]);
+    g_nreg = count;
+}
+
 static void compose_regions(void) {
     g_nreg = 0;
     for (int i = 0; i < g_nfixed; i++) {
@@ -1266,6 +1307,13 @@ static void compose_regions(void) {
                 fail("too many regions");
             g_reg[g_nreg++] = (Region){g_heap + g_heap_cur, g_heap_cap - g_heap_cur, MEM_INACCESSIBLE, 0};
         }
+    }
+    for (int i = 0; i < MAX_STACK_MAPS; i++) {
+        const StackMap *mapping = &g_stack_maps[i];
+        if (!mapping->size)
+            continue;
+        overlay_region((Region){mapping->source, mapping->size, mapping->source_state, 0});
+        overlay_region((Region){mapping->destination, mapping->size, MEM_STACK, PERM_RW});
     }
     qsort(g_reg, (size_t)g_nreg, sizeof g_reg[0], region_cmp);
     for (int i = 1; i < g_nreg; i++) {
@@ -1325,14 +1373,15 @@ static void prepare_memory(void) {
     void *tls = map_pages(PAGE_SIZE, PROT_READ | PROT_WRITE);
     void *thread = map_pages(PAGE_SIZE, PROT_READ | PROT_WRITE);
     void *tlr = map_pages(PAGE_SIZE, PROT_READ | PROT_WRITE);
-    void *stack_map = map_pages(STACK_SIZE + GUARD_SIZE, PROT_NONE);
-    if (mprotect((char *)stack_map + GUARD_SIZE, STACK_SIZE, PROT_READ | PROT_WRITE) != 0)
+    void *stack_map = map_pages(STACK_REGION_SIZE, PROT_NONE);
+    g_stack_region = (uint64_t)(uintptr_t)stack_map;
+    g_stack = g_stack_region + STACK_REGION_SIZE - STACK_SIZE;
+    g_guard = g_stack - GUARD_SIZE;
+    if (mprotect((void *)(uintptr_t)g_stack, STACK_SIZE, PROT_READ | PROT_WRITE) != 0)
         fail("stack mprotect errno %d", errno);
     g_tls = (uint64_t)(uintptr_t)tls;
     g_thread = (uint64_t)(uintptr_t)thread;
     g_tlr = (uint64_t)(uintptr_t)tlr;
-    g_guard = (uint64_t)(uintptr_t)stack_map;
-    g_stack = g_guard + GUARD_SIZE;
     g_guest_tp = g_tls;
     *(uint16_t *)(uintptr_t)(g_tlr + 0x100) = 0;
     *(uint16_t *)(uintptr_t)(g_tlr + 0x102) = 0;
@@ -1455,6 +1504,13 @@ static void query_memory(d3_saved *saved) {
             fail("QueryMemory gap addr=%" PRIx64, addr);
         fill_info(&out, start, end - start, MEM_FREE, 0);
     }
+    for (int i = 0; i < MAX_STACK_MAPS; i++) {
+        const StackMap *mapping = &g_stack_maps[i];
+        if (mapping->size && addr >= mapping->source && addr - mapping->source < mapping->size) {
+            out.attr |= 1u; /* MemoryAttribute::Locked while mapped as a stack. */
+            break;
+        }
+    }
     memcpy((void *)(uintptr_t)info_ptr, &out, sizeof out);
     set_saved(saved, 0, 0);
     set_saved(saved, 1, 0);
@@ -1557,8 +1613,9 @@ static void get_info(d3_saved *saved) {
     case I_RANDOM_ENTROPY: arc4random_buf(&value, sizeof value); break;
     case I_ASLR_ADDR: value = g_heap; break;
     case I_ASLR_SIZE: value = g_heap_cap; break;
-    case I_STACK_ADDR: value = g_stack; break;
-    case I_STACK_SIZE: value = STACK_SIZE; break;
+    /* This is the allocation region, not just the occupied main-thread stack. */
+    case I_STACK_ADDR: value = g_stack_region; break;
+    case I_STACK_SIZE: value = STACK_REGION_SIZE; break;
     case I_SYS_RES_TOTAL: value = SYS_RES_TOTAL; break;
     case I_SYS_RES_USED: value = SYS_RES_USED; break;
     case I_PROGRAM_ID: value = D3_TITLE_ID; break;
@@ -1617,6 +1674,82 @@ static uint64_t page_up(uint64_t size) {
    the guest maps them, so mirror that instead of handing out the whole region. */
 static int in_alias(uint64_t address, uint64_t size) {
     return g_alias && size && address >= g_alias && address + size <= g_alias + g_alias_cap;
+}
+
+/* MapMemory transfers backing pages into a free stack-region range. The source
+   becomes inaccessible until UnmapMemory moves those same pages back. */
+static uint32_t stack_map_memory(uint64_t destination, uint64_t source, uint64_t size, int mapped) {
+    const uint32_t invalid = 0xD401;
+    uint64_t alignment = g_os_page ? g_os_page : 0x1000u;
+    if (!size || ((destination | source | size) & (alignment - 1)) ||
+        size > STACK_REGION_SIZE || destination < g_stack_region ||
+        destination - g_stack_region > STACK_REGION_SIZE - size ||
+        source > UINT64_MAX - size ||
+        (source < destination + size && destination < source + size))
+        return invalid;
+
+    if (!mapped) {
+        for (int i = 0; i < MAX_STACK_MAPS; i++) {
+            StackMap *mapping = &g_stack_maps[i];
+            if (mapping->size != size || mapping->destination != destination || mapping->source != source)
+                continue;
+            if (mremap((void *)(uintptr_t)destination, (size_t)size, (size_t)size,
+                       MREMAP_MAYMOVE | MREMAP_FIXED, (void *)(uintptr_t)source) == MAP_FAILED)
+                return invalid;
+            if (mmap((void *)(uintptr_t)destination, (size_t)size, PROT_NONE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
+                fail("UnmapMemory lost stack reservation errno %d", errno);
+            if (mprotect((void *)(uintptr_t)source, (size_t)size, host_prot(mapping->source_perm)) != 0)
+                fail("UnmapMemory restore permissions errno %d", errno);
+            mapping->size = 0;
+            compose_regions();
+            return 0;
+        }
+        return invalid;
+    }
+
+    Region source_region = {0};
+    int found_source = 0;
+    for (int i = 0; i < g_nreg; i++) {
+        const Region *region = &g_reg[i];
+        if (region->state != MEM_FREE && region->base < destination + size &&
+            destination < region->base + region->size)
+            return invalid;
+        if (source >= region->base && size <= region->size &&
+            source - region->base <= region->size - size &&
+            (region->state == MEM_NORMAL || region->state == MEM_CODE_DATA) &&
+            (region->perm & PERM_RW) == PERM_RW) {
+            source_region = *region;
+            found_source = 1;
+        }
+    }
+    if (!found_source)
+        return invalid;
+    StackMap *mapping = NULL;
+    for (int i = 0; i < MAX_STACK_MAPS; i++) {
+        if (!g_stack_maps[i].size) {
+            mapping = &g_stack_maps[i];
+            break;
+        }
+    }
+    if (!mapping)
+        return invalid;
+    if (mremap((void *)(uintptr_t)source, (size_t)size, (size_t)size,
+               MREMAP_MAYMOVE | MREMAP_FIXED, (void *)(uintptr_t)destination) == MAP_FAILED)
+        return invalid;
+    if (mmap((void *)(uintptr_t)source, (size_t)size, PROT_NONE,
+             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED) {
+        if (mremap((void *)(uintptr_t)destination, (size_t)size, (size_t)size,
+                   MREMAP_MAYMOVE | MREMAP_FIXED, (void *)(uintptr_t)source) == MAP_FAILED)
+            fail("MapMemory rollback failed errno %d", errno);
+        if (mmap((void *)(uintptr_t)destination, (size_t)size, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
+            fail("MapMemory rollback reservation errno %d", errno);
+        return invalid;
+    }
+    *mapping = (StackMap){destination, source, size, source_region.state, source_region.perm};
+    compose_regions();
+    return 0;
 }
 
 static uint32_t g_alias_logs;
@@ -1736,15 +1869,16 @@ static void svc_call(d3_saved *saved, uint32_t id) {
         set_saved(saved, 0, 0);
         return;
     case 0x04:
-    case 0x05:
-        alias_commit(x[0], x[2] ? x[2] : x[1], id == 0x04, id == 0x04 ? "MapMemory" : "UnmapMemory");
+    case 0x05: {
+        uint32_t result = stack_map_memory(x[0], x[1], x[2], id == 0x04);
         if (g_batch_logs < 24) {
             g_batch_logs++;
-            info("svc #%u dst=%#" PRIx64 " src=%#" PRIx64 " size=%#" PRIx64, (unsigned)id, x[0],
-                 x[1], x[2]);
+            info("svc #%u dst=%#" PRIx64 " src=%#" PRIx64 " size=%#" PRIx64 " result=%#x", (unsigned)id, x[0],
+                 x[1], x[2], result);
         }
-        set_saved(saved, 0, 0);
+        set_saved(saved, 0, result);
         return;
+    }
     case 0x06:
         query_memory(saved);
         return;
@@ -1769,8 +1903,9 @@ static void svc_call(d3_saved *saved, uint32_t id) {
             return;
         }
         if (id == 0x09) {
+            uint32_t handle = (uint32_t)x[0];
+            info("StartThread handle=%#x", handle);
             set_saved(saved, 0, 0);
-            info("StartThread handle=%#x", (uint32_t)x[0]);
             return;
         }
         panic_guest(id == 0x0A ? "ExitThread" : id == 0x33 ? "GetThreadContext3"
@@ -1912,7 +2047,7 @@ static void svc_call(d3_saved *saved, uint32_t id) {
                                         "%02x ", bytes[byte]);
                     info("Break bytes %s", text);
                 }
-                info("Break ignored reason=%" PRIu64 " arg=%#" PRIx64 " size=%" PRIu64
+                info("Break assertion reason=%" PRIu64 " arg=%#" PRIx64 " size=%" PRIu64
                     " lr=%#" PRIx64 " (%s+%#" PRIx64 ") x0=%#" PRIx64 " x1=%#" PRIx64
                     " x2=%#" PRIx64 " x3=%#" PRIx64 " x19=%#" PRIx64 " x20=%#" PRIx64
                     " x29=%#" PRIx64,
@@ -1921,9 +2056,8 @@ static void svc_call(d3_saved *saved, uint32_t id) {
                     x[0], x[1], x[2], x[3], saved->x[19], saved->x[20],
                     saved->x[29]);
             }
-            d3_trace_guest("Break(0)", saved);
-            set_saved(saved, 0, 0);
-            return;
+            panic_guest("Break(0)", saved);
+            fail("guest assertion Break(0) lr=%#" PRIx64, saved->x[30]);
         }
         info("Break reason=%" PRIu64 " arg=%#" PRIx64 " size=%" PRIu64 " lr=%#" PRIx64 " (%s+%#" PRIx64 ")",
              x[0], x[1], x[2], x[30], module_of(x[30]),

@@ -16,7 +16,7 @@
 #include <unistd.h>
 
 #define LOG_TAG "D3Host"
-#define LOG_DIR "/sdcard/D3/logs"
+#define LOG_DIR D3_DATA_ROOT "/logs"
 #define LOG_PATH LOG_DIR "/d3-service.log"
 
 /* The CMIF magic the guest writes into a request and expects in a reply. */
@@ -70,7 +70,7 @@ static void slog(const char *format, ...) {
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "svc %s", line);
     if (g_log_tried == 0) {
         g_log_tried = 1;
-        (void)mkdir("/sdcard/D3", 0777);
+        (void)mkdir(D3_DATA_ROOT, 0777);
         (void)mkdir(LOG_DIR, 0777);
         g_log = open_log();
     }
@@ -623,9 +623,16 @@ typedef struct {
     int used;
     uint32_t session;
     int iface;
+    uint32_t pending; /* queued ReceiveMessage messages not yet consumed */
 } DomainObject;
 
 static DomainObject g_domain[DOMAIN_SLOTS];
+
+/* A freshly opened ICommonStateGetter owes the guest one queued message: the
+   guest's applet loop calls ReceiveMessage until it sees AppletMessage::
+   FocusStateChanged (15) and only then continues booting.  Every other object
+   starts with an empty queue. */
+#define D3_APPLET_MESSAGE_FOCUS_CHANGED 15u
 
 static uint32_t domain_add(uint32_t session, int iface) {
     for (uint32_t index = 0; index < DOMAIN_SLOTS; index++) {
@@ -635,6 +642,8 @@ static uint32_t domain_add(uint32_t session, int iface) {
         object->used = 1;
         object->session = session;
         object->iface = iface;
+        object->pending =
+            iface == D3_IF_COMMON_STATE_GETTER ? D3_APPLET_MESSAGE_FOCUS_CHANGED : 0u;
         return index + 1;
     }
     slog("domain table is full");
@@ -655,7 +664,23 @@ static void domain_close(uint32_t session, uint32_t id) {
     if (object->used && object->session == session) {
         object->used = 0;
         object->iface = D3_IF_NONE;
+        object->pending = 0;
     }
+}
+
+/* Pop the oldest message queued on one domain object, or 0 when the object has
+   none (or the id does not belong to this session).  Today the only queued
+   message is the focus notification, so the value returned is the applet
+   message kind the guest's ReceiveMessage loop is waiting for. */
+static uint32_t domain_take_pending(uint32_t session, uint32_t id) {
+    if (id == 0 || id > DOMAIN_SLOTS)
+        return 0;
+    DomainObject *object = &g_domain[id - 1];
+    if (!object->used || object->session != session)
+        return 0;
+    uint32_t message = object->pending;
+    object->pending = 0;
+    return message;
 }
 
 /* IApplicationProxyService, reached as object 1 of appletOE. */
@@ -756,7 +781,7 @@ static void application_functions_command(Message *m, uint32_t command, uint32_t
 
 /* Minimal applet-controller shapes checked against citron; Android emulates an
    application running handheld and in focus. */
-static void common_state_getter_command(Message *m, uint32_t command) {
+static void common_state_getter_command(Message *m, uint32_t command, uint32_t session) {
     switch (command) {
     case 0: {
         uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "applet-state", 0);
@@ -767,10 +792,19 @@ static void common_state_getter_command(Message *m, uint32_t command) {
             reply_domain_handle(m, event);
         break;
     }
-    case 1:
-        slog("ICommonStateGetter::ReceiveMessage -> no messages");
-        reply_domain(m, D3_RESULT(128, 3), 1);
+    case 1: { /* ReceiveMessage (Out<AppletMessage>) */
+        uint32_t message = domain_take_pending(session, m->domain_object);
+        if (message != 0) {
+            slog("ICommonStateGetter::ReceiveMessage -> %u (FocusStateChanged)", message);
+            reply_prepare(m, 0, 2, 1);
+            m->w[m->payload + 4] = message;
+            reply_send(m);
+        } else {
+            slog("ICommonStateGetter::ReceiveMessage -> no messages");
+            reply_domain(m, D3_RESULT(128, 3), 1);
+        }
         break;
+    }
     case 3:
     case 4:
     case 10:
@@ -922,7 +956,7 @@ static void domain_command(Message *m, uint32_t handle) {
         applet_oe_command(m, m->command, handle);
         break;
     case D3_IF_COMMON_STATE_GETTER:
-        common_state_getter_command(m, m->command);
+        common_state_getter_command(m, m->command, handle);
         break;
     case D3_IF_SELF_CONTROLLER:
         self_controller_command(m, m->command);
@@ -1092,7 +1126,7 @@ void d3_svc_connect_to_named_port(d3_saved *saved) {
 /* ------------------------------------------------------------------ start  */
 
 void d3_service_open(void) {
-    (void)mkdir("/sdcard/D3", 0777);
+    (void)mkdir(D3_DATA_ROOT, 0777);
     (void)mkdir(LOG_DIR, 0777);
     g_log = open_log();
     g_log_tried = 1;
