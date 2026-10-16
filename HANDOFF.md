@@ -1,16 +1,18 @@
 # Diablo 3 Android Emulator - Boot Sequence Debugging Handoff
 
 > **WARNING - PARTLY SUPERSEDED (last revised 2026-10-16, code stage
-> `3595280`).** This handoff predates the source-recovery checkpoint. Its "4/5
+> `4eb34b9`).** This handoff predates the source-recovery checkpoint. Its "4/5
 > blockers resolved" status, line numbers, `d3_table.c` layout and ABI
 > conclusions are unverified and must not be treated as current. Since then boot
 > has moved past the domain-close stage (fix `0f973c2`), the HIPC descriptor
-> parser (`325fcdd`) and the `set` service's modern cmd5
-> (`GetAvailableLanguageCodes2`, `ab074d3`), so the old "TLR retrieval" blocker
-> below is stale. Boot now reaches the `main` init array (count 360) and stops at
-> index 160 with a guest SIGSEGV at `sdk+0x4db690` (strcmp), caller
-> `main+0x1a26b74` - root cause still under analysis. The game is NOT runnable
-> and `/sdcard/D3/RomFS` is missing. See `d3-android/RECOVERY.md` and
+> parser (`325fcdd`), the `set` service's modern cmd5 (`ab074d3`) and the old
+> `main[160]` `ItemLock` fault (fixed in `4eb34b9` by removing the host's
+> redundant `call_array`, which had re-run the SDK/main init arrays a second
+> time). The guest now reaches `nnMain` on device, but the game is still NOT
+> runnable and does not yet stop crashing: `time:u` request cmd3 is rejected and
+> SVC `0x1c` is a stub, the process later exits on a non-guest thread (suspected,
+> unproven: the raw host signal handler intercepting ART-managed signals), and
+> `/sdcard/D3/RomFS` is missing. See `d3-android/RECOVERY.md` and
 > `d3-android/README.md` for the actual state.
 
 **Date:** 2026-10-16  

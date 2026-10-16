@@ -40,19 +40,29 @@ exclusive with `--data-root`/`--private-root`. Strict flags:
 thin wrapper over `build.sh`, but `make` is not available here and has not been
 run - use `build.sh`.
 
-## State at code checkpoint 3595280 (2026-10-16)
+## Current state (code stage 4eb34b9, 2026-10-16)
 
-Dated milestone, not "latest forever" (later doc commits move the branch tip).
+Dated, not "latest forever" (later doc commits move the branch tip).
 
-- Strict NDK build of all six artifacts passes with `--build-probe --build-tests`:
-  `libd3host.so`, `d3_probe`, `test_stack_memory`, `test_applet_focus`,
-  `test_hipc_message`, `test_set_service`.
-- Four Android-native suites PASS on tablet `R52T90127WT` after being pushed and
-  run on-device (including the new `test_set_service`, wired into the build
-  driver). The test helper also propagates `CHECK` results to `main` and aligns
-  the frame to an explicit 16 bytes.
-- The 9 Python extraction tests PASS (their sources did not change).
-- A clean `git archive` of `3595280` strict-builds the six native artifacts and
+- Single-initialization fix (`4eb34b9`, "execute guest module constructors only
+  once"; root cause located). The SDK and `main` `DT_INIT` already traverse their
+  own full init arrays (`[0xc4bc88, 0xc4bfe0)` = 107 entries,
+  `[0x215bed0, 0x215ca10)` = 360 entries), but the host also ran them a second
+  time via `call_array`; that redundant pass is removed, leaving only the two
+  `DT_INIT`. On `6df9de6` the double traversal re-cleared the `ItemLock` object's
+  link, producing the old `main[160]` SIGSEGV at `sdk+0x4db690`; real-device
+  `config-01` memory showed the list head already pointing at the `ItemLock`
+  object, so it was not missing data or a guest empty map.
+- Strict NDK build of all seven artifacts passes with `--build-probe
+  --build-tests`: `libd3host.so`, `d3_probe` and the five native tests.
+- Five Android-native suites PASS on tablet `R52T90127WT` (`config-02`):
+  `test_stack_memory`, `test_applet_focus`, `test_hipc_message`,
+  `test_set_service` and `test_boot_sequence` (new). Built from the `6df9de6`
+  snapshot the same `test_boot_sequence` fails red (exit 1 at the
+  `sdk_ctor_calls` assert), pinning the fix. The test helper also propagates
+  `CHECK` results to `main` and aligns the frame to an explicit 16 bytes.
+- The 9 Python extraction tests PASS.
+- A clean `git archive` of `4eb34b9` strict-builds the seven native artifacts,
   passes the nine Python tests, and packages + signs an APK with an externally
   preserved `libd3guest.so` and the existing debug key (`apksigner verify`
   PASS). This verifies tracked source / packaging inputs only: the archive
@@ -82,38 +92,54 @@ Dated milestone, not "latest forever" (later doc commits move the branch tip).
 
 ## Limits (NOT proven, do not read as running)
 
-- The game is not runnable and there is no `gameMainLoop` evidence.
-- Boot moves past `back nninitStartup`, both `DT_INIT` (including `main`) and
-  into the `main` init array (count 360), reaching index 160; it then hits a
-  guest SIGSEGV at `sdk+0x4db690` (strcmp) with caller `main+0x1a26b74`
-  (`x1 = -0x48`). The suspected site is the `ItemLockCooldownMinutes` register
-  loop whose linked-list `next` is 0; root cause is still under analysis - do not
-  assert it is TLS or a missing RomFS.
+- The game is not runnable.
+- Real device `config-02` (`pid 32104` / guest `32139`) entered `nnMain` for the
+  first time at 19:57:33 - the old `main[160]` `ItemLock` SIGSEGV is **resolved**
+  by the single-init fix above, so treat that fault as historical, not current.
+- It then sends `time:u` `ConvertCurrentObjectToDomain` for object 13 (iface 0),
+  and the following request cmd3 is rejected (`has no object 13`), with an
+  SVC `0x1c` loop (still a stub). That rejection has no fix yet.
+- The process later exits; the current crash is `fault pc=0x4804f37c`,
+  `tid 32150 != guest 32139` (a non-guest thread), and its root cause is not yet
+  determined. A no-handler diagnostic run (`pid 32404` / guest `32429`, existing
+  marker, no source change) also reached `nnMain`, stayed alive in a busy SVC
+  `0x1c` stub loop, and was force-stopped after ~60 s CPU; its maps show
+  `0x48000000-0x4a000000` as a JIT-cache RX range. That range matches the earlier
+  non-guest fault PC (different pid, so not positively the same mapping), which
+  raises the suspicion that the raw host signal handler is intercepting
+  ART-managed signals - suspected, not fixed or proven. Do not read the `nnMain`
+  entry as "the game runs / does not crash"; there is still no game loop.
 - Guest threads Create/Start still only allocate a handle / return a success
   stub; real guest thread scheduling is not implemented.
 - `/sdcard/D3/RomFS` is missing; graphics, audio, input and a deployable gameplay
-  build are not done. Boot does not complete, so a passing build and native tests are not
-  running success.
+  build are not done. A passing build and native tests are not running success.
+- Evidence (not in Git): `../recovery/d3host-20261016-huRwPN/analysis/apk-config02-logcat.txt`
+  (nnMain at lines 833..838; time:u / cmd3 / SVC 0x1c at 855..913),
+  `apk-config02-crash.txt`, `apk-config02-default-handler.log`,
+  `apk-config02-pid32404-full.log`, `apk-config02-default-handler.maps`,
+  `apk-config02-default-handler-threads.log`.
 
 ## Recovery APK diagnostic shell (package `com.d3mobile.host.recovery`)
 
 - Fixed package name, separate from the original `com.d3mobile.host`, so it never
   overwrites the original APK (kept at SHA-256
-  `1659b83628edaf0e3da72d8a54b4e7cf88dac80cd7c5ea240f8af5dcc95007e7`); the
-  original's own `g_table` crash is a distinct, still-open issue. Installed on the
-  tablet (UID 10272) and launched via the Activity and a manual button tap
-  (`pid 29429`). The new host library loads with `System.loadLibrary`, and the
-  guest (33,227,200 bytes) comes from the original APK. Internal runtime root
+  `1659b83628edaf0e3da72d8a54b4e7cf88dac80cd7c5ea240f8af5dcc95007e7`, verified
+  unchanged again this round); the original's own `g_table` crash is a distinct,
+  still-open issue. Installed on the tablet (UID 10272) and launched via the
+  Activity. The new host library loads with `System.loadLibrary`, and the guest
+  (33,227,200 bytes) comes from the original APK. Internal runtime root
   `/data/user/0/com.d3mobile.host.recovery/files/runtime`; private root
   `/data/user/0/com.d3mobile.host.recovery`.
 - Diagnostic UI fixed on Android 16 (target 36): NoActionBar theme, WindowInsets
   handling and dark status-bar icons; screenshot
   `../recovery/d3host-20261016-huRwPN/analysis/apk-recovery-ui-03.png`.
+- Latest run `config-02` reuses the existing key to update the APK (see Limits for
+  the `nnMain` result).
 - Does NOT autostart by default; the button fires once (`Intent autostart=true`
-  exercises the path for testing). A visible UI is not a working game: launching
-  the guest still ends the process, so it is not yet a "no crash" result. Evidence
-  logs (not in Git): `.../analysis/apk-recovery-02-pid27088.log`,
-  `apk-recovery-02-service.log`, `apk-recovery-manualtap-01*.log`.
+  exercises the path for testing). A visible UI is not a working game: the process
+  still exits after the guest starts. Evidence (not in Git):
+  `.../analysis/apk-config02-logcat.txt`, `apk-config02-crash.txt`,
+  `apk-config02-pid32104-full.log`.
 
 ## Offline packaging and tooling scope
 
