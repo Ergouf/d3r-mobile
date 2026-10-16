@@ -2388,7 +2388,9 @@ int d3_host_start(const char *guest_path) {
         fail("pthread_attr_setdetachstate");
     if (pthread_create(&thread, &attr, guest_thread, 0) != 0)
         fail("pthread_create errno %d", errno);
-    pthread_join(thread, 0);
+    /* The guest runs detached: return without joining. This is an asynchronous
+       JNI start, so the native call must not block the UI thread waiting for the
+       guest (a return of 0 means started, not guest completion). */
     pthread_attr_destroy(&attr);
     return 0;
 }
