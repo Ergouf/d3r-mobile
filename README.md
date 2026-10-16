@@ -1,8 +1,9 @@
 # Diablo 3 Android Compatibility Layer
 
 Top-level pointer for this workspace. The actual project lives in
-`d3-android/`; see `d3-android/README.md` and `d3-android/RECOVERY.md` for the
-current state and `HANDOFF.md` for the (partly superseded) historical notes.
+`d3-android/`; see [the current goal](d3-android/GOAL.md),
+`d3-android/README.md` and `d3-android/RECOVERY.md` for the current state, and
+`HANDOFF.md` for the (partly superseded) historical notes.
 
 ## Recent code stages (branch `recovery/d3host-sources`)
 

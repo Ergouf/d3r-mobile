@@ -4,6 +4,9 @@ Custom ARM64 emulation / IPC translation layer for running Diablo 3 on Android
 through a translation layer. The main goal is a dedicated compatibility layer
 plus APK wrapping - it is NOT an attempt to restore the game's own C++.
 
+The active target and acceptance criteria are in [GOAL.md](GOAL.md); the current
+stage is to move beyond `nnMain` on the real tablet without hiding failures.
+
 ## Source set (the only correct files)
 
 - `host/d3_host.c` - ARM64 instruction handling, signal handlers
