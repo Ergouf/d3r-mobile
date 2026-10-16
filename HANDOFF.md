@@ -1,5 +1,16 @@
 # Diablo 3 Android Emulator - Boot Sequence Debugging Handoff
 
+> **WARNING - PARTLY SUPERSEDED (last revised 2026-10-16, code checkpoint
+> 325fcdd).** This handoff predates the source-recovery checkpoint. Its "4/5
+> blockers resolved" status, line numbers, `d3_table.c` layout and ABI
+> conclusions are unverified and must not be treated as current. Since then boot
+> has moved past the domain-close stage (fix `0f973c2`) and the HIPC descriptor
+> parser (fix `325fcdd`), but now stops at an assertion in the guest
+> `main DT_INIT`; the current blocker is the unimplemented `set` command 5
+> (`GetAvailableLanguageCodes2`). The game is NOT runnable and
+> `/sdcard/D3/RomFS` is missing. See `d3-android/RECOVERY.md` and
+> `d3-android/README.md` for the actual state.
+
 **Date:** 2026-10-16  
 **Status:** 4 major blockers resolved, 1 remaining (TLR retrieval)  
 **Ready for:** Next developer to continue boot sequence
