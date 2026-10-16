@@ -133,16 +133,14 @@ static void request_send_bool(uint32_t handle, uint32_t command, uint32_t object
     request_send_full(handle, 0x130001u, command, object, arg0, result, outarg);
 }
 
-/* Convert the appletOE session to a domain exactly as the guest does: the port
+/* Convert one port session to a domain exactly as the guest does: the port
    handle's SendSyncRequest carries ConvertCurrentObjectToDomain, the service
-   answers with the initial object id (1), and control_command queues the applet
-   interfaces behind it.  The session arg is the port kind (appletOE is unknown
-   to port_kind); control_command picks the iface through port_iface(name). */
-static uint32_t session_convert(void) {
-    uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "appletOE", (uint64_t)PORT_UNKNOWN);
+   answers with the actual root object id it allocated (never a fixed 1), and
+   control_command queues port_iface(name) behind it.  The session arg is the
+   port kind; control_command picks the iface through port_iface(name). */
+static uint32_t session_convert_named(const char *name, int kind, uint32_t *root_out) {
+    uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, name, (uint64_t)kind);
     REQUIRE(handle != 0);
-    REQUIRE((int)PORT_UNKNOWN == (int)d3_handle_arg(handle));
-    REQUIRE(port_iface("appletOE") == D3_IF_APPLET_OE);
 
     RequestBuffer request;
     memset(&request, 0, sizeof request);
@@ -160,17 +158,24 @@ static uint32_t session_convert(void) {
     REQUIRE(saved.x[0] == 0);
     uint32_t result = 0xdeadbeefu, object = 0;
     reply_parse((const uint32_t *)request.buffer, &result, &object);
-    REQUIRE(result == 0);
-    REQUIRE(object == 1u); /* first domain slot */
-    REQUIRE(domain_iface(handle, object) == D3_IF_APPLET_OE);
+    REQUIRE(result == 0);  /* the conversion itself succeeded */
+    REQUIRE(object != 0);  /* the host returned a real allocated id, not a fabricated one */
+    REQUIRE(domain_iface(handle, object) == port_iface(name));
+    *root_out = object;
     return handle;
 }
 
-/* Ask IApplicationProxyService (object 1) for a fresh CommonStateGetter object,
-   the way the guest walks OpenApplicationProxy -> GetCommonStateGetter. */
-static uint32_t common_state_getter_open(uint32_t session) {
+static uint32_t session_convert(uint32_t *root_out) {
+    REQUIRE(port_iface("appletOE") == D3_IF_APPLET_OE);
+    return session_convert_named("appletOE", PORT_UNKNOWN, root_out);
+}
+
+/* Ask IApplicationProxyService (the session's root object) for a fresh
+   CommonStateGetter object, the way the guest walks OpenApplicationProxy ->
+   GetCommonStateGetter. */
+static uint32_t common_state_getter_open(uint32_t session, uint32_t root) {
     uint32_t result = 0xdeadbeefu, proxy = 0;
-    request_send(session, 0 /* OpenApplicationProxy */, 1, &result, &proxy);
+    request_send(session, 0 /* OpenApplicationProxy */, root, &result, &proxy);
     REQUIRE(result == 0);
     REQUIRE(domain_iface(session, proxy) == D3_IF_APPLICATION_PROXY);
     uint32_t getter = 0;
@@ -180,11 +185,12 @@ static uint32_t common_state_getter_open(uint32_t session) {
     return getter;
 }
 
-/* Ask IApplicationProxyService (object 1) for a fresh SelfController object, the
-   way the guest walks OpenApplicationProxy -> GetSelfController. */
-static uint32_t self_controller_open(uint32_t session) {
+/* Ask IApplicationProxyService (the session's root object) for a fresh
+   SelfController object, the way the guest walks OpenApplicationProxy ->
+   GetSelfController. */
+static uint32_t self_controller_open(uint32_t session, uint32_t root) {
     uint32_t result = 0xdeadbeefu, proxy = 0;
-    request_send(session, 0 /* OpenApplicationProxy */, 1, &result, &proxy);
+    request_send(session, 0 /* OpenApplicationProxy */, root, &result, &proxy);
     REQUIRE(result == 0);
     REQUIRE(domain_iface(session, proxy) == D3_IF_APPLICATION_PROXY);
     uint32_t controller = 0;
@@ -202,10 +208,12 @@ int main(void) {
 
     CHECK(D3_APPLET_MESSAGE_FOCUS_CHANGED == 15);
 
-    const uint32_t session = session_convert();
+    uint32_t session_root = 0;
+    const uint32_t session = session_convert(&session_root);
+    CHECK(session_root != 0); /* the real root id, not a hardcoded 1 */
 
     /* One object: a focus notification once, then empty for good. */
-    uint32_t getter = common_state_getter_open(session);
+    uint32_t getter = common_state_getter_open(session, session_root);
     uint32_t result = 0xdeadbeefu, arg = 0;
     request_send(session, 1 /* ReceiveMessage */, getter, &result, &arg);
     CHECK(result == 0);
@@ -216,7 +224,7 @@ int main(void) {
 
     /* A second object is independent: it still owes its own notification, and
        consuming it does not touch the first object. */
-    uint32_t second = common_state_getter_open(session);
+    uint32_t second = common_state_getter_open(session, session_root);
     CHECK(second != getter);
     request_send(session, 1, second, &result, &arg);
     CHECK(result == 0);
@@ -236,7 +244,7 @@ int main(void) {
     CHECK(arg == 1);
 
     /* A pop from the wrong session leaves the notification for the right one. */
-    uint32_t third = common_state_getter_open(session);
+    uint32_t third = common_state_getter_open(session, session_root);
     uint32_t other = d3_handle_alloc(D3_OBJ_SESSION, "appletOE", (uint64_t)PORT_UNKNOWN);
     CHECK(other != 0 && other != session);
     CHECK(domain_take_pending(other, third) == 0);                       /* vacuous pop */
@@ -246,7 +254,7 @@ int main(void) {
        object is loaded (the controls above showed fresh objects answer 15), yet
        after closing it the same slot holds nothing.  Reusing it queues exactly
        one again. */
-    uint32_t fourth = common_state_getter_open(session);
+    uint32_t fourth = common_state_getter_open(session, session_root);
     CHECK(domain_iface(session, fourth) == D3_IF_COMMON_STATE_GETTER); /* it is live... */
     domain_close(session, fourth);                                    /* ...and unconsumed */
     CHECK(domain_iface(session, fourth) == D3_IF_NONE);
@@ -258,7 +266,7 @@ int main(void) {
 
     /* ---- ISelfController::SetOutOfFocusSuspendingEnabled (cmd 16) ---- */
 
-    uint32_t self = self_controller_open(session);
+    uint32_t self = self_controller_open(session, session_root);
     CHECK(object_out_of_focus_suspending(session, self) == 0); /* default off */
 
     /* false, with clean padding */
@@ -283,7 +291,7 @@ int main(void) {
     CHECK(object_out_of_focus_suspending(session, self) == 1);
 
     /* a second SelfController object carries its own value */
-    uint32_t self2 = self_controller_open(session);
+    uint32_t self2 = self_controller_open(session, session_root);
     CHECK(self2 != self);
     CHECK(object_out_of_focus_suspending(session, self2) == 0); /* independent */
     CHECK(object_out_of_focus_suspending(session, self) == 1);  /* unchanged */
@@ -305,9 +313,78 @@ int main(void) {
     CHECK(self_reused == self); /* same slot */
     CHECK(object_out_of_focus_suspending(session, self_reused) == 0);
 
+    /* ---- ConvertCurrentObjectToDomain returns the ACTUAL root id ---- */
+
+    /* Two separate sessions each convert and must land on different root slots.
+       Before the fix both answers were a hardcoded 1, so the second session's
+       domain_iface(session, 1) resolved to the first session's object (or NONE),
+       exactly the boot04 pctl/object 1 collision. */
+    uint32_t root2 = 0;
+    uint32_t session2 = session_convert_named("appletOE", PORT_UNKNOWN, &root2);
+    CHECK(session2 != session);
+    CHECK(root2 != 0 && session_root != 0 && root2 != session_root);
+    CHECK(domain_iface(session, session_root) == D3_IF_APPLET_OE);
+    CHECK(domain_iface(session2, root2) == D3_IF_APPLET_OE);
+    CHECK(domain_iface(session, root2) == D3_IF_NONE);      /* not each other's */
+    CHECK(domain_iface(session2, session_root) == D3_IF_NONE);
+
+    /* Children opened through each root stay in their own session: the ids
+       differ and neither session can resolve the other's child. */
+    uint32_t getter1 = common_state_getter_open(session, session_root);
+    uint32_t getter2 = common_state_getter_open(session2, root2);
+    CHECK(getter1 != getter2);                              /* not both slot 1 */
+    CHECK(domain_iface(session, getter1) == D3_IF_COMMON_STATE_GETTER);
+    CHECK(domain_iface(session2, getter2) == D3_IF_COMMON_STATE_GETTER);
+    CHECK(domain_iface(session, getter2) == D3_IF_NONE);
+    CHECK(domain_iface(session2, getter1) == D3_IF_NONE);
+    /* each child still owes its own focus notification */
+    CHECK(domain_take_pending(session, getter1) == D3_APPLET_MESSAGE_FOCUS_CHANGED);
+    CHECK(domain_take_pending(session2, getter2) == D3_APPLET_MESSAGE_FOCUS_CHANGED);
+
+    /* The boot04 pctl session converts to a legal root of its own, distinct from
+       the applet roots, and the applet session cannot see it. */
+    uint32_t pctl_root = 0;
+    uint32_t pctl = session_convert_named("pctl", PORT_UNKNOWN, &pctl_root);
+    CHECK(pctl != session && pctl != session2);
+    CHECK(pctl_root != 0 && pctl_root != session_root && pctl_root != root2);
+    CHECK(domain_iface(pctl, pctl_root) == D3_IF_PCTL);
+    CHECK(domain_iface(session, pctl_root) == D3_IF_NONE);
+    CHECK(domain_iface(session2, pctl_root) == D3_IF_NONE);
+
+    /* ---- ConvertCurrentObjectToDomain when the table is full ---- */
+
+    /* No free slot: the conversion must report an error and hand back no object
+       id at all, never a fabricated one. */
+    for (uint32_t index = 0; index <= DOMAIN_SLOTS; index++) {
+        if (domain_add(session, D3_IF_PCTL) == 0)
+            break;
+    }
+
+    uint32_t fresh = d3_handle_alloc(D3_OBJ_SESSION, "appletOE", (uint64_t)PORT_UNKNOWN);
+    CHECK(fresh != 0);
+    RequestBuffer full_request;
+    memset(&full_request, 0, sizeof full_request);
+    uint32_t *fw = (uint32_t *)full_request.buffer;
+    fw[0] = 5;
+    fw[1] = 16u + 4u;
+    fw[4] = CMIF_IN;
+    fw[5] = 1;
+    fw[6] = 0;
+    fw[7] = 0;
+    d3_saved full_saved = {0};
+    full_saved.x[0] = fresh;
+    d3_svc_send_sync_request(&full_saved, (uint64_t)(uintptr_t)&full_request.buffer);
+    CHECK(full_saved.x[0] == 0);
+    uint32_t full_result = 0, full_object = 0xdeadbeefu;
+    reply_parse((const uint32_t *)full_request.buffer, &full_result, &full_object);
+    CHECK(full_result == D3_RESULT(21, 7)); /* a real error, not success */
+    CHECK(full_object == 0);                /* no fabricated object id */
+    CHECK(domain_iface(fresh, 1) == D3_IF_NONE); /* id 1 does not exist for fresh */
+
     puts("PASS: applet focus notification is one message per object, objects are "
          "independent, the queue empties after consume, wrong-session pops are "
-         "vacuous, close/reset clears it, and SetOutOfFocusSuspendingEnabled "
-         "stores a byte-normalized bool per object with reset");
+         "vacuous, close/reset clears it, SetOutOfFocusSuspendingEnabled stores a "
+         "byte-normalized bool per object, and ConvertCurrentObjectToDomain "
+         "returns the actual per-session root id or a real error when full");
     return 0;
 }

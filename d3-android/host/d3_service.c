@@ -485,12 +485,22 @@ static void control_command(Message *m, uint32_t command, uint32_t handle) {
     const char *name = d3_handle_name(handle);
     switch (command) {
     case 0: /* ConvertCurrentObjectToDomain */
-        slog("control %s ConvertCurrentObjectToDomain -> object 1 (%d)", name,
-             port_iface(name));
-        (void)domain_add(handle, port_iface(name));
-        reply_prepare(m, 0, 2, 0);
-        m->w[m->payload + 4] = 1;
-        reply_send(m);
+        {
+            uint32_t object = domain_add(handle, port_iface(name));
+            if (object == 0) {
+                /* No free domain slot: report the failure, never a fabricated
+                   object id, or the guest would address an object that is not
+                   there. */
+                slog("control %s ConvertCurrentObjectToDomain -> domain table full", name);
+                reply_result(m, D3_RESULT(21, 7)); /* module SPRL / no memory */
+                break;
+            }
+            slog("control %s ConvertCurrentObjectToDomain -> object %u (%d)", name, object,
+                 port_iface(name));
+            reply_prepare(m, 0, 2, 0);
+            m->w[m->payload + 4] = object;
+            reply_send(m);
+        }
         break;
     case 2: /* CloneCurrentObject */
     case 4: /* CloneCurrentObjectEx */
