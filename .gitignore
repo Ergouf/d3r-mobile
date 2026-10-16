@@ -1,0 +1,24 @@
+
+# Local metering/game assets, docs and tooling cached locally.
+.DS_Store
+Thumbs.db
+*.xci
+*.nsp
+*.nso
+*.zip
+*.7z
+prod.keys
+d3_extract/
+d3hack_dl/
+citron_cfg/
+ph_*.png
+ph_*.txt
+tools/scratch/
+cfg_live/
+packaged/
+build/
+out/
+temp/
+cache/
+.git/
+
