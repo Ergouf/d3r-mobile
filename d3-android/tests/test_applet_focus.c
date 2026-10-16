@@ -148,8 +148,8 @@ static void request_send_bool(uint32_t handle, uint32_t command, uint32_t object
 static void request_build_factory(RequestBuffer *request, uint32_t command, uint32_t root) {
     memset(request, 0, sizeof *request);
     uint32_t *w = (uint32_t *)request->buffer;
-    w[0] = (uint32_t)(6u | (0xdu << 16));        /* type 6, raw descriptor count 13 */
-    w[1] = 0x80000000u | (16u + 4u + 4u);        /* special header, pid + two data words */
+    w[0] = 6u;
+    w[1] = 0x80000000u | 14u;                   /* special header, domain + 24 CMIF bytes */
     w[2] = 1u;                                   /* special header: pid present */
     w[3] = 1u;                                   /* process id, low word */
     w[4] = 0u;                                   /* process id, high word */

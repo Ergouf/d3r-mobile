@@ -257,22 +257,17 @@ typedef struct {
     size_t handle_slot_out;
 } Message;
 
-/* cn: word frame
-   w0          command type / tag
-   w1          bit31 = special header, bits 0..9 = data size
-   w2          special header when bit31 of w1 is set
-   w3, w4      process id when the special header says so
-   ...         copy handles, then move handles, one word each
-   frame       the word index rounded up to a 16 byte boundary
-   frame..     domain message header (4 words) when the session is a domain
-   payload     'SFCI' / 'SFCO', version, command (low then high), arguments
+/* HIPC layout in 32-bit words:
+   w0          command type and X/A/B/W descriptor counts
+   w1          bit31 = special header, bits 0..9 = raw data words
+   w2          optional special header
+   ...         optional process id, copy handles, then move handles
+   ...         X descriptors (2 words each), then A/B/W descriptors (3 each)
+   frame       raw data index rounded up to a 16-byte boundary
+   frame..     domain header (4 words) for domain messages
+   payload     SFCI/SFCO, version, command/result, token, arguments
 
-   The guest builds and reads this with nn::sf::hipc::GetMessageBufferOnTls and
-   HipcMessageReader, whose payload search is
-   align16 (raw_data_index) + 16 for a domain message.  raw_data_index counts
-   the header, the special header, the pid and the handle slots, which is
-   exactly the frame above.  Replying with the same frame keeps the reader's
-   search landing on our magic. */
+   Descriptors are outside raw data and must not be searched for CMIF magic. */
 static int message_parse(Message *m, uint64_t address) {
     memcpy(m->w, (const void *)(uintptr_t)address, MESSAGE_BYTES);
     m->address = address;
@@ -293,57 +288,61 @@ static int message_parse(Message *m, uint64_t address) {
         index += 2;
     m->handle_slot = index;
     index += m->copy_handles + m->move_handles;
+
+    const uint32_t descriptor_counts = m->w[0] >> 16;
+    const size_t statics = descriptor_counts & 0xfu;
+    const size_t sends = (descriptor_counts >> 4) & 0xfu;
+    const size_t receives = (descriptor_counts >> 8) & 0xfu;
+    const size_t exchanges = (descriptor_counts >> 12) & 0xfu;
+    index += 2u * statics + 3u * (sends + receives + exchanges);
+    const size_t raw_words = m->w[1] & 0x3ffu;
+    if (index > MESSAGE_WORDS || raw_words > MESSAGE_WORDS - index) {
+        slog("HIPC layout exceeds message at %#" PRIx64 ": descriptors=%#x raw=%zu", address,
+             descriptor_counts, raw_words);
+        return -1;
+    }
+    const size_t raw_end = index + raw_words;
     m->frame = (index + 3u) & ~(size_t)3u;
     m->domain = 0;
     m->domain_command = 0;
     m->domain_object = 0;
     m->magic = 0;
 
-    /* A domain CloseVirtualHandle: 16 byte header at frame, command 2, no CMIF
-       payload (header == 2 encodes cmd:u8/objects:u8/data_size:u16).  Decide it
-       here: a close-shaped header is answered or refused, never dispatched
-       through a stale magic the previous reply left at frame + 4. */
-    const uint32_t hipc_type = m->w[0] & 0xffffu;
-    const uint32_t descriptor_counts = m->w[0] >> 16;
-    const uint32_t raw_words = m->w[1] & 0x3ffu;
-    const size_t raw_end = index + raw_words; /* declared raw data ends here */
-    if ((hipc_type == 4u || hipc_type == 6u) && m->frame + 8 <= MESSAGE_WORDS &&
+    /* A close has no CMIF payload; stale magic must not turn an invalid close
+       into a request. Header 2 also requires zero input objects and data bytes. */
+    if ((m->type == 4u || m->type == 6u) && m->frame + 4u <= raw_end &&
         (m->w[m->frame] & 0xffu) == 2u) {
-        if (m->w[m->frame] == 2u && descriptor_counts == 0u && raw_end <= MESSAGE_WORDS &&
-            m->frame + 4u <= raw_end) {
-            m->domain = 1;
-            m->domain_command = 2;
-            m->domain_object = m->w[m->frame + 1];
-            m->command = 0;
-            m->magic = m->frame;
-            return 0;
+        if (m->w[m->frame] != 2u || descriptor_counts != 0u) {
+            slog("malformed domain close at %#" PRIx64, address);
+            return -1;
         }
-        slog("malformed domain close at %#" PRIx64 ": header=%#x desc=%u raw_end=%zu", address,
-             m->w[m->frame], descriptor_counts, raw_end);
-        d3_service_dump("request", address, m->w, MESSAGE_BYTES);
-        return -1;
+        m->domain = 1;
+        m->domain_command = 2;
+        m->domain_object = m->w[m->frame + 1];
+        m->command = 0;
+        m->magic = m->frame;
+        return 0;
     }
 
-    if (m->frame + 4 <= MESSAGE_WORDS && m->w[m->frame] == CMIF_IN) {
+    if (m->frame + 4u <= raw_end && m->w[m->frame] == CMIF_IN) {
         m->magic = m->frame;
-    } else if (m->frame + 8 <= MESSAGE_WORDS && m->w[m->frame + 4] == CMIF_IN) {
+    } else if (m->frame + 8u <= raw_end && (m->w[m->frame] & 0xffu) == 1u &&
+               m->w[m->frame + 4] == CMIF_IN) {
+        const size_t data_bytes = m->w[m->frame] >> 16;
+        const size_t objects = (m->w[m->frame] >> 8) & 0xffu;
+        if (data_bytes < 16u ||
+            m->frame + 4u + (data_bytes + 3u) / 4u + objects > raw_end) {
+            slog("domain payload exceeds raw data at %#" PRIx64, address);
+            return -1;
+        }
         m->magic = m->frame + 4;
         m->domain = 1;
-        m->domain_command = m->w[m->frame] & 0xffu;
+        m->domain_command = 1;
         m->domain_object = m->w[m->frame + 1];
-    } else {
-        /* Anything unexpected still gets parsed, the way it always was. */
-        for (size_t scan = 2; scan + 4 < MESSAGE_WORDS; scan++) {
-            if (m->w[scan] == CMIF_IN) {
-                m->magic = scan;
-                slog("unexpected frame at %#" PRIx64 ": magic at word %zu not %zu", address, scan,
-                     m->frame);
-                break;
-            }
-        }
     }
-    if (m->magic == 0) {
-        slog("no SFCI magic in the request at %#" PRIx64, address);
+    /* Legacy handlers and diagnostics inspect up to five argument words. */
+    if (m->magic == 0 || m->magic + 9u > MESSAGE_WORDS) {
+        slog("no bounded CMIF request at %#" PRIx64, address);
         d3_service_dump("request", address, m->w, MESSAGE_BYTES);
         return -1;
     }
@@ -355,11 +354,8 @@ static void message_write(const Message *m) {
     memcpy((void *)(uintptr_t)m->address, m->w, MESSAGE_BYTES);
 }
 
-/* nn::sf::hipc::detail::HipcMessageReader::Initialize walks the message header the same
-   way citron does: two words of header, then an optional special header, then the
-   process id, then the handle slots, then the descriptor slots, and the CMIF payload
-   sits on the first 16 byte boundary after that.  A reply must keep the request's
-   header shape or the reader looks for the payload at the wrong offset. */
+/* Replies describe their own handle/header shape; request buffer descriptors
+   are consumed server-side and must not appear in the reply header. */
 static void reply_prepare(Message *m, uint32_t move_handles, uint32_t params, int domain) {
     const uint32_t tag = m->w[0] & 0xffffu;
     const uint32_t token = m->w[m->magic + 3];
@@ -1157,10 +1153,9 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
     if (message_parse(&m, buffer) != 0) {
         slog("%s handle %#x (%s) kind %d buffer %#" PRIx64 ": no CMIF request", which, handle, name,
              kind, buffer);
-        /* A request with no payload at all (raw count zero, no special header) is
-           just a bare hipc header; answer it with an equally bare header. */
+        /* HIPC session Close has no CMIF payload, unlike a service request. */
         const uint32_t *words = (const uint32_t *)(uintptr_t)buffer;
-        if ((words[1] & 0x3ffu) == 0 && (words[1] & 0x80000000u) == 0) {
+        if (words[0] == 2u && words[1] == 0u) {
             uint32_t reply[MESSAGE_WORDS];
             memset(reply, 0, sizeof reply);
             reply[0] = words[0];
