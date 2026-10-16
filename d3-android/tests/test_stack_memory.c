@@ -67,6 +67,51 @@ static int run_tpidrro_regression(void) {
     return 0;
 }
 
+static int run_memory_dump_regression(void) {
+    unsigned char *pages = mmap(NULL, g_os_page * 2, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(pages != MAP_FAILED);
+    uint64_t *root = (uint64_t *)(void *)pages;
+    uint64_t *child = (uint64_t *)(void *)(pages + 0x200);
+    root[0] = (uint64_t)(uintptr_t)child;
+    root[16] = UINT64_C(0x1122334455667788);
+    child[16] = UINT64_C(0x8877665544332211);
+    child[0] = 0;
+    CHECK(mprotect(pages + g_os_page, g_os_page, PROT_NONE) == 0);
+    CHECK(mprotect(pages, g_os_page, PROT_READ) == 0);
+
+    g_dump_used = 0;
+    dump_memory_links(21, (uint64_t)(uintptr_t)root);
+    CHECK(g_dump_used < sizeof g_dump);
+    g_dump[g_dump_used] = 0;
+    CHECK(strstr(g_dump, "m_register=0000000000000015\n") != NULL);
+    CHECK(strstr(g_dump, "m_depth=0000000000000001\n") != NULL);
+    CHECK(strstr(g_dump, "m16=1122334455667788\n") != NULL);
+    CHECK(strstr(g_dump, "m16=8877665544332211\n") != NULL);
+    CHECK(strstr(g_dump, "m_unreadable") == NULL);
+
+    const uint64_t invalid[] = {0, UINT64_MAX,
+        (uint64_t)(uintptr_t)(pages + g_os_page),
+        (uint64_t)(uintptr_t)(pages + g_os_page - 64)};
+    for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++) {
+        g_dump_used = 0;
+        dump_memory_links(21, invalid[i]);
+        CHECK(g_dump_used < sizeof g_dump);
+        g_dump[g_dump_used] = 0;
+        CHECK(strstr(g_dump, "m_unreadable\n") != NULL);
+        CHECK(strstr(g_dump, "m0=") == NULL);
+    }
+    g_dump_used = 0;
+    dump_memory_links(19, (uint64_t)(uintptr_t)child);
+    CHECK(g_dump_used < sizeof g_dump);
+    g_dump[g_dump_used] = 0;
+    CHECK(strstr(g_dump, "m_depth=0000000000000001\n") != NULL);
+    CHECK(strstr(g_dump, "m_unreadable\n") != NULL);
+    CHECK(munmap(pages, g_os_page * 2) == 0);
+    g_dump_used = 0;
+    return 0;
+}
+
 int main(void) {
     g_os_page = (size_t)sysconf(_SC_PAGESIZE);
     CHECK(g_os_page == 0x1000);
@@ -139,8 +184,9 @@ int main(void) {
         CHECK(input[0] == (unsigned char)round);
     }
     CHECK(run_tpidrro_regression() == 0);
+    CHECK(run_memory_dump_regression() == 0);
     CHECK(munmap((void *)(uintptr_t)g_heap, g_heap_cap) == 0);
     CHECK(munmap((void *)(uintptr_t)g_stack_region, STACK_REGION_SIZE) == 0);
-    puts("PASS: stack region, MapMemory/UnmapMemory backing, protections, queries, rejection cases, tpidrro TLR");
+    puts("PASS: stack region, MapMemory/UnmapMemory backing, protections, queries, rejection cases, tpidrro TLR, bounded crash memory");
     return 0;
 }

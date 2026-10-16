@@ -434,6 +434,22 @@ static int safe_read(uint64_t address, void *dst, uint64_t size) {
                         (long)(uintptr_t)&local, 1, (long)(uintptr_t)&remote, 1, 0) == (long)size;
 }
 
+static void dump_memory_links(uint32_t reg, uint64_t address) {
+    uint64_t words[24];
+    dump_field("m_register", reg);
+    for (uint32_t depth = 0; depth < 2; depth++) {
+        dump_field("m_depth", depth);
+        dump_field("m_address", address);
+        if (!safe_read(address, words, sizeof words)) {
+            dump_text("m_unreadable\n");
+            return;
+        }
+        for (uint32_t i = 0; i < 24; i++)
+            dump_index("m", i, words[i]);
+        address = words[0];
+    }
+}
+
 static void crash_handler(int sig, siginfo_t *si, void *context) {
     /* The fault may have happened in guest context, where tpidr_el0 and x18 hold
        guest values. bionic's errno and TLS live behind tpidr_el0, so every libc
@@ -486,6 +502,11 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
         dump_field("r_extra", entry->extra);
         dump_field("r_lr", entry->lr);
         dump_field("r_x0", entry->x0);
+    }
+    if (fault_tid == g_guest_tid) {
+        dump_memory_links(19, (uint64_t)mc->regs[19]);
+        dump_memory_links(20, (uint64_t)mc->regs[20]);
+        dump_memory_links(21, (uint64_t)mc->regs[21]);
     }
     for (uint32_t i = 0; i < g_trace_count; i++) {
         dump_field("t_kind", g_trace[i].kind);
@@ -2300,23 +2321,6 @@ static void call_pref(const char *name, uint64_t preferred, uint64_t arg0, uint6
     info("back %s", name);
 }
 
-static void call_array(const char *name, uint64_t preferred, uint64_t bytes) {
-    uint64_t *fns = (uint64_t *)(uintptr_t)(g_bias + preferred);
-    uint64_t count;
-    if (bytes & 7)
-        fail("%s init array size %" PRIx64, name, bytes);
-    count = bytes / 8;
-    info("init array %s count %" PRIu64, name, count);
-    for (uint64_t i = 0; i < count; i++) {
-        if (!fns[i])
-            continue;
-        if (!executable(fns[i]))
-            fail("%s init[%" PRIu64 "] %" PRIx64 " is not executable", name, i, fns[i]);
-        info("init %s[%" PRIu64 "] %" PRIx64, name, i, fns[i]);
-        guest_call(fns[i], 0, 0);
-    }
-}
-
 static void boot_sequence(void) {
     call_pref("_init_libc0", D3_SYM__init_libc0, 0, 0);
     call_pref("nnosInitialize", D3_SYM_nnosInitialize, 1, 0);
@@ -2324,10 +2328,9 @@ static void boot_sequence(void) {
     call_pref("nninitInitializeSdkModule", D3_SYM_nninitInitializeSdkModule, 0, 0);
     call_pref("nninitStartup", D3_SYM_nninitStartup, 0, 0);
     call_pref("_init_libc2", D3_SYM__init_libc2, 0, 0);
+    /* Guest DT_INIT routines already execute their module's init arrays. */
     call_pref("sdk DT_INIT", D3_SDK_DT_INIT, 0, 0);
-    call_array("sdk", D3_SDK_INIT_ARRAY, D3_SDK_INIT_ARRAYSZ);
     call_pref("main DT_INIT", D3_MAIN_DT_INIT, 0, 0);
-    call_array("main", D3_MAIN_INIT_ARRAY, D3_MAIN_INIT_ARRAYSZ);
     call_pref("SetHostArgc", D3_SYM_SetHostArgc, 1, 0);
     call_pref("SetHostArgv", D3_SYM_SetHostArgv, (uint64_t)(uintptr_t)g_argv, 0);
     call_pref("nnMain", D3_SYM_nnMain, 0, 0);

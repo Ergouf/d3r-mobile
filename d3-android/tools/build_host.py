@@ -23,6 +23,8 @@ test_stack_memory = [os.path.join(ROOT, "tests", "test_stack_memory.c"),
 test_applet_focus = [os.path.join(ROOT, "tests", "test_applet_focus.c")]
 test_hipc_message = [os.path.join(ROOT, "tests", "test_hipc_message.c")]
 test_set_service = [os.path.join(ROOT, "tests", "test_set_service.c")]
+test_boot_sequence = [os.path.join(ROOT, "tests", "test_boot_sequence.c"),
+                      os.path.join(ROOT, "host", "d3_service.c")]
 
 # Strict flags preserved verbatim from the original build_host.py.
 HOST_FLAGS = [
@@ -123,7 +125,8 @@ def main() -> None:
         "--build-tests",
         action="store_true",
         help="Compile-only: also build the native Android tests (test_stack_memory, "
-        "test_applet_focus, test_hipc_message, test_set_service) into the output directory. Does not "
+        "test_applet_focus, test_hipc_message, test_set_service, test_boot_sequence) "
+        "into the output directory. Does not "
         "touch a device.",
     )
     args = parser.parse_args()
@@ -162,7 +165,8 @@ def main() -> None:
         for name, src in (("test_stack_memory", test_stack_memory),
                           ("test_applet_focus", test_applet_focus),
                           ("test_hipc_message", test_hipc_message),
-                          ("test_set_service", test_set_service)):
+                          ("test_set_service", test_set_service),
+                          ("test_boot_sequence", test_boot_sequence)):
             out = os.path.join(out_dir, name)
             compile_one(
                 [clang, *PROBE_FLAGS, *defines, *src, "-llog", "-ldl", "-o", out],
