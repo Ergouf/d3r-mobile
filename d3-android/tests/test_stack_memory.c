@@ -17,6 +17,56 @@ static MemInfo inspect_memory(uint64_t address) {
     return memory;
 }
 
+/* Constraint: on_tpidrro writes only the requested register (never blindly to
+   LR), so all other registers/NZCV/q survive and only x16/x17 spill into pair. */
+static int run_tpidrro_regression(void) {
+    static const uint64_t lr_sentinel = UINT64_C(0x0000deadbeef0000);
+    static const uint64_t nzcv_sentinel = UINT64_C(0xa0000000);
+    const uint64_t tlr = UINT64_C(0x77aa0000cafe);
+    const uint32_t targets[] = {0u, 8u, 16u, 17u, 30u};
+
+    uint64_t table[5] = {0};
+    table[D3_HOST_OFF_TLR / 8] = tlr;
+    uint64_t *const saved_table = g_table;
+
+    struct { d3_saved saved; uint64_t pair[2]; } frame;
+    CHECK(sizeof(d3_saved) == 0x180u);
+    CHECK((const unsigned char *)&frame.pair[0] - (const unsigned char *)&frame.saved
+          == (long)sizeof(d3_saved));
+
+    for (size_t t = 0; t < sizeof targets / sizeof targets[0]; t++) {
+        const uint32_t dest = targets[t];
+        memset(&frame, 0, sizeof frame);
+        for (int r = 0; r < 31; r++)
+            frame.saved.x[r] = 0x1000u + (uint64_t)r;
+        frame.saved.x[30] = lr_sentinel;
+        frame.saved.nzcv = nzcv_sentinel;
+        for (int i = 0; i < 8; i++)
+            for (int j = 0; j < 16; j++)
+                frame.saved.q[i][j] = (unsigned char)(i * 16 + j);
+
+        g_table = table;
+        on_tpidrro(&frame.saved, dest);
+        g_table = saved_table; /* restore before any CHECK can early-return */
+
+        CHECK(frame.saved.x[dest] == tlr); /* destination holds exactly TLR */
+        for (int r = 0; r < 31; r++) {
+            if ((uint32_t)r == dest)
+                continue;
+            const uint64_t expected = (r == 30) ? lr_sentinel : 0x1000u + (uint64_t)r;
+            CHECK(frame.saved.x[r] == expected);
+        }
+        CHECK(frame.saved.nzcv == nzcv_sentinel);
+        for (int i = 0; i < 8; i++)
+            for (int j = 0; j < 16; j++)
+                CHECK(frame.saved.q[i][j] == (unsigned char)(i * 16 + j));
+        CHECK(frame.pair[0] == (dest == 16 ? tlr : 0));
+        CHECK(frame.pair[1] == (dest == 17 ? tlr : 0));
+    }
+    CHECK(g_table == saved_table);
+    return 0;
+}
+
 int main(void) {
     g_os_page = (size_t)sysconf(_SC_PAGESIZE);
     CHECK(g_os_page == 0x1000);
@@ -88,8 +138,9 @@ int main(void) {
         CHECK(stack_map_memory(destination, source, size, 0) == 0);
         CHECK(input[0] == (unsigned char)round);
     }
+    CHECK(run_tpidrro_regression() == 0);
     CHECK(munmap((void *)(uintptr_t)g_heap, g_heap_cap) == 0);
     CHECK(munmap((void *)(uintptr_t)g_stack_region, STACK_REGION_SIZE) == 0);
-    puts("PASS: stack region, MapMemory/UnmapMemory backing, protections, queries, and rejection cases");
+    puts("PASS: stack region, MapMemory/UnmapMemory backing, protections, queries, rejection cases, tpidrro TLR");
     return 0;
 }

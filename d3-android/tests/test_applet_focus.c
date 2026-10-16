@@ -180,6 +180,45 @@ static uint32_t pctl_factory(uint32_t handle, uint32_t command, uint32_t root) {
     return object;
 }
 
+/* A domain CloseVirtualHandle request in the captured shape: no special header,
+   so the 16 byte domain header sits at word 4 with command 2 and the object id,
+   and no CMIF payload follows.  type is 6 for SendSyncRequest, 4 for the user
+   buffer form.  The tail word carries whatever a previous reply left behind, so
+   the host must not mistake it for this request. */
+static void request_build_close_tail(RequestBuffer *request, uint32_t type, uint32_t object,
+                                     size_t tail_word, uint32_t tail) {
+    memset(request, 0, sizeof *request);
+    uint32_t *w = (uint32_t *)request->buffer;
+    w[0] = type;
+    w[1] = 8u; /* raw data includes alignment padding and the domain header */
+    w[4] = 2u; /* domain header: command 2 (CloseVirtualHandle), data size 0 */
+    w[5] = object;
+    w[6] = 0;
+    w[7] = 0;
+    w[tail_word] = tail; /* stale SFCO/SFCI from the previous reply */
+}
+
+static void request_build_close(RequestBuffer *request, uint32_t type, uint32_t object) {
+    request_build_close_tail(request, type, object, 12, 0x4f434653u); /* stale SFCO */
+}
+
+/* Run one request through the real SendSyncRequest path and return its status. */
+static uint64_t request_send_close_system(uint32_t handle, const RequestBuffer *request) {
+    d3_saved saved = {0};
+    saved.x[0] = handle; /* SendSyncRequest carries the handle in x0, the buffer in tls */
+    d3_svc_send_sync_request(&saved, (uint64_t)(uintptr_t)&request->buffer);
+    return saved.x[0];
+}
+
+/* The SendSyncRequestWithUserBuffer form: the buffer in x0, the handle in x2. */
+static uint64_t request_send_close_user(uint32_t handle, const RequestBuffer *request) {
+    d3_saved saved = {0};
+    saved.x[0] = (uint64_t)(uintptr_t)&request->buffer;
+    saved.x[2] = handle;
+    d3_svc_send_sync_request_user(&saved);
+    return saved.x[0];
+}
+
 /* Convert one port session to a domain exactly as the guest does: the port
    handle's SendSyncRequest carries ConvertCurrentObjectToDomain, the service
    answers with the actual root object id it allocated (never a fixed 1), and
@@ -447,6 +486,152 @@ int main(void) {
     CHECK(svc_reused == svc1); /* same slot */
     CHECK(object_initialized(pctl, svc_reused) == 0);
 
+    /* ---- domain CloseVirtualHandle (type 4/6, no CMIF payload) ---- */
+
+    /* The captured close shape: no special header, 16 byte domain header at word
+       4 with command 2 and the object, and stale reply bytes behind it.  It must
+       succeed (0, not the old 0x40b) and release the owning slot. */
+    uint32_t close_getter = common_state_getter_open(session, session_root);
+    uint32_t sibling = common_state_getter_open(session, session_root);
+    CHECK(close_getter != sibling);
+    CHECK(domain_iface(session, close_getter) == D3_IF_COMMON_STATE_GETTER); /* unconsumed */
+    RequestBuffer close_req;
+    request_build_close(&close_req, 6u, close_getter); /* type 6, stale SFCO tail */
+    CHECK(request_send_close_system(session, &close_req) == 0);
+    CHECK(domain_iface(session, close_getter) == D3_IF_NONE);
+    CHECK(domain_take_pending(session, close_getter) == 0); /* queue cleared */
+    CHECK(object_initialized(session, close_getter) == 0);
+    CHECK(domain_iface(session, sibling) == D3_IF_COMMON_STATE_GETTER); /* sibling intact */
+    CHECK(domain_take_pending(session, sibling) == D3_APPLET_MESSAGE_FOCUS_CHANGED);
+    /* the freed slot is reusable */
+    CHECK(domain_add(session, D3_IF_COMMON_STATE_GETTER) == close_getter);
+
+    /* the same close sent with a stale SFCI tail is still a close, not a message */
+    uint32_t close_sfci = common_state_getter_open(session, session_root);
+    RequestBuffer close_sfci_req;
+    request_build_close_tail(&close_sfci_req, 6u, close_sfci, 12, CMIF_IN);
+    CHECK(request_send_close_system(session, &close_sfci_req) == 0);
+    CHECK(domain_iface(session, close_sfci) == D3_IF_NONE);
+
+    /* an initialized pctl child, closed through the user buffer form (type 4) */
+    uint32_t pctl_child = pctl_factory(pctl, 1, pctl_root);
+    request_send(pctl, 1 /* Initialize */, pctl_child, &result, &arg);
+    CHECK(object_initialized(pctl, pctl_child) == 1);
+    RequestBuffer close_user;
+    request_build_close(&close_user, 4u, pctl_child);
+    CHECK(request_send_close_user(pctl, &close_user) == 0);
+    CHECK(domain_iface(pctl, pctl_child) == D3_IF_NONE);
+    CHECK(object_initialized(pctl, pctl_child) == 0);
+    CHECK(domain_iface(pctl, pctl_root) == D3_IF_PCTL); /* the root is untouched */
+
+    /* rejected shapes: the object must survive every one of them. */
+
+    /* a domain message with no CMIF payload at all: not close, no SFCI */
+    uint32_t keep = common_state_getter_open(session, session_root);
+    RequestBuffer no_sfci;
+    memset(&no_sfci, 0, sizeof no_sfci);
+    uint32_t *nw = (uint32_t *)no_sfci.buffer;
+    nw[0] = 6u;
+    nw[1] = 8u;
+    nw[4] = 0x01000001u; /* domain command 1 (SendMessage), 0x100 data bytes */
+    nw[5] = keep;
+    CHECK(request_send_close_system(session, &no_sfci) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    /* a close header that claims a non zero CMIF data size is not a close */
+    RequestBuffer short_raw;
+    memset(&short_raw, 0, sizeof short_raw);
+    uint32_t *sw = (uint32_t *)short_raw.buffer;
+    sw[0] = 6u;
+    sw[1] = 8u;
+    sw[4] = (0x100u << 16) | 2u; /* command 2 but data size 0x100 */
+    sw[5] = keep;
+    CHECK(request_send_close_system(session, &short_raw) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    /* a raw count shorter than the header (raw words = 1) is not a close */
+    RequestBuffer raw_too_short;
+    memset(&raw_too_short, 0, sizeof raw_too_short);
+    uint32_t *rw = (uint32_t *)raw_too_short.buffer;
+    rw[0] = 6u;
+    rw[1] = 1u; /* non zero, so the bare-header fallback does not fire */
+    rw[4] = 2u; /* close-like header, but it lies outside the raw data */
+    rw[5] = keep;
+    CHECK(request_send_close_system(session, &raw_too_short) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    /* a close-like word behind non empty buffer descriptors is descriptor data,
+       not a close header, even with stale reply bytes in the tail */
+    RequestBuffer with_desc;
+    memset(&with_desc, 0, sizeof with_desc);
+    uint32_t *dw = (uint32_t *)with_desc.buffer;
+    dw[0] = (uint32_t)(6u | (5u << 16)); /* five buffer descriptors */
+    dw[1] = 8u;
+    dw[4] = 2u; /* looks like a close header, but it is descriptor data */
+    dw[5] = keep;
+    dw[12] = 0x4f434653u; /* stale SFCO */
+    CHECK(request_send_close_system(session, &with_desc) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    /* The dangerous fallthrough: a close-shaped header that does NOT qualify,
+       with a stale CMIF_IN exactly at frame + 4 (word 8).  Before the fix the
+       legacy branch (or full-buffer scan) dispatched it through that stale magic
+       into the close path and deleted the object.  It must be refused instead,
+       for a non zero data size, a too short raw count, and non empty
+       descriptors alike. */
+    RequestBuffer stale_at_frame4;
+    memset(&stale_at_frame4, 0, sizeof stale_at_frame4);
+    uint32_t *cw = (uint32_t *)stale_at_frame4.buffer;
+    cw[0] = 6u;
+    cw[1] = 8u;
+    cw[4] = (0x100u << 16) | 2u; /* cmd 2 but data size 0x100 */
+    cw[5] = keep;
+    cw[8] = CMIF_IN; /* stale SFCI where the legacy branch looks */
+    CHECK(request_send_close_system(session, &stale_at_frame4) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    RequestBuffer stale_short_raw;
+    memset(&stale_short_raw, 0, sizeof stale_short_raw);
+    uint32_t *sw2 = (uint32_t *)stale_short_raw.buffer;
+    sw2[0] = 6u;
+    sw2[1] = 1u; /* raw count too short for the header */
+    sw2[4] = 2u;
+    sw2[5] = keep;
+    sw2[8] = CMIF_IN;
+    CHECK(request_send_close_system(session, &stale_short_raw) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    RequestBuffer stale_desc;
+    memset(&stale_desc, 0, sizeof stale_desc);
+    uint32_t *sw3 = (uint32_t *)stale_desc.buffer;
+    sw3[0] = (uint32_t)(6u | (1u << 16)); /* one buffer descriptor */
+    sw3[1] = 8u;
+    sw3[4] = 2u;
+    sw3[5] = keep;
+    sw3[8] = CMIF_IN;
+    CHECK(request_send_close_system(session, &stale_desc) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    /* a raw count that runs past the buffer is refused the same way */
+    RequestBuffer huge_raw;
+    memset(&huge_raw, 0, sizeof huge_raw);
+    uint32_t *hw = (uint32_t *)huge_raw.buffer;
+    hw[0] = 6u;
+    hw[1] = 0x3ffu; /* raw_end well beyond MESSAGE_WORDS */
+    hw[4] = 2u;
+    hw[5] = keep;
+    CHECK(request_send_close_system(session, &huge_raw) != 0);
+    CHECK(domain_iface(session, keep) == D3_IF_COMMON_STATE_GETTER);
+
+    /* a valid close aimed at another session's object reports success but frees
+       nothing: the object stays usable by its owning session */
+    uint32_t foreign = common_state_getter_open(session2, root2);
+    RequestBuffer wrong_session;
+    request_build_close(&wrong_session, 6u, foreign);
+    CHECK(request_send_close_system(session, &wrong_session) == 0);
+    CHECK(domain_iface(session2, foreign) == D3_IF_COMMON_STATE_GETTER);
+    CHECK(domain_take_pending(session2, foreign) == D3_APPLET_MESSAGE_FOCUS_CHANGED);
+
     /* ---- ConvertCurrentObjectToDomain when the table is full ---- */
 
     /* No free slot: the conversion must report an error and hand back no object
@@ -481,7 +666,9 @@ int main(void) {
          "independent, the queue empties after consume, wrong-session pops are "
          "vacuous, close/reset clears it, SetOutOfFocusSuspendingEnabled stores a "
          "byte-normalized bool per object, ConvertCurrentObjectToDomain "
-         "returns the actual per-session root id or a real error when full, and "
-         "pctl factory 0/1 with child Initialize manages per-object state");
+         "returns the actual per-session root id or a real error when full, "
+         "pctl factory 0/1 with child Initialize manages per-object state, and "
+         "domain CloseVirtualHandle is recognized without a CMIF payload while "
+         "malformed shapes are refused");
     return 0;
 }

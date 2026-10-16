@@ -298,6 +298,32 @@ static int message_parse(Message *m, uint64_t address) {
     m->domain_command = 0;
     m->domain_object = 0;
     m->magic = 0;
+
+    /* A domain CloseVirtualHandle: 16 byte header at frame, command 2, no CMIF
+       payload (header == 2 encodes cmd:u8/objects:u8/data_size:u16).  Decide it
+       here: a close-shaped header is answered or refused, never dispatched
+       through a stale magic the previous reply left at frame + 4. */
+    const uint32_t hipc_type = m->w[0] & 0xffffu;
+    const uint32_t descriptor_counts = m->w[0] >> 16;
+    const uint32_t raw_words = m->w[1] & 0x3ffu;
+    const size_t raw_end = index + raw_words; /* declared raw data ends here */
+    if ((hipc_type == 4u || hipc_type == 6u) && m->frame + 8 <= MESSAGE_WORDS &&
+        (m->w[m->frame] & 0xffu) == 2u) {
+        if (m->w[m->frame] == 2u && descriptor_counts == 0u && raw_end <= MESSAGE_WORDS &&
+            m->frame + 4u <= raw_end) {
+            m->domain = 1;
+            m->domain_command = 2;
+            m->domain_object = m->w[m->frame + 1];
+            m->command = 0;
+            m->magic = m->frame;
+            return 0;
+        }
+        slog("malformed domain close at %#" PRIx64 ": header=%#x desc=%u raw_end=%zu", address,
+             m->w[m->frame], descriptor_counts, raw_end);
+        d3_service_dump("request", address, m->w, MESSAGE_BYTES);
+        return -1;
+    }
+
     if (m->frame + 4 <= MESSAGE_WORDS && m->w[m->frame] == CMIF_IN) {
         m->magic = m->frame;
     } else if (m->frame + 8 <= MESSAGE_WORDS && m->w[m->frame + 4] == CMIF_IN) {
