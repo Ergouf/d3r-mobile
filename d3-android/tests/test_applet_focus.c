@@ -35,6 +35,15 @@ void d3_trace_guest(const char *tag, const d3_saved *saved) {
     (void)saved;
 }
 
+/* Read back one object's stored SetOutOfFocusSuspendingEnabled value, mirroring
+   the bounds and session checks the production setter uses. */
+static int object_out_of_focus_suspending(uint32_t session, uint32_t id) {
+    if (id == 0 || id > DOMAIN_SLOTS)
+        return 0;
+    const DomainObject *object = &g_domain[id - 1];
+    return object->used && object->session == session ? object->out_of_focus_suspending : 0;
+}
+
 #define MESSAGE_BYTES 0x100
 
 typedef struct {
@@ -74,34 +83,54 @@ static void reply_parse(const uint32_t *w, uint32_t *result, uint32_t *outarg) {
 }
 
 /* Build a domain SendMessage request for one object.  The domain header word is
-   the observed guest value 0x100001: command 1 (SendMessage) in the low byte and
-   a 16 byte CMIF data block (the x0 field). */
-static void request_build(RequestBuffer *request, uint32_t command, uint32_t object) {
+   the observed guest value: command 1 (SendMessage) in the low byte, plus the
+   CMIF data size the guest reported for that request (0x100001 for the plain
+   commands, 0x130001 for the one byte SetOutOfFocusSuspendingEnabled boolean).
+   The host only reads the low byte, but the fixture keeps the observed value.
+   arg0 lands in the first argument word (w[magic + 4]). */
+static void request_build_arg(RequestBuffer *request, uint32_t domain_header, uint32_t command,
+                              uint32_t object, uint32_t arg0) {
     memset(request, 0, sizeof *request);
     uint32_t *w = (uint32_t *)request->buffer;
     w[0] = 6;                                   /* hipc SendMessage request */
     w[1] = 0x80000000u | (uint32_t)(16u + 4u);  /* special header, 16 bytes of data */
     w[2] = 0;                                   /* no pid, no copy/move handles */
-    w[4] = 0x00100001u;                         /* domain header: cmd 1, 16 bytes */
+    w[4] = domain_header;                       /* domain header: cmd 1 in the low byte */
     w[5] = object;                              /* domain object id */
     w[8] = CMIF_IN;
     w[9] = 1;
     w[10] = command;
-    w[11] = 0;
+    w[11] = 0;                                  /* token */
+    w[12] = arg0;                               /* first argument word (magic + 4) */
 }
 
 /* Send one domain request on a session handle and return the reply's result and
    out argument.  Asserts on the syscall's own status, not just the payload. */
-static void request_send(uint32_t handle, uint32_t command, uint32_t object, uint32_t *result,
-                         uint32_t *outarg) {
+static void request_send_full(uint32_t handle, uint32_t domain_header, uint32_t command,
+                              uint32_t object, uint32_t arg0, uint32_t *result,
+                              uint32_t *outarg) {
     RequestBuffer request;
-    request_build(&request, command, object);
+    request_build_arg(&request, domain_header, command, object, arg0);
     d3_saved saved = {0};
     saved.x[0] = (uint64_t)(uintptr_t)&request.buffer;
     saved.x[2] = handle;
     d3_svc_send_sync_request_user(&saved);
     REQUIRE(saved.x[0] == 0);
     reply_parse((const uint32_t *)request.buffer, result, outarg);
+}
+
+/* The plain command shape (no argument): domain header 0x100001. */
+static void request_send(uint32_t handle, uint32_t command, uint32_t object, uint32_t *result,
+                         uint32_t *outarg) {
+    request_send_full(handle, 0x100001u, command, object, 0, result, outarg);
+}
+
+/* One byte boolean argument: domain header 0x130001, the value in the low byte
+   of the first argument word.  The extra high byte exercises padding that must
+   not be read as part of the value. */
+static void request_send_bool(uint32_t handle, uint32_t command, uint32_t object, uint32_t arg0,
+                              uint32_t *result, uint32_t *outarg) {
+    request_send_full(handle, 0x130001u, command, object, arg0, result, outarg);
 }
 
 /* Convert the appletOE session to a domain exactly as the guest does: the port
@@ -149,6 +178,20 @@ static uint32_t common_state_getter_open(uint32_t session) {
     REQUIRE(result == 0);
     REQUIRE(domain_iface(session, getter) == D3_IF_COMMON_STATE_GETTER);
     return getter;
+}
+
+/* Ask IApplicationProxyService (object 1) for a fresh SelfController object, the
+   way the guest walks OpenApplicationProxy -> GetSelfController. */
+static uint32_t self_controller_open(uint32_t session) {
+    uint32_t result = 0xdeadbeefu, proxy = 0;
+    request_send(session, 0 /* OpenApplicationProxy */, 1, &result, &proxy);
+    REQUIRE(result == 0);
+    REQUIRE(domain_iface(session, proxy) == D3_IF_APPLICATION_PROXY);
+    uint32_t controller = 0;
+    request_send(session, 1 /* GetSelfController */, proxy, &result, &controller);
+    REQUIRE(result == 0);
+    REQUIRE(domain_iface(session, controller) == D3_IF_SELF_CONTROLLER);
+    return controller;
 }
 
 int main(void) {
@@ -213,8 +256,58 @@ int main(void) {
     CHECK(domain_take_pending(session, reused) == D3_APPLET_MESSAGE_FOCUS_CHANGED);
     CHECK(domain_take_pending(session, reused) == 0);
 
+    /* ---- ISelfController::SetOutOfFocusSuspendingEnabled (cmd 16) ---- */
+
+    uint32_t self = self_controller_open(session);
+    CHECK(object_out_of_focus_suspending(session, self) == 0); /* default off */
+
+    /* false, with clean padding */
+    request_send_bool(session, 16, self, 0x00000000u, &result, &arg);
+    CHECK(result == 0); /* normal domain success */
+    CHECK(object_out_of_focus_suspending(session, self) == 0);
+
+    /* true */
+    request_send_bool(session, 16, self, 0x00000001u, &result, &arg);
+    CHECK(result == 0);
+    CHECK(object_out_of_focus_suspending(session, self) == 1);
+
+    /* the high (padding) bytes must not be read as part of the value: a zero low
+       byte stays false even when the rest of the word is all ones */
+    request_send_bool(session, 16, self, 0xffffff00u, &result, &arg);
+    CHECK(result == 0);
+    CHECK(object_out_of_focus_suspending(session, self) == 0);
+
+    /* any non zero low byte is true, again ignoring the padding */
+    request_send_bool(session, 16, self, 0xffffff01u, &result, &arg);
+    CHECK(result == 0);
+    CHECK(object_out_of_focus_suspending(session, self) == 1);
+
+    /* a second SelfController object carries its own value */
+    uint32_t self2 = self_controller_open(session);
+    CHECK(self2 != self);
+    CHECK(object_out_of_focus_suspending(session, self2) == 0); /* independent */
+    CHECK(object_out_of_focus_suspending(session, self) == 1);  /* unchanged */
+    request_send_bool(session, 16, self2, 0x00000001u, &result, &arg);
+    CHECK(object_out_of_focus_suspending(session, self2) == 1);
+
+    /* a write against a foreign session never reaches the object, and its value
+       is unreadable from that session too */
+    uint32_t other_session = d3_handle_alloc(D3_OBJ_SESSION, "appletOE", (uint64_t)PORT_UNKNOWN);
+    CHECK(other_session != session);
+    domain_set_out_of_focus_suspending(other_session, self, 0);
+    CHECK(object_out_of_focus_suspending(session, self) == 1); /* unchanged */
+    CHECK(object_out_of_focus_suspending(other_session, self) == 0); /* not visible */
+
+    /* close clears the value; the reused slot starts false */
+    domain_close(session, self);
+    CHECK(object_out_of_focus_suspending(session, self) == 0);
+    uint32_t self_reused = domain_add(session, D3_IF_SELF_CONTROLLER);
+    CHECK(self_reused == self); /* same slot */
+    CHECK(object_out_of_focus_suspending(session, self_reused) == 0);
+
     puts("PASS: applet focus notification is one message per object, objects are "
          "independent, the queue empties after consume, wrong-session pops are "
-         "vacuous, and close/reset clears it");
+         "vacuous, close/reset clears it, and SetOutOfFocusSuspendingEnabled "
+         "stores a byte-normalized bool per object with reset");
     return 0;
 }

@@ -624,6 +624,7 @@ typedef struct {
     uint32_t session;
     int iface;
     uint32_t pending; /* queued ReceiveMessage messages not yet consumed */
+    int out_of_focus_suspending; /* ISelfController::SetOutOfFocusSuspendingEnabled */
 } DomainObject;
 
 static DomainObject g_domain[DOMAIN_SLOTS];
@@ -644,6 +645,7 @@ static uint32_t domain_add(uint32_t session, int iface) {
         object->iface = iface;
         object->pending =
             iface == D3_IF_COMMON_STATE_GETTER ? D3_APPLET_MESSAGE_FOCUS_CHANGED : 0u;
+        object->out_of_focus_suspending = 0;
         return index + 1;
     }
     slog("domain table is full");
@@ -665,6 +667,7 @@ static void domain_close(uint32_t session, uint32_t id) {
         object->used = 0;
         object->iface = D3_IF_NONE;
         object->pending = 0;
+        object->out_of_focus_suspending = 0;
     }
 }
 
@@ -681,6 +684,17 @@ static uint32_t domain_take_pending(uint32_t session, uint32_t id) {
     uint32_t message = object->pending;
     object->pending = 0;
     return message;
+}
+
+/* Record one ISelfController::SetOutOfFocusSuspendingEnabled value on the object
+   it was sent to, so objects stay independent and the setting survives until the
+   object is closed.  Out of range ids are ignored; the caller still replies. */
+static void domain_set_out_of_focus_suspending(uint32_t session, uint32_t id, int enabled) {
+    if (id == 0 || id > DOMAIN_SLOTS)
+        return;
+    DomainObject *object = &g_domain[id - 1];
+    if (object->used && object->session == session)
+        object->out_of_focus_suspending = enabled;
 }
 
 /* IApplicationProxyService, reached as object 1 of appletOE. */
@@ -833,7 +847,7 @@ static void common_state_getter_command(Message *m, uint32_t command, uint32_t s
     }
 }
 
-static void self_controller_command(Message *m, uint32_t command) {
+static void self_controller_command(Message *m, uint32_t command, uint32_t session) {
     switch (command) {
     case 0:
     case 1:
@@ -849,6 +863,16 @@ static void self_controller_command(Message *m, uint32_t command) {
              command_name(D3_IF_SELF_CONTROLLER, command));
         reply_domain(m, 0, 1);
         break;
+    case 16: { /* SetOutOfFocusSuspendingEnabled(bool) */
+        /* The argument is one byte at the first data word; its high bytes are
+           padding and must not leak into the value. */
+        const int enabled = (m->w[m->magic + 4] & 0xffu) != 0;
+        domain_set_out_of_focus_suspending(session, m->domain_object, enabled);
+        slog("ISelfController::SetOutOfFocusSuspendingEnabled -> %s",
+             enabled ? "true" : "false");
+        reply_domain(m, 0, 1);
+        break;
+    }
     case 9: {
         uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "applet-launchable", 0);
         slog("ISelfController::GetLibraryAppletLaunchableEvent -> handle %#x", event);
@@ -959,7 +983,7 @@ static void domain_command(Message *m, uint32_t handle) {
         common_state_getter_command(m, m->command, handle);
         break;
     case D3_IF_SELF_CONTROLLER:
-        self_controller_command(m, m->command);
+        self_controller_command(m, m->command, handle);
         break;
     case D3_IF_WINDOW_CONTROLLER:
         window_controller_command(m, m->command);

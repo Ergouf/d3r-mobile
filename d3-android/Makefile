@@ -1,34 +1,14 @@
-ANDROID_NDK ?= D:\workspace\Gdict\android_sdk\ndk\28.2.13676358
-CLANG := $(ANDROID_NDK)\toolchains\llvm\prebuilt\windows-x86_64\bin\clang.cmd
+# Thin wrapper over build.sh. It carries no clang path, no object list and no
+# header copies; build.sh -> tools/build_host.py own the source set and flags.
+# Pass extra flags through BUILD_ARGS, e.g. make BUILD_ARGS="--sandbox-root /data/local/tmp/d3".
+BUILD_ARGS ?=
 
-# Target architecture and API level
-TARGET := aarch64-linux-android21
-OUT_DIR := out
-OBJ_DIR := $(OUT_DIR)/obj
+.PHONY: all host tests
 
-# Source files
-SOURCES := host/d3_host.c host/d3_service.c host/d3_table.c
-OBJECTS := $(SOURCES:%.c=$(OBJ_DIR)/%.o)
+all: host
 
-# Build flags
-CFLAGS := -Wall -O2 -fPIC
-LDFLAGS := -shared
+host:
+	bash build.sh $(BUILD_ARGS)
 
-# Output library
-LIBRARY := $(OUT_DIR)/libd3host.so
-
-all: $(LIBRARY)
-
-$(LIBRARY): $(OBJECTS)
-	@mkdir -p $(OUT_DIR)
-	$(CLANG) --target=$(TARGET) $(LDFLAGS) -o $@ $^
-	@echo "Built: $@"
-
-$(OBJ_DIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CLANG) --target=$(TARGET) $(CFLAGS) -c -o $@ $<
-
-clean:
-	rm -rf $(OUT_DIR)
-
-.PHONY: all clean
+tests:
+	bash build.sh --build-tests $(BUILD_ARGS)

@@ -16,6 +16,12 @@ HOST_SRC = [
 ]
 PROBE_SRC = os.path.join(ROOT, "tools", "d3_probe.c")
 
+# Native tests. Each test #includes the .c it exercises, so the exercised unit
+# is NOT linked again; test_stack_memory also needs d3_service.c linked.
+test_stack_memory = [os.path.join(ROOT, "tests", "test_stack_memory.c"),
+                     os.path.join(ROOT, "host", "d3_service.c")]
+test_applet_focus = [os.path.join(ROOT, "tests", "test_applet_focus.c")]
+
 # Strict flags preserved verbatim from the original build_host.py.
 HOST_FLAGS = [
     "--target=aarch64-linux-android34",
@@ -109,6 +115,12 @@ def main() -> None:
         action="store_true",
         help="Also compile tools/d3_probe.c (with -ldl) into the same output directory",
     )
+    parser.add_argument(
+        "--build-tests",
+        action="store_true",
+        help="Compile-only: also build the native Android tests (test_stack_memory, "
+        "test_applet_focus) into the output directory. Does not touch a device.",
+    )
     args = parser.parse_args()
 
     clang = clang_path(args.ndk)
@@ -132,6 +144,15 @@ def main() -> None:
             [clang, *PROBE_FLAGS, *defines, PROBE_SRC, "-ldl", "-o", probe_out],
             probe_out,
         )
+
+    if args.build_tests:
+        for name, src in (("test_stack_memory", test_stack_memory),
+                          ("test_applet_focus", test_applet_focus)):
+            out = os.path.join(out_dir, name)
+            compile_one(
+                [clang, *PROBE_FLAGS, *defines, *src, "-llog", "-ldl", "-o", out],
+                out,
+            )
 
 
 if __name__ == "__main__":
