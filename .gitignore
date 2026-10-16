@@ -7,7 +7,29 @@ Thumbs.db
 *.nso
 *.zip
 *.7z
-prod.keys
+# Local secrets and signing material.
+*.keys
+*.keystore
+*.jks
+
+# Device packages, compiled code, and Python caches.
+*.apk
+*.aab
+*.so
+*.o
+*.a
+*.dex
+*.log
+*.log.old
+__pycache__/
+.pytest_cache/
+
+# Keep recovered source snapshots, not extracted binaries or device dumps.
+recovery/**/apk/
+recovery/**/extracted/
+recovery/**/analysis/
+recovery/**/reconstruction-before-restore/
+.claude/worktrees/
 d3_extract/
 d3hack_dl/
 citron_cfg/

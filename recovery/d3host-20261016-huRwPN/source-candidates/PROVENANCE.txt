@@ -1,0 +1,66 @@
+Source candidates recovered verbatim from Claude file-history.
+Transcript: C:/Users/fengj/.claude/projects/D--workspace-Diablo/fa6ddb6e-577c-4353-931e-903c9fcf7111.jsonl
+Backups:    C:/Users/fengj/.claude/file-history/fa6ddb6e-577c-4353-931e-903c9fcf7111/
+No full-file Write of either source exists in the transcript (edits only). Git commits d8f87d3 and aa47753 contain only the later 115/60-line reconstructions.
+No older copy with this header exists in other Claude file-history sessions (scan of files 20KB-200KB).
+partial=false means the backup is a complete file, not a stitched or rewritten excerpt.
+
+FILE d3_host.c
+  bytes: 80778
+  newline_count: 2260
+  sha256: 5d162b54ac0d19d92242f124801c48c17a0ff67ef40d62684a55829f6a2ebc7b
+  original_path: d3-android/host/d3_host.c
+  role: earliest full snapshot; pre-edit original at session start
+  backup_time: 2026-10-15T17:09:30.469Z
+  partial: false
+  provenance: transcript fa6ddb6e file-history-delta L391 backupFileName=d05a13771a77cd34@v1 version=1 backupTime=2026-10-15T17:09:30.469Z
+  note: Matches Read L334 (lines 1-120) and Read L387 (lines 135-154) taken before any applied edit. Edit L390 old_string is present and new_string is absent, so this backup is the pre-image. Read tool totalLines was 2261; file has 2260 newline-terminated lines (tool counts one past the final newline).
+  source_backup: C:/Users/fengj/.claude/file-history/fa6ddb6e-577c-4353-931e-903c9fcf7111\d05a13771a77cd34@v1
+
+FILE d3_host.c.last-full
+  bytes: 86749
+  newline_count: 2391
+  sha256: 132d4e09b9d6b04c25e2bf1ac96b8a4f8623136eb66c9296cda7f5421cf9c164
+  original_path: d3-android/host/d3_host.c
+  role: last complete file before the short reconstruction overwrote it; includes this session's edits
+  backup_time: 2026-10-16T04:55:03.522Z
+  partial: false
+  provenance: transcript fa6ddb6e file-history-snapshot L5745 trackedFileBackups d3-android\\host\\d3_host.c backupFileName=d05a13771a77cd34@v7 version=7 backupTime=2026-10-16T04:55:03.522Z
+  note: Not the session-start original. Verbatim later version. Next backup v8 (2026-10-16T05:07:49.323Z, 115 lines) is the HANDOFF reconstruction and was NOT copied. Read at 2026-10-16T02:23 reported totalLines 2392; this file has 2391 newlines.
+  source_backup: C:/Users/fengj/.claude/file-history/fa6ddb6e-577c-4353-931e-903c9fcf7111\d05a13771a77cd34@v7
+
+FILE d3_service.c
+  bytes: 38267
+  newline_count: 1100
+  sha256: 3753c3adda44c1b1f2b6c377f4ddc278af6a1d626b5ef9e4ff3d74fc8db0248f
+  original_path: d3-android/host/d3_service.c
+  role: earliest full snapshot; pre-edit original (before TLR edit)
+  backup_time: 2026-10-16T02:24:57.689Z
+  partial: false
+  provenance: transcript fa6ddb6e file-history-delta L5690 backupFileName=296e320ba6e3e081@v1 version=1 backupTime=2026-10-16T02:24:57.689Z
+  note: Matches Read L5661 (lines 1052-1082, totalLines 1101) immediately before Edit L5689. That edit's old_string is in this file and its new_string is not. 1100 newline-terminated lines; Read totalLines 1101 is the trailing-newline count. First in-session Read of this file (L5332, 2026-10-16T00:03:08) already reported totalLines 1101.
+  source_backup: C:/Users/fengj/.claude/file-history/fa6ddb6e-577c-4353-931e-903c9fcf7111\296e320ba6e3e081@v1
+
+FILE d3_service.c.last-full
+  bytes: 38722
+  newline_count: 1112
+  sha256: 2575ff88ba70e70647631ac5c9d8e91ff589bdd4c5d0e835dcc68e61dd93b968
+  original_path: d3-android/host/d3_service.c
+  role: last complete file before the short reconstruction; includes later edits
+  backup_time: 2026-10-16T04:55:03.523Z
+  partial: false
+  provenance: transcript fa6ddb6e file-history-snapshot L5745 trackedFileBackups d3-android\\host\\d3_service.c backupFileName=296e320ba6e3e081@v2 version=2 backupTime=2026-10-16T04:55:03.523Z
+  note: Not the session-start original. Next backup v3 (2026-10-16T05:07:49.324Z, 60 lines) is the HANDOFF reconstruction and was NOT copied.
+  source_backup: C:/Users/fengj/.claude/file-history/fa6ddb6e-577c-4353-931e-903c9fcf7111\296e320ba6e3e081@v2
+
+INTERMEDIATE host backups not copied (same file, between v1 and v7):
+  d05a13771a77cd34@v2 newlines=2298 backupTime=2026-10-15T17:14:08.558Z
+  d05a13771a77cd34@v3 newlines=2298 backupTime=2026-10-15T17:25:07.201Z
+  d05a13771a77cd34@v4 newlines=2318 backupTime=2026-10-15T22:17:21.897Z
+  d05a13771a77cd34@v5 newlines=2324 backupTime=2026-10-15T23:30:25.672Z
+  d05a13771a77cd34@v6 newlines=2342 backupTime=2026-10-16T02:17:03.911Z
+GAPS:
+  - Nothing older than session-start d3_host.c (2260 lines) or d3_service.c (1100 lines) was found. The ~2100/~1068 figures were approximate; Read totalLines at first sight were 2261 and 1101.
+  - d3_host.h, d3_service.h, d3_table.c, guest_layout.h were not in this file-history as pre-wipe originals.
+  - No line-numbered Read covered either file in one shot; completeness rests on the file-history snapshot, checked against Read windows and the first applied Edit old_string.
+  - Active host tree and prod.keys were not touched.
