@@ -28,6 +28,8 @@ enum {
     D3_IF_LIBRARY_APPLET_ACCESSOR = 19,
     D3_IF_LIBRARY_APPLET_SELF_ACCESSOR = 20,
     D3_IF_STORAGE = 21,
+    D3_IF_TIME = 22,
+    D3_IF_TIME_ZONE = 23,
 };
 
 typedef struct { uint32_t command; const char *name; } d3_command_name;
@@ -269,6 +271,14 @@ static const d3_command_name d3_commands_IStorage[] = {
     {0, NULL},
 };
 
+static const d3_command_name d3_commands_ITimeService[] = {
+    {3u, "GetTimeZoneService"},
+};
+
+static const d3_command_name d3_commands_ITimeZoneService[] = {
+    {0u, "GetDeviceLocationName"},
+};
+
 static const d3_command_set d3_command_sets[] = {
     {2, "IApplicationProxyService", d3_commands_IApplicationProxyService, 0},
     {3, "IApplicationProxy", d3_commands_IApplicationProxy, 0},
@@ -283,6 +293,8 @@ static const d3_command_set d3_command_sets[] = {
     {19, "ILibraryAppletAccessor", d3_commands_ILibraryAppletAccessor, 10},
     {20, "ILibraryAppletSelfAccessor", d3_commands_ILibraryAppletSelfAccessor, 27},
     {21, "IStorage", d3_commands_IStorage, 0},
+    {D3_IF_TIME, "ITimeService", d3_commands_ITimeService, 1},
+    {D3_IF_TIME_ZONE, "ITimeZoneService", d3_commands_ITimeZoneService, 1},
 };
 #define D3_COMMAND_SET_COUNT (sizeof d3_command_sets / sizeof d3_command_sets[0])
 #endif

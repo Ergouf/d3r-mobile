@@ -10,14 +10,14 @@
 
 ## 当前阶段目标
 
-**越过 `nnMain` 之后的 `time:u` 与同步启动阻塞，推进到下一处可验证的游戏启动阶段。**
+**越过 `nnMain` 后的 `time:u` 根接口 / domain / cmd3 这条启动阻塞（已完成），并推进到下一处可验证的游戏启动阶段。**
 
-基线：代码检查点 `4eb34b9` 已在真机进入 `nnMain`，但游戏尚不可玩；进入主入口不算总目标完成。
+基线：检查点 `4b8f419`（signal）。真实 Activity 启动按钮两次进入 `nnMain`；`time:u` 根接口与 cmd3 已实现。游戏仍不可玩；进入主入口不算总目标完成。
 
-- [ ] 定位并修复非 guest 线程退出问题，验证 host 与 Android ART 信号处理链的边界；当前“信号处理冲突”只是待证假设。
-- [ ] 按实际 guest 请求实现 `time:u` 所需根接口、domain 对象及 cmd3，不再返回 iface 0 的无效服务对象。
-- [ ] 实现本启动路径需要的同步等待、唤醒和线程行为，替换 `SVC 0x1c` 的无条件成功存根，消除高频空转。
-- [ ] 在独立恢复 APK 的真实 Activity 中复测，记录越过这些阻塞后的下一条明确启动证据。
+- [x] 非 guest 线程退出问题：`4b8f419` 保留 Android 信号链（ART `sig11`、7 个 user 线程与 kernel 线程不再混淆），真机无新 crash。**guest 线程自身的 ART pre-handler 风险仍 open**，故信号修复是 bounded 的，不宣称所有 guest 信号已安全。
+- [x] 按 guest 请求实现 `time:u` 根接口（root iface 22 → TZ iface 23 child）、domain 对象（`num_out_objects` 0、factory 1）与 cmd3，含会话与 child-close 生命周期。真机 `time-activity-01` 已越过 cmd3 object 14。
+- [x] 替换 `SVC 0x1c` 的无条件成功存根，实现本启动路径需要的同步等待与唤醒（`d3_sync`：lock/unlock/process-wide-key；SVC `0x1A..0x1D` 已接线）。**范围说明**：这是启动子集，不是完整 Horizon 内核——模块 FIFO 而非优先级继承；`SVC 0x1B` 仍传现存单 guest 上下文 `D3_THREAD_ID=1`；线程终止 / 取消 / `WaitSynchronization` 事件语义未完，真实 `Create/Start` 线程仍 stub；**guest 启动路径尚未行使到 0x1a/0x1b/0x1c**（停在 cmd20 前），故同步只由 native `test_sync`（15 例含 SVC ABI）证明。回归：android 本机 8 suite 全 PASS（`sync-native-01`）、Python 9/9 + 11/11。证据与定性见 [SYNC.md](SYNC.md)。
+- [x] 在独立恢复 APK 的真实 Activity 中复测，记录越过这些阻塞后的下一条明确启动证据：`time-activity-01`（APK `f13d4332…97592`、host `c055a7eb…b0a4f7`）于 21:37:17 越过 cmd3 object 14；下一处是 root cmd20 `GetSharedMemory` unsupported → `error 0x278` → `Break0` → 正常 SIGABRT + debuggerd。
 
 ### 当前阶段验收
 
@@ -26,6 +26,17 @@
 3. 正常诊断配置下启动继续推进；`no-handler`、暂停标记或跳过断言不能作为修复成功的条件。
 4. 原有 native/Python 回归不退化，新增行为有针对性测试；保存构建身份、logcat、故障证据和对应 Git 检查点。
 5. 若推进后遇到资源缺失或新的未实现接口，明确记录新的阻塞，不将其写成“游戏已运行”。
+
+## 剩余工作大块（不编完成百分比 / 工期）
+
+按依赖顺序列出尚待完成的大块。仅为范围，非估算；具体工期由主会话判断。
+
+1. **guest 线程真实调度**：`Create/Start` 仍只分配句柄 / 返回成功 stub；`WaitSynchronization` 与 events 仍缺。需真实线程创建、等待队列与唤醒。
+2. **SVC / 同步 ABI 收尾**：`d3_sync` 已接线并回归（8 suite PASS），但只是启动子集（lock/unlock/process-wide-key；FIFO，非优先级继承；`0x1B` 仍单 guest tag1），且 guest 启动路径尚未行使到 0x1a/0x1b/0x1c。线程终止 / 取消 / `WaitSynchronization` 事件语义仍属此块。
+3. **下一处启动接口**：root cmd20 `GetSharedMemory` 目前 unsupported（`error 0x278` → `Break0` → SIGABRT）；需按协议实现并继续推进。
+4. **guest 重建路径**：源码重写器 `build_guest_elf.py` 缺失，无法从 Git 重建 guest，只能依赖保存的 `libd3guest.so`。需恢复或重写该工具。
+5. **ART pre-handler 信号风险**：guest 线程在 ART 管理信号下仍有 pre-handler 风险，属未决，需专门验证与修复。
+6. **资源与呈现**：RomFS / 文件系统、graphics、audio、input 以及可部署的可玩构建均未实现。
 
 ## 后续阶段
 

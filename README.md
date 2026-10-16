@@ -7,6 +7,11 @@ Top-level pointer for this workspace. The actual project lives in
 
 ## Recent code stages (branch `recovery/d3host-sources`)
 
+- `4b8f419` - "preserve Android signal chain for non-guest threads" (signal
+  checkpoint): the host keeps the Android signal chain instead of intercepting
+  ART-managed signals. Two real Activity-button starts reached `nnMain` with no
+  new crash and the original APK unchanged, but this is bounded - the guest
+  thread's own ART pre-handler risk stays open.
 - `4eb34b9` - "execute guest module constructors only once" (single-init fix;
   root cause located): the SDK and `main` `DT_INIT` already traverse their own
   full init arrays, but the host also ran the arrays a second time via
@@ -23,39 +28,40 @@ Top-level pointer for this workspace. The actual project lives in
 - `0f973c2` - earlier close checkpoint (domain-close without a CMIF payload).
 
 These are dated milestones, not a permanent "latest": later docs commits move the
-branch tip, so read the state below as of `4eb34b9`, not as "HEAD forever".
+branch tip, so read the state below as of `4b8f419`, not as "HEAD forever".
 
-## Current state (code stage 4eb34b9, 2026-10-16)
+## Current state (code stage 4b8f419, 2026-10-16)
 
-- Strict NDK build of all seven artifacts passes: `libd3host.so`, `d3_probe` and
-  the five native tests.
-- Five Android-native suites PASS on tablet `R52T90127WT`: `test_stack_memory`,
-  `test_applet_focus`, `test_hipc_message`, `test_set_service` and
-  `test_boot_sequence` (new, synthetic guest 107 / 360 constructor counts). Built
-  from the `6df9de6` snapshot the same test fails red (exit 1 at the
-  `sdk_ctor_calls` assert), which pins the fix.
-- A clean `git archive` of `4eb34b9` strict-builds the seven native artifacts and
-  passes the nine Python tests, and packages + signs an APK with an externally
-  preserved `libd3guest.so` and the existing debug key (`apksigner verify` PASS).
-  This verifies tracked source / packaging inputs only; the archive artifacts were
-  not run on a device, and the guest binary and key are not Git inputs.
-- The old `main[160]` `ItemLock` fault is **resolved**. On device (`config-02`)
-  the guest now reaches `nnMain` for the first time. It then sends `time:u`
-  `ConvertCurrentObjectToDomain` for object 13 (iface 0) and the following
-  request cmd3 is rejected (`has no object 13`), with an SVC `0x1c` loop (still a
-  stub). Root cause of that rejection is not yet fixed. There is still no game
-  loop.
-- The game is still **NOT runnable** and the app has not stopped crashing: the
-  process later exits, and the current crash has `fault pc=0x4804f37c`,
-  `tid 32150 != guest 32139` (a non-guest thread), with an undetermined root
-  cause. A no-handler diagnostic run (existing marker, no source change) also
-  reached `nnMain` and stayed alive in a busy SVC `0x1c` stub loop until a forced
-  stop; its maps show `0x48000000-0x4a000000` as a JIT-cache RX range (the same
-  range as the earlier non-guest fault PC, though a different pid). The raw host
-  signal handler intercepting ART-managed signals is suspected but not proven.
-  `/sdcard/D3/RomFS` is missing, and graphics, audio, input and real guest thread
-  scheduling are not done. Do not read the `nnMain` entry or a visible APK UI as
-  "the game runs / no crash".
+- `4b8f419` signal checkpoint: the host preserves the Android signal chain.
+  Real Activity-button starts `signal-activity-01` (pid 7201/7304) and
+  `signal-activity-03` (pid 10072/10167) reached `nnMain` with `markers[]`, the
+  original APK SHA-256 unchanged, and no new crash; ART `sig11` and the 7 user
+  threads no longer mix with kernel threads. Bounded: the guest thread's own ART
+  **pre-handler risk stays open**.
+- `time` root interface and cmd3 are implemented (root iface 22 → TZ iface 23
+  child, domain `num_out_objects` 0 / factory 1, session + child-close lifecycle).
+  `time-native02` PASSes all 7 native suites on device. `d3_sync`
+  (lock/unlock/wait/signal) passes 14 case kinds standalone - a startup-subset
+  implementation (FIFO, `SVC 0x1B` still single-guest tag 1), not a full Horizon
+  kernel; the `0x1a..0x1d` stubs are replaced but the final SVC regression / ABI
+  is **pending** and real `Create/Start` threads are still stubs.
+- `time-activity-01` (real APK `f13d4332…97592`, host `c055a7eb…b0a4f7`, pid
+  12088 / guest 12169) crossed cmd3 object 14 at 21:37:17; the next blocker is
+  root cmd20 `GetSharedMemory` unsupported → `error 0x278` → `Break0` → a normal
+  SIGABRT + debuggerd. That is a **new guest assertion**, not a recurrence of the
+  old non-guest JIT fault, and not app success.
+- Historical `4eb34b9`: strict NDK build of the seven artifacts and five
+  Android-native suites (incl. `test_boot_sequence`, which fails red on the
+  `6df9de6` snapshot) plus the nine Python extraction tests PASS; a clean
+  `git archive` strict-builds and packages/signs an APK from the preserved guest
+  (tracked source / packaging inputs only - not device-run). The old `main[160]`
+  `ItemLock` fault is **resolved**. The earlier `time:u` cmd3 rejection and the
+  non-guest `fault pc=0x4804f37c` crash (with the "host raw signal handler
+  intercepts ART signals" hypothesis) were the `config-02` stage and are
+  **superseded** - kept as evidence, not as current state.
+- The game is still **NOT runnable**: `/sdcard/D3/RomFS` is missing, and graphics,
+  audio, input and real guest thread scheduling are not done. Do not read any
+  `nnMain` entry or a visible APK UI as "the game runs / no crash".
 
 ## Offline APK packaging (fixed package, does not overwrite the original app)
 

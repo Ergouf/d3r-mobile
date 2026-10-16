@@ -12,21 +12,30 @@ KNOWN_NDK = r"D:\workspace\Gdict\android_sdk\ndk\28.2.13676358"
 HOST_SRC = [
     os.path.join(ROOT, "host", "d3_host.c"),
     os.path.join(ROOT, "host", "d3_service.c"),
+    os.path.join(ROOT, "host", "d3_sync.c"),
     os.path.join(ROOT, "host", "d3_jni.c"),
 ]
 PROBE_SRC = os.path.join(ROOT, "tools", "d3_probe.c")
 
 # Native tests. Each test #includes the .c it exercises, so the exercised unit
-# is NOT linked again; test_stack_memory also needs d3_service.c linked.
+# is NOT linked again. A test that #includes d3_host.c must link d3_sync.c
+# (host.c calls into the sync module but does not include it); test_sync
+# #includes both host.c and sync.c, so it links only d3_service.c.
 test_stack_memory = [os.path.join(ROOT, "tests", "test_stack_memory.c"),
-                     os.path.join(ROOT, "host", "d3_service.c")]
+                     os.path.join(ROOT, "host", "d3_service.c"),
+                     os.path.join(ROOT, "host", "d3_sync.c")]
 test_applet_focus = [os.path.join(ROOT, "tests", "test_applet_focus.c")]
 test_hipc_message = [os.path.join(ROOT, "tests", "test_hipc_message.c")]
 test_set_service = [os.path.join(ROOT, "tests", "test_set_service.c")]
 test_boot_sequence = [os.path.join(ROOT, "tests", "test_boot_sequence.c"),
-                      os.path.join(ROOT, "host", "d3_service.c")]
+                      os.path.join(ROOT, "host", "d3_service.c"),
+                      os.path.join(ROOT, "host", "d3_sync.c")]
 test_signal_chain = [os.path.join(ROOT, "tests", "test_signal_chain.c"),
-                     os.path.join(ROOT, "host", "d3_service.c")]
+                     os.path.join(ROOT, "host", "d3_service.c"),
+                     os.path.join(ROOT, "host", "d3_sync.c")]
+test_time_service = [os.path.join(ROOT, "tests", "test_time_service.c")]
+test_sync = [os.path.join(ROOT, "tests", "test_sync.c"),
+             os.path.join(ROOT, "host", "d3_service.c")]
 
 # Strict flags preserved verbatim from the original build_host.py.
 HOST_FLAGS = [
@@ -128,7 +137,7 @@ def main() -> None:
         action="store_true",
         help="Compile-only: also build the native Android tests (test_stack_memory, "
         "test_applet_focus, test_hipc_message, test_set_service, test_boot_sequence, "
-        "test_signal_chain) "
+        "test_signal_chain, test_time_service) "
         "into the output directory. Does not "
         "touch a device.",
     )
@@ -170,7 +179,9 @@ def main() -> None:
                           ("test_hipc_message", test_hipc_message),
                           ("test_set_service", test_set_service),
                           ("test_boot_sequence", test_boot_sequence),
-                          ("test_signal_chain", test_signal_chain)):
+                          ("test_signal_chain", test_signal_chain),
+                          ("test_time_service", test_time_service),
+                          ("test_sync", test_sync)):
             out = os.path.join(out_dir, name)
             compile_one(
                 [clang, *PROBE_FLAGS, *defines, *src, "-llog", "-ldl", "-o", out],

@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "d3_host.h"
 #include "d3_service.h"
+#include "d3_sync.h"
 #include "../guest_layout.h"
 
 #include <android/log.h>
@@ -1903,6 +1904,8 @@ void d3_trace_guest(const char *tag, const d3_saved *saved) {
     }
 }
 
+static uint32_t g_sync_logs;
+
 static void svc_call(d3_saved *saved, uint32_t id) {
     uint64_t *x = saved->x;
     switch (id) {
@@ -2054,17 +2057,35 @@ static void svc_call(d3_saved *saved, uint32_t id) {
         set_saved(saved, 0, 0);
         return;
     case 0x1A:
+        set_saved(saved, 0, d3_sync_lock((uint32_t)x[0], (uint32_t *)(uintptr_t)x[1],
+                                       (uint32_t)x[2]));
+        return;
     case 0x1B:
-    case 0x1C:
-        if (g_batch_logs < 24) {
-            g_batch_logs++;
-            info("svc #%u x0=%#" PRIx64 " x1=%#" PRIx64 " x2=%#" PRIx64 " x3=%#" PRIx64,
-                 (unsigned)id, x[0], x[1], x[2], x[3]);
-        }
-        set_saved(saved, 0, 0);
+        set_saved(saved, 0, d3_sync_unlock((uint32_t *)(uintptr_t)x[0],
+                                         (uint32_t)D3_THREAD_ID));
         return;
-    case 0x1D:
+    case 0x1C: {
+        uint32_t *mutex = (uint32_t *)(uintptr_t)x[0];
+        uint32_t *key = (uint32_t *)(uintptr_t)x[1];
+        uint32_t tag = (uint32_t)x[2];
+        int64_t timeout = (int64_t)x[3];
+        int log = g_sync_logs++ < 32;
+        if (log)
+            info("WaitProcessWideKeyAtomic mutex=%p key=%p tag=%#x timeout=%" PRId64,
+                 (void *)mutex, (void *)key, tag, timeout);
+        uint32_t result = d3_sync_wait(mutex, key, tag, timeout);
+        if (log)
+            info("WaitProcessWideKeyAtomic result=%#x", result);
+        set_saved(saved, 0, result);
         return;
+    }
+    case 0x1D: {
+        uint32_t result = d3_sync_signal((uint32_t *)(uintptr_t)x[0], (int32_t)x[1]);
+        if (result != 0 && g_sync_logs++ < 32)
+            info("SignalProcessWideKey key=%#" PRIx64 " count=%d result=%#x",
+                 x[0], (int32_t)x[1], result);
+        return;
+    }
     case 0x1F:
         d3_svc_connect_to_named_port(saved);
         return;

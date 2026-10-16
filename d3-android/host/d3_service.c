@@ -30,7 +30,10 @@
    nn::Result treats any non zero value as a failure (nnResultIsFailure). */
 #define D3_RESULT(module, description) (((module) & 0x1FFu) | ((description) << 9))
 
-enum { PORT_NONE = 0, PORT_SM, PORT_FSP, PORT_LM, PORT_LOGGER, PORT_OFFLINE, PORT_UNKNOWN, PORT_SET };
+enum {
+    PORT_NONE = 0, PORT_SM, PORT_FSP, PORT_LM, PORT_LOGGER, PORT_OFFLINE,
+    PORT_UNKNOWN, PORT_SET, PORT_TIME, PORT_TIME_ZONE
+};
 
 #define HANDLE_SLOTS 0x400
 #define NAME_CHARS 24
@@ -165,12 +168,16 @@ void d3_handle_set_arg(uint32_t handle, uint64_t arg) {
         object->arg = arg;
 }
 
+static void domain_close_session(uint32_t session);
+
 int d3_handle_close(uint32_t handle) {
     if (handle < D3_HANDLE_FIRST)
         return 0;
     uint32_t index = handle - D3_HANDLE_FIRST;
     if (index >= HANDLE_SLOTS || g_obj[index].kind == D3_OBJ_NONE)
         return 1;
+    if (g_obj[index].kind == D3_OBJ_SESSION)
+        domain_close_session(handle);
     g_obj[index].kind = D3_OBJ_NONE;
     g_obj[index].arg = 0;
     g_obj[index].name[0] = 0;
@@ -198,6 +205,10 @@ static int port_kind(const char *name) {
         return PORT_LM;
     if (strcmp(name, "set") == 0 || strcmp(name, "set:") == 0)
         return PORT_SET;
+    if (strcmp(name, "time:u") == 0)
+        return PORT_TIME;
+    if (strcmp(name, "ITimeZoneService") == 0)
+        return PORT_TIME_ZONE;
     static const char *const offline[] = {
         "nifm", "bsd", "ssl", "nsd", "ldn", "htcs", "bcat", "nfp", "irs", "socket",
     };
@@ -227,6 +238,10 @@ static int port_iface(const char *name) {
         return D3_IF_LOGGER;
     if (strcmp(name, "apm") == 0)
         return D3_IF_APM;
+    if (strcmp(name, "time:u") == 0)
+        return D3_IF_TIME;
+    if (strcmp(name, "ITimeZoneService") == 0)
+        return D3_IF_TIME_ZONE;
     return D3_IF_NONE;
 }
 
@@ -378,8 +393,6 @@ static void reply_prepare(Message *m, uint32_t move_handles, uint32_t params, in
     m->w[1] = (special ? 0x80000000u : 0u) | (uint32_t)(payload + 4 + params);
     if (special)
         m->w[2] = (pid ? 1u : 0u) | ((move_handles & 0xfu) << 5);
-    if (domain)
-        m->w[frame] = 1; /* one new object id was handed out */
     m->w[payload] = CMIF_OUT;
     m->w[payload + 1] = 1;
     m->w[payload + 2] = 0;
@@ -426,6 +439,7 @@ static void reply_domain(Message *m, uint32_t result, uint32_t params) {
 
 static void reply_domain_object(Message *m, uint32_t object) {
     reply_prepare(m, 0, 2, 1);
+    m->w[m->frame] = 1;
     m->w[m->payload + 4] = object;
     reply_send(m);
 }
@@ -844,6 +858,11 @@ static void domain_close(uint32_t session, uint32_t id) {
     }
 }
 
+static void domain_close_session(uint32_t session) {
+    for (uint32_t id = 1; id <= DOMAIN_SLOTS; id++)
+        domain_close(session, id);
+}
+
 /* Pop the oldest message queued on one domain object, or 0 when the object has
    none (or the id does not belong to this session).  Today the only queued
    message is the focus notification, so the value returned is the applet
@@ -1188,6 +1207,31 @@ static void debug_functions_command(Message *m, uint32_t command) {
     reply_domain(m, 0, 1);
 }
 
+static void time_service_command(Message *m, uint32_t command, uint32_t session) {
+    if (command != 3) {
+        unsupported_command(m, D3_IF_TIME, command);
+        return;
+    }
+    if (m->domain) {
+        uint32_t object = domain_add(session, D3_IF_TIME_ZONE);
+        slog("ITimeService::GetTimeZoneService -> object %u", object);
+        if (object == 0)
+            reply_domain(m, D3_RESULT(21, 7), 1);
+        else
+            reply_domain_object(m, object);
+        return;
+    }
+    uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "ITimeZoneService", PORT_TIME_ZONE);
+    slog("ITimeService::GetTimeZoneService -> session %#x", handle);
+    if (handle == 0) {
+        reply_result(m, D3_RESULT(21, 7));
+        return;
+    }
+    reply_prepare(m, 1, 0, 0);
+    m->w[m->handle_slot_out] = handle;
+    reply_send(m);
+}
+
 static void domain_command(Message *m, uint32_t handle) {
     const char *name = d3_handle_name(handle);
     if (m->domain_command == 2) { /* CloseVirtualHandle */
@@ -1209,6 +1253,12 @@ static void domain_command(Message *m, uint32_t handle) {
              m->w[m->magic + 7]);
     }
     switch (iface) {
+    case D3_IF_TIME:
+        time_service_command(m, m->command, handle);
+        break;
+    case D3_IF_TIME_ZONE:
+        unsupported_command(m, iface, m->command);
+        break;
     case D3_IF_PCTL:
         pctl_command(m, m->command, handle);
         break;
@@ -1294,6 +1344,7 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
             reply[0] = words[0];
             memcpy((void *)(uintptr_t)buffer, reply, sizeof reply);
             slog("%s bare header on %s tag=%u -> empty reply", which, name, words[0] & 0xffffu);
+            d3_handle_close(handle);
             saved->x[0] = 0;
             return;
         }
@@ -1322,6 +1373,12 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
         return;
     }
     switch ((int)d3_handle_arg(handle)) {
+    case PORT_TIME:
+        time_service_command(&m, m.command, handle);
+        break;
+    case PORT_TIME_ZONE:
+        unsupported_command(&m, D3_IF_TIME_ZONE, m.command);
+        break;
     case PORT_SM:
         sm_command(&m, m.command);
         break;

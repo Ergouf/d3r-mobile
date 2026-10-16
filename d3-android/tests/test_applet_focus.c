@@ -73,16 +73,20 @@ static size_t reply_frame(const uint32_t *w) {
     return (index + 3u) & ~(size_t)3u;
 }
 
-/* Read a reply's result word and first out argument.  A domain reply (the common
-   state getter session) puts a four word domain header first; a plain reply (the
-   ConvertCurrentObjectToDomain control call) does not. */
-static void reply_parse(const uint32_t *w, uint32_t *result, uint32_t *outarg) {
+/* Read a reply's result word and first out argument.  A domain reply puts a four
+   word domain header first (its frameword is libnx CmifDomainOutHeader's
+   num_out_objects, i.e. exactly the new-object count); a plain reply has no
+   domain header and carries no new object.  expected_objects is asserted exactly,
+   never loosened to allow either 0 or 1. */
+static void reply_parse(const uint32_t *w, uint32_t expected_objects, uint32_t *result,
+                        uint32_t *outarg) {
     const size_t frame = reply_frame(w);
     size_t payload;
     if (w[frame] == CMIF_OUT) {
-        payload = frame; /* plain reply */
+        REQUIRE(expected_objects == 0u); /* a plain reply introduces no object */
+        payload = frame;
     } else {
-        REQUIRE(w[frame] == 1u);      /* domain header: one new object id */
+        REQUIRE(w[frame] == expected_objects); /* exact new-object count */
         REQUIRE(w[frame + 4] == CMIF_OUT);
         payload = frame + 4;
     }
@@ -113,10 +117,12 @@ static void request_build_arg(RequestBuffer *request, uint32_t domain_header, ui
 }
 
 /* Send one domain request on a session handle and return the reply's result and
-   out argument.  Asserts on the syscall's own status, not just the payload. */
+   out argument.  expected_objects is the exact new-object count the reply's
+   domain header must carry.  Asserts on the syscall's own status, not just the
+   payload. */
 static void request_send_full(uint32_t handle, uint32_t domain_header, uint32_t command,
-                              uint32_t object, uint32_t arg0, uint32_t *result,
-                              uint32_t *outarg) {
+                              uint32_t object, uint32_t arg0, uint32_t expected_objects,
+                              uint32_t *result, uint32_t *outarg) {
     RequestBuffer request;
     request_build_arg(&request, domain_header, command, object, arg0);
     d3_saved saved = {0};
@@ -124,13 +130,13 @@ static void request_send_full(uint32_t handle, uint32_t domain_header, uint32_t 
     saved.x[2] = handle;
     d3_svc_send_sync_request_user(&saved);
     REQUIRE(saved.x[0] == 0);
-    reply_parse((const uint32_t *)request.buffer, result, outarg);
+    reply_parse((const uint32_t *)request.buffer, expected_objects, result, outarg);
 }
 
-/* The plain command shape (no argument): domain header 0x100001. */
+/* The plain command shape (no argument): domain header 0x100001, no new object. */
 static void request_send(uint32_t handle, uint32_t command, uint32_t object, uint32_t *result,
                          uint32_t *outarg) {
-    request_send_full(handle, 0x100001u, command, object, 0, result, outarg);
+    request_send_full(handle, 0x100001u, command, object, 0, 0, result, outarg);
 }
 
 /* One byte boolean argument: domain header 0x130001, the value in the low byte
@@ -138,7 +144,15 @@ static void request_send(uint32_t handle, uint32_t command, uint32_t object, uin
    not be read as part of the value. */
 static void request_send_bool(uint32_t handle, uint32_t command, uint32_t object, uint32_t arg0,
                               uint32_t *result, uint32_t *outarg) {
-    request_send_full(handle, 0x130001u, command, object, arg0, result, outarg);
+    request_send_full(handle, 0x130001u, command, object, arg0, 0, result, outarg);
+}
+
+/* A request whose reply introduces a fresh domain object: its domain header must
+   carry exactly one new object id (the CommonStateGetter/SelfController opens and
+   the pctl factory). */
+static void request_send_object(uint32_t handle, uint32_t command, uint32_t object,
+                                uint32_t *result, uint32_t *outarg) {
+    request_send_full(handle, 0x100001u, command, object, 0, 1, result, outarg);
 }
 
 /* A pctl factory request as the guest sends it: the u64 pid_reserved travels in
@@ -173,7 +187,7 @@ static uint32_t pctl_factory(uint32_t handle, uint32_t command, uint32_t root) {
     d3_svc_send_sync_request_user(&saved);
     REQUIRE(saved.x[0] == 0);
     uint32_t result = 0xdeadbeefu, object = 0xdeadbeefu;
-    reply_parse((const uint32_t *)request.buffer, &result, &object);
+    reply_parse((const uint32_t *)request.buffer, 1, &result, &object);
     REQUIRE(result == 0);        /* the factory call itself succeeded */
     REQUIRE(object != 0);        /* a real new child object */
     REQUIRE(domain_iface(handle, object) == D3_IF_PCTL_SERVICE);
@@ -243,7 +257,7 @@ static uint32_t session_convert_named(const char *name, int kind, uint32_t *root
     d3_svc_send_sync_request(&saved, (uint64_t)(uintptr_t)&request.buffer);
     REQUIRE(saved.x[0] == 0);
     uint32_t result = 0xdeadbeefu, object = 0;
-    reply_parse((const uint32_t *)request.buffer, &result, &object);
+    reply_parse((const uint32_t *)request.buffer, 0, &result, &object);
     REQUIRE(result == 0);  /* the conversion itself succeeded */
     REQUIRE(object != 0);  /* the host returned a real allocated id, not a fabricated one */
     REQUIRE(domain_iface(handle, object) == port_iface(name));
@@ -261,11 +275,11 @@ static uint32_t session_convert(uint32_t *root_out) {
    GetCommonStateGetter. */
 static uint32_t common_state_getter_open(uint32_t session, uint32_t root) {
     uint32_t result = 0xdeadbeefu, proxy = 0;
-    request_send(session, 0 /* OpenApplicationProxy */, root, &result, &proxy);
+    request_send_object(session, 0 /* OpenApplicationProxy */, root, &result, &proxy);
     REQUIRE(result == 0);
     REQUIRE(domain_iface(session, proxy) == D3_IF_APPLICATION_PROXY);
     uint32_t getter = 0;
-    request_send(session, 0 /* GetCommonStateGetter */, proxy, &result, &getter);
+    request_send_object(session, 0 /* GetCommonStateGetter */, proxy, &result, &getter);
     REQUIRE(result == 0);
     REQUIRE(domain_iface(session, getter) == D3_IF_COMMON_STATE_GETTER);
     return getter;
@@ -276,11 +290,11 @@ static uint32_t common_state_getter_open(uint32_t session, uint32_t root) {
    GetSelfController. */
 static uint32_t self_controller_open(uint32_t session, uint32_t root) {
     uint32_t result = 0xdeadbeefu, proxy = 0;
-    request_send(session, 0 /* OpenApplicationProxy */, root, &result, &proxy);
+    request_send_object(session, 0 /* OpenApplicationProxy */, root, &result, &proxy);
     REQUIRE(result == 0);
     REQUIRE(domain_iface(session, proxy) == D3_IF_APPLICATION_PROXY);
     uint32_t controller = 0;
-    request_send(session, 1 /* GetSelfController */, proxy, &result, &controller);
+    request_send_object(session, 1 /* GetSelfController */, proxy, &result, &controller);
     REQUIRE(result == 0);
     REQUIRE(domain_iface(session, controller) == D3_IF_SELF_CONTROLLER);
     return controller;
@@ -657,7 +671,7 @@ int main(void) {
     d3_svc_send_sync_request(&full_saved, (uint64_t)(uintptr_t)&full_request.buffer);
     CHECK(full_saved.x[0] == 0);
     uint32_t full_result = 0, full_object = 0xdeadbeefu;
-    reply_parse((const uint32_t *)full_request.buffer, &full_result, &full_object);
+    reply_parse((const uint32_t *)full_request.buffer, 0, &full_result, &full_object);
     CHECK(full_result == D3_RESULT(21, 7)); /* a real error, not success */
     CHECK(full_object == 0);                /* no fabricated object id */
     CHECK(domain_iface(fresh, 1) == D3_IF_NONE); /* id 1 does not exist for fresh */
