@@ -1,0 +1,14 @@
+# Official C sources target the Android ARM64 ABI (NDK clang + sysroot below).
+# Keep the absolute NDK path identical to the one the local build uses.
+CompileFlags:
+  # Use the exact NDK clang so clangd inspects the same driver the build uses
+  # (its own resource dir and builtin headers under lib/clang/19).
+  Compiler: D:/workspace/Gdict/android_sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe
+  Add:
+    - --target=aarch64-linux-android34
+    - --sysroot=D:/workspace/Gdict/android_sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/sysroot
+    - -ffixed-x18
+    - -fno-stack-protector
+    - -fPIC
+    - -Wall
+    - -Wextra

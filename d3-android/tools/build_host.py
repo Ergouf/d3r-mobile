@@ -25,6 +25,8 @@ test_hipc_message = [os.path.join(ROOT, "tests", "test_hipc_message.c")]
 test_set_service = [os.path.join(ROOT, "tests", "test_set_service.c")]
 test_boot_sequence = [os.path.join(ROOT, "tests", "test_boot_sequence.c"),
                       os.path.join(ROOT, "host", "d3_service.c")]
+test_signal_chain = [os.path.join(ROOT, "tests", "test_signal_chain.c"),
+                     os.path.join(ROOT, "host", "d3_service.c")]
 
 # Strict flags preserved verbatim from the original build_host.py.
 HOST_FLAGS = [
@@ -125,7 +127,8 @@ def main() -> None:
         "--build-tests",
         action="store_true",
         help="Compile-only: also build the native Android tests (test_stack_memory, "
-        "test_applet_focus, test_hipc_message, test_set_service, test_boot_sequence) "
+        "test_applet_focus, test_hipc_message, test_set_service, test_boot_sequence, "
+        "test_signal_chain) "
         "into the output directory. Does not "
         "touch a device.",
     )
@@ -166,7 +169,8 @@ def main() -> None:
                           ("test_applet_focus", test_applet_focus),
                           ("test_hipc_message", test_hipc_message),
                           ("test_set_service", test_set_service),
-                          ("test_boot_sequence", test_boot_sequence)):
+                          ("test_boot_sequence", test_boot_sequence),
+                          ("test_signal_chain", test_signal_chain)):
             out = os.path.join(out_dir, name)
             compile_one(
                 [clang, *PROBE_FLAGS, *defines, *src, "-llog", "-ldl", "-o", out],

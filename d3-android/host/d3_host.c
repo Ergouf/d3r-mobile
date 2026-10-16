@@ -251,6 +251,7 @@ static long raw_syscall6(long number, long a0, long a1, long a2, long a3, long a
 #define RAW_O_CREAT 0100
 #define RAW_O_TRUNC 01000
 #define RAW_SYS_RT_SIGACTION 134
+#define RAW_SYS_RT_SIGPROCMASK 135
 #define RAW_SYS_TGKILL 131
 #define RAW_SYS_GETPID 172
 #define RAW_SYS_EXIT_GROUP 94
@@ -359,10 +360,6 @@ static void dump_file(const char *path) {
     raw_syscall4(RAW_SYS_CLOSE, fd, 0, 0, 0);
 }
 
-#define D3_SA_SIGINFO 0x00000004u
-#define D3_SA_ONSTACK 0x08000000u
-#define D3_SA_RESTORER 0x04000000u
-
 /* arm64 rt_sigaction takes the kernel layout: handler, flags, restorer, mask. */
 typedef struct {
     uint64_t handler;
@@ -408,15 +405,42 @@ static void remember_fault_thread(void) {
     }
 }
 
-/* The kernel returns through this when the handler returns. */
-static void __attribute__((naked)) d3_sigreturn(void) {
-    __asm__ volatile("mov x8, #139\n\t"
-                     "svc #0\n\t");
-}
-
 static void raw_sigaction(int signal, const D3SigAction *action, D3SigAction *old) {
     raw_syscall6(RAW_SYS_RT_SIGACTION, signal, (long)(uintptr_t)action, (long)(uintptr_t)old,
                  8, 0, 0);
+}
+
+static struct sigaction g_previous_signals[NSIG];
+static sig_atomic_t g_signal_reset[NSIG];
+static pthread_once_t g_signal_once = PTHREAD_ONCE_INIT;
+
+static void default_signal(int sig) {
+    D3SigAction action = {0};
+    uint64_t mask = UINT64_C(1) << (sig - 1);
+    raw_sigaction(sig, &action, 0);
+    raw_syscall6(RAW_SYS_TGKILL, raw_syscall4(RAW_SYS_GETPID, 0, 0, 0, 0),
+                 raw_syscall4(RAW_SYS_GETTID, 0, 0, 0, 0), sig, 0, 0, 0);
+    raw_syscall6(RAW_SYS_RT_SIGPROCMASK, SIG_UNBLOCK, (long)(uintptr_t)&mask,
+                 0, sizeof mask, 0, 0);
+}
+
+static void chain_signal(int sig, siginfo_t *si, void *context) {
+    const struct sigaction *previous = &g_previous_signals[sig];
+    if (previous->sa_handler == SIG_IGN) {
+        if (si && si->si_code > 0)
+            default_signal(sig);
+        return;
+    }
+    if (previous->sa_handler == SIG_DFL ||
+        ((previous->sa_flags & SA_RESETHAND) &&
+         __atomic_exchange_n(&g_signal_reset[sig], 1, __ATOMIC_RELAXED))) {
+        default_signal(sig);
+        return;
+    }
+    if (previous->sa_flags & SA_SIGINFO)
+        previous->sa_sigaction(sig, si, context);
+    else
+        previous->sa_handler(sig);
 }
 
 /* process_vm_readv on our own pid reports a bad address instead of faulting, which
@@ -451,14 +475,21 @@ static void dump_memory_links(uint32_t reg, uint64_t address) {
 }
 
 static void crash_handler(int sig, siginfo_t *si, void *context) {
-    /* The fault may have happened in guest context, where tpidr_el0 and x18 hold
-       guest values. bionic's errno and TLS live behind tpidr_el0, so every libc
-       call below would fault again and the process would die without a trace. */
+    /* Only a guest fault needs its host TLS restored. Other threads must retain
+       their own TLS while the preceding signal action runs. */
     const ucontext_t *uc = context;
     const mcontext_t *mc = &uc->uc_mcontext;
     uint64_t fault_tid = (uint64_t)raw_syscall4(RAW_SYS_GETTID, 0, 0, 0, 0);
-    uint64_t fault_tp = g_host_tp;
-    uint64_t fault_x18 = g_host_x18;
+    if (fault_tid != g_guest_tid) {
+        chain_signal(sig, si, context);
+        return;
+    }
+    uint64_t interrupted_tp;
+    uint64_t interrupted_x18;
+    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(interrupted_tp));
+    __asm__ volatile("mov %0, x18" : "=r"(interrupted_x18));
+    uint64_t fault_tp = 0;
+    uint64_t fault_x18 = 0;
     int known = 0;
     uint64_t pc;
     for (int i = 0; i < g_nfault_threads; i++) {
@@ -469,8 +500,10 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
             break;
         }
     }
-    __asm__ volatile("mov x18, %0" ::"r"(fault_x18) : "memory");
-    __asm__ volatile("msr tpidr_el0, %0" ::"r"(fault_tp) : "memory");
+    if (known) {
+        __asm__ volatile("mov x18, %0" ::"r"(fault_x18) : "memory");
+        __asm__ volatile("msr tpidr_el0, %0" ::"r"(fault_tp) : "memory");
+    }
     pc = (uint64_t)mc->pc;
     uint64_t lr = (uint64_t)mc->regs[30];
     uint64_t fault = si && si->si_addr ? (uint64_t)(uintptr_t)si->si_addr
@@ -560,29 +593,12 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
     dump_file(CRASH_PATH);
     dump_file(CRASH_PATH_FALLBACK);
     dump_file(CRASH_PATH_SDCARD);
-    if (!known) {
-        dump_file(CRASH_PATH);
-        raw_syscall6(RAW_SYS_EXIT_GROUP, 1, 0, 0, 0, 0, 0);
-    }
-    info("signal %d fault=%#" PRIx64 " pc=%#" PRIx64 " (%s+%" PRIx64 ") lr=%#" PRIx64
-         " (%s+%" PRIx64 ") tid=%" PRIu64 " guest_tid=%" PRIu64,
-         sig, fault, pc, module_of(pc), pc >= g_bias ? pc - g_bias : 0, lr, module_of(lr),
-         lr >= g_bias ? lr - g_bias : 0, fault_tid, g_guest_tid);
-    info("x0=%" PRIx64 " x1=%" PRIx64 " x2=%" PRIx64 " x8=%" PRIx64 " x19=%" PRIx64 " x20=%" PRIx64
-         " x21=%" PRIx64 " last kind=%" PRIu64 " extra=%" PRIu64 " svcs=%" PRIu64,
-         (uint64_t)mc->regs[0], (uint64_t)mc->regs[1], (uint64_t)mc->regs[2],
-         (uint64_t)mc->regs[8], (uint64_t)mc->regs[19], (uint64_t)mc->regs[20],
-         (uint64_t)mc->regs[21], g_last_kind, g_last_extra, g_svcs);
-    /* Dying through the default action keeps the exit status honest, and the raw
-       syscall keeps the re-raise out of ART's signal chain. */
-    {
-        D3SigAction dfl;
-        memset(&dfl, 0, sizeof dfl);
-        raw_sigaction(sig, &dfl, 0);
-        raw_syscall6(RAW_SYS_TGKILL, raw_syscall4(RAW_SYS_GETPID, 0, 0, 0, 0),
-                     (long)fault_tid, sig, 0, 0, 0);
-    }
-    raw_syscall6(RAW_SYS_EXIT_GROUP, 1, 0, 0, 0, 0, 0);
+    if (known)
+        chain_signal(sig, si, context);
+    else
+        default_signal(sig);
+    __asm__ volatile("msr tpidr_el0, %0" ::"r"(interrupted_tp) : "memory");
+    __asm__ volatile("mov x18, %0" ::"r"(interrupted_x18) : "memory");
 }
 
 /* /sdcard/D3/no-handler switches the crash path over to bionic debuggerd. */
@@ -603,42 +619,58 @@ static int selftest_crash(void) {
     return stat(D3_DATA_ROOT "/selftest-crash", &st) == 0;
 }
 
-static void install_crash_handler(void) {
+static void install_signal_actions(void) {
     static const int signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGABRT, SIGFPE, SIGSYS, SIGTRAP};
-    /* sigaltstack is per thread, and the frame has to hold the full register set,
-       so give every thread its own private mapping instead of a TLS array. */
+    for (size_t i = 0; i < sizeof signals / sizeof signals[0]; i++) {
+        int sig = signals[i];
+        struct sigaction action;
+        struct sigaction current;
+        D3SigAction kernel;
+        if (sigaction(sig, 0, &g_previous_signals[sig]) != 0)
+            fail("sigaction read %d errno %d", sig, errno);
+        memset(&action, 0, sizeof action);
+        action.sa_sigaction = crash_handler;
+        action.sa_mask = g_previous_signals[sig].sa_mask;
+        action.sa_flags = SA_SIGINFO | SA_ONSTACK |
+                          (g_previous_signals[sig].sa_flags & (SA_RESTART | SA_NODEFER));
+        /* libc keeps ART's special handlers ahead of this user action. */
+        if (sigaction(sig, &action, 0) != 0)
+            fail("sigaction install %d errno %d", sig, errno);
+        if (sigaction(sig, 0, &current) != 0)
+            fail("sigaction verify %d errno %d", sig, errno);
+        raw_sigaction(sig, 0, &kernel);
+        info("sig %d user=%p ours=%d kernel=%" PRIx64 " chained=%d", sig,
+             (void *)(uintptr_t)current.sa_sigaction, current.sa_sigaction == crash_handler,
+             kernel.handler, kernel.handler != (uint64_t)(uintptr_t)crash_handler);
+    }
+}
+
+static void install_crash_handler(void) {
     static __thread void *alternate;
     stack_t stack;
-    if (!alternate) {
-        alternate = mmap(0, ALTSTACK_SIZE, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (alternate == MAP_FAILED)
-            fail("altstack mmap errno %d", errno);
+    if (sigaltstack(0, &stack) != 0)
+        fail("sigaltstack read errno %d", errno);
+    if (stack.ss_flags & SS_DISABLE) {
+        if (!alternate) {
+            alternate = mmap(0, ALTSTACK_SIZE, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (alternate == MAP_FAILED)
+                fail("altstack mmap errno %d", errno);
+        }
+        stack.ss_sp = alternate;
+        stack.ss_size = ALTSTACK_SIZE;
+        stack.ss_flags = 0;
+        if (sigaltstack(&stack, 0) != 0)
+            fail("sigaltstack errno %d", errno);
     }
-    stack.ss_sp = alternate;
-    stack.ss_size = ALTSTACK_SIZE;
-    stack.ss_flags = 0;
-    if (sigaltstack(&stack, 0) != 0)
-        fail("sigaltstack errno %d", errno);
     if (tombstone_mode()) {
-        /* Leave the bionic debuggerd handler in place, so a crash produces a full
-           tombstone with a backtrace instead of the raw register dump. */
         info("crash handler disabled, using debuggerd");
         return;
     }
     remember_fault_thread();
-    for (size_t i = 0; i < sizeof signals / sizeof signals[0]; i++) {
-        D3SigAction installed;
-        D3SigAction old;
-        memset(&installed, 0, sizeof installed);
-        installed.handler = (uint64_t)(uintptr_t)crash_handler;
-        installed.flags = D3_SA_SIGINFO | D3_SA_ONSTACK | D3_SA_RESTORER;
-        installed.restorer = (uint64_t)(uintptr_t)d3_sigreturn;
-        raw_sigaction(signals[i], &installed, 0);
-        raw_sigaction(signals[i], 0, &old);
-        info("sig %d handler=%" PRIx64 " ours=%d", signals[i], old.handler,
-             old.handler == (uint64_t)(uintptr_t)crash_handler);
-    }
+    int result = pthread_once(&g_signal_once, install_signal_actions);
+    if (result != 0)
+        fail("pthread_once signals %d", result);
 }
 
 /* ------------------------------------------------------------------ tracer */
