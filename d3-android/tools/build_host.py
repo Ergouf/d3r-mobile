@@ -22,6 +22,7 @@ test_stack_memory = [os.path.join(ROOT, "tests", "test_stack_memory.c"),
                      os.path.join(ROOT, "host", "d3_service.c")]
 test_applet_focus = [os.path.join(ROOT, "tests", "test_applet_focus.c")]
 test_hipc_message = [os.path.join(ROOT, "tests", "test_hipc_message.c")]
+test_set_service = [os.path.join(ROOT, "tests", "test_set_service.c")]
 
 # Strict flags preserved verbatim from the original build_host.py.
 HOST_FLAGS = [
@@ -111,6 +112,8 @@ def main() -> None:
         help="Absolute Android path; sets -DD3_DATA_ROOT/-DD3_PRIVATE_ROOT "
         "(default: installed app paths from the headers)",
     )
+    parser.add_argument("--data-root", help="Absolute Android runtime data directory")
+    parser.add_argument("--private-root", help="Absolute Android application data directory")
     parser.add_argument(
         "--build-probe",
         action="store_true",
@@ -120,7 +123,7 @@ def main() -> None:
         "--build-tests",
         action="store_true",
         help="Compile-only: also build the native Android tests (test_stack_memory, "
-        "test_applet_focus, test_hipc_message) into the output directory. Does not "
+        "test_applet_focus, test_hipc_message, test_set_service) into the output directory. Does not "
         "touch a device.",
     )
     args = parser.parse_args()
@@ -129,7 +132,15 @@ def main() -> None:
     if not os.path.isfile(clang):
         sys.exit("missing clang: " + clang)
 
+    if args.sandbox_root and (args.data_root or args.private_root):
+        parser.error("--sandbox-root cannot be combined with --data-root/--private-root")
     defines = sandbox_defines(args.sandbox_root) if args.sandbox_root else []
+    for name, value in (("D3_DATA_ROOT", args.data_root), ("D3_PRIVATE_ROOT", args.private_root)):
+        if value is None:
+            continue
+        if not value.startswith("/") or any(char in value for char in "\x00\n\r"):
+            parser.error("%s must be an absolute Android path without NUL/newlines" % name)
+        defines.append("-D" + name + "=" + c_literal(value.rstrip("/") or "/"))
 
     out_dir = os.path.abspath(args.output_dir)
     os.makedirs(out_dir, exist_ok=True)
@@ -150,7 +161,8 @@ def main() -> None:
     if args.build_tests:
         for name, src in (("test_stack_memory", test_stack_memory),
                           ("test_applet_focus", test_applet_focus),
-                          ("test_hipc_message", test_hipc_message)):
+                          ("test_hipc_message", test_hipc_message),
+                          ("test_set_service", test_set_service)):
             out = os.path.join(out_dir, name)
             compile_one(
                 [clang, *PROBE_FLAGS, *defines, *src, "-llog", "-ldl", "-o", out],

@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #define LOG_TAG "D3Host"
@@ -29,7 +30,7 @@
    nn::Result treats any non zero value as a failure (nnResultIsFailure). */
 #define D3_RESULT(module, description) (((module) & 0x1FFu) | ((description) << 9))
 
-enum { PORT_NONE = 0, PORT_SM, PORT_FSP, PORT_LM, PORT_LOGGER, PORT_OFFLINE, PORT_UNKNOWN };
+enum { PORT_NONE = 0, PORT_SM, PORT_FSP, PORT_LM, PORT_LOGGER, PORT_OFFLINE, PORT_UNKNOWN, PORT_SET };
 
 #define HANDLE_SLOTS 0x400
 #define NAME_CHARS 24
@@ -195,6 +196,8 @@ static int port_kind(const char *name) {
         return PORT_FSP;
     if (strcmp(name, "lm") == 0 || strcmp(name, "lm:") == 0)
         return PORT_LM;
+    if (strcmp(name, "set") == 0 || strcmp(name, "set:") == 0)
+        return PORT_SET;
     static const char *const offline[] = {
         "nifm", "bsd", "ssl", "nsd", "ldn", "htcs", "bcat", "nfp", "irs", "socket",
     };
@@ -255,6 +258,8 @@ typedef struct {
     uint32_t command;
     size_t payload;         /* where a reply must put its CMIF payload */
     size_t handle_slot_out;
+    size_t recv_buffer_count;
+    size_t recv_buffer_slot;
 } Message;
 
 /* HIPC layout in 32-bit words:
@@ -294,6 +299,8 @@ static int message_parse(Message *m, uint64_t address) {
     const size_t sends = (descriptor_counts >> 4) & 0xfu;
     const size_t receives = (descriptor_counts >> 8) & 0xfu;
     const size_t exchanges = (descriptor_counts >> 12) & 0xfu;
+    m->recv_buffer_count = receives;
+    m->recv_buffer_slot = index + 2u * statics + 3u * sends;
     index += 2u * statics + 3u * (sends + receives + exchanges);
     const size_t raw_words = m->w[1] & 0x3ffu;
     if (index > MESSAGE_WORDS || raw_words > MESSAGE_WORDS - index) {
@@ -641,6 +648,132 @@ static void lm_command(Message *m, uint32_t command) {
     }
     default:
         reply_unsupported(m, "lm:", command, PORT_LM);
+        break;
+    }
+}
+
+/* -------------------------------------------------------------------- set  */
+
+/* Available languages are the 18 nn::settings::Language values (0..17) of
+   Horizon 10.1.0, each packed into the NUL terminated LanguageCode string.  The
+   list and the count the service reports are the same length, as the guest
+   caches the list then indexes it by SetLanguage. */
+static const char *const g_set_languages[] = {
+    "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl",
+    "pt", "ru", "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR",
+};
+#define D3_SET_LANGUAGE_COUNT (sizeof g_set_languages / sizeof g_set_languages[0])
+
+static uint64_t set_language_code(size_t index) {
+    uint64_t code = 0;
+    for (size_t i = 0; i < 7 && g_set_languages[index][i] != 0; i++)
+        code |= (uint64_t)(uint8_t)g_set_languages[index][i] << (8 * i);
+    return code;
+}
+
+/* Map descriptors split the address into 32 low, 4 middle and 22 high bits. */
+static uint64_t map_descriptor_size(const uint32_t *word) {
+    return (uint64_t)word[0] | ((uint64_t)((word[2] >> 24) & 0xfu) << 32);
+}
+
+static uint64_t map_descriptor_address(const uint32_t *word) {
+    return (uint64_t)word[1] | ((uint64_t)((word[2] >> 28) & 0xfu) << 32) |
+           ((uint64_t)((word[2] >> 2) & 0x003fffffu) << 36);
+}
+
+/* Write the available LanguageCode list into the guest receive buffer.  A
+   malformed or short descriptor, an out of range address, or a mapping that
+   refuses the write all become a Horizon result, never a host fault. */
+static uint32_t set_write_language_codes(Message *m, size_t wants) {
+    const uint32_t counts = m->w[0] >> 16;
+    const uint32_t send_statics = counts & 0xfu;
+    const uint32_t send_buffers = (counts >> 4) & 0xfu;
+    const uint32_t recv_buffers = (counts >> 8) & 0xfu;
+    const uint32_t exch_buffers = (counts >> 12) & 0xfu;
+    if (send_statics != 0 || send_buffers != 0 || recv_buffers != 1 || exch_buffers != 0 ||
+        m->recv_buffer_count != 1 || m->recv_buffer_slot > MESSAGE_WORDS - 3u ||
+        wants == 0 || wants > D3_SET_LANGUAGE_COUNT) {
+        slog("set cmd=%u: expected one receive map descriptor, counts=%#x", m->command, counts);
+        return D3_RESULT(120, 1);
+    }
+    const uint32_t *word = &m->w[m->recv_buffer_slot];
+    const uint32_t mode = word[2] & 3u;
+    const uint64_t size = map_descriptor_size(word);
+    const uint64_t address = map_descriptor_address(word);
+    const uint64_t needed = (uint64_t)wants * sizeof(uint64_t);
+    if (mode == 2u || size < needed || address == 0 || address > UINTPTR_MAX - needed) {
+        slog("set cmd=%u: descriptor mode=%u size=%#" PRIx64 " address=%#" PRIx64
+             " too small for %#" PRIx64 " bytes", m->command, mode, size, address, needed);
+        return D3_RESULT(120, 1);
+    }
+    uint64_t codes[D3_SET_LANGUAGE_COUNT];
+    for (size_t index = 0; index < wants; index++)
+        codes[index] = set_language_code(index);
+    struct iovec local = { codes, (size_t)needed };
+    struct iovec remote = { (void *)(uintptr_t)address, (size_t)needed };
+    if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != (ssize_t)needed) {
+        slog("set cmd=%u: cannot write language codes to %#" PRIx64 " errno=%d", m->command,
+             address, errno);
+        return D3_RESULT(120, 1);
+    }
+    return 0;
+}
+
+static void set_command(Message *m, uint32_t command) {
+    switch (command) {
+    case 0: { /* GetLanguageCode */
+        const uint64_t code = set_language_code(1);
+        slog("set:GetLanguageCode -> en-US");
+        reply_prepare(m, 0, 2, 0);
+        m->w[m->payload + 4] = (uint32_t)code;
+        m->w[m->payload + 5] = (uint32_t)(code >> 32);
+        reply_send(m);
+        break;
+    }
+    case 5: { /* GetAvailableLanguageCodes2: MapAlias output, not legacy OutPointer. */
+        const uint32_t result = set_write_language_codes(m, D3_SET_LANGUAGE_COUNT);
+        if (result != 0) {
+            reply_result(m, result);
+            break;
+        }
+        slog("set:GetAvailableLanguageCodes2 -> %zu codes, en-US at index 1",
+             (size_t)D3_SET_LANGUAGE_COUNT);
+        reply_prepare(m, 0, 1, 0);
+        m->w[m->payload + 4] = (uint32_t)D3_SET_LANGUAGE_COUNT;
+        reply_send(m);
+        break;
+    }
+    case 2: { /* MakeLanguageCode */
+        const uint32_t language = m->w[m->magic + 4];
+        if (language >= D3_SET_LANGUAGE_COUNT) {
+            slog("set:MakeLanguageCode language=%u out of range -> error", language);
+            reply_result(m, D3_RESULT(120, 2));
+            break;
+        }
+        const uint64_t code = set_language_code(language);
+        slog("set:MakeLanguageCode %u -> %s", language, g_set_languages[language]);
+        reply_prepare(m, 0, 2, 0);
+        m->w[m->payload + 4] = (uint32_t)code;
+        m->w[m->payload + 5] = (uint32_t)(code >> 32);
+        reply_send(m);
+        break;
+    }
+    case 3: /* GetAvailableLanguageCodeCount */
+    case 6: /* GetAvailableLanguageCodeCount2 */
+        slog("set:GetAvailableLanguageCodeCount%s -> %zu", command == 6 ? "2" : "",
+             (size_t)D3_SET_LANGUAGE_COUNT);
+        reply_prepare(m, 0, 1, 0);
+        m->w[m->payload + 4] = (uint32_t)D3_SET_LANGUAGE_COUNT;
+        reply_send(m);
+        break;
+    case 4: /* GetRegionCode */
+        slog("set:GetRegionCode -> 1 (USA)");
+        reply_prepare(m, 0, 1, 0);
+        m->w[m->payload + 4] = 1;
+        reply_send(m);
+        break;
+    default:
+        reply_unsupported(m, "set", command, PORT_SET);
         break;
     }
 }
@@ -1200,6 +1333,9 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
         break;
     case PORT_LOGGER:
         logger_command(&m, m.command);
+        break;
+    case PORT_SET:
+        set_command(&m, m.command);
         break;
     default:
         reply_unsupported(&m, name, m.command, (int)d3_handle_arg(handle));
