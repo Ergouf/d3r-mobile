@@ -635,6 +635,7 @@ typedef struct {
     int iface;
     uint32_t pending; /* queued ReceiveMessage messages not yet consumed */
     int out_of_focus_suspending; /* ISelfController::SetOutOfFocusSuspendingEnabled */
+    int initialized; /* a service object the guest has been told is ready */
 } DomainObject;
 
 static DomainObject g_domain[DOMAIN_SLOTS];
@@ -644,6 +645,11 @@ static DomainObject g_domain[DOMAIN_SLOTS];
    FocusStateChanged (15) and only then continues booting.  Every other object
    starts with an empty queue. */
 #define D3_APPLET_MESSAGE_FOCUS_CHANGED 15u
+
+/* The service object behind pctl's factory commands.  It is a domain object of
+   its own so the guest addresses it by id, but its interface tag is a host-only
+   value kept out of the generated names header. */
+#define D3_IF_PCTL_SERVICE 0x10000
 
 static uint32_t domain_add(uint32_t session, int iface) {
     for (uint32_t index = 0; index < DOMAIN_SLOTS; index++) {
@@ -656,6 +662,7 @@ static uint32_t domain_add(uint32_t session, int iface) {
         object->pending =
             iface == D3_IF_COMMON_STATE_GETTER ? D3_APPLET_MESSAGE_FOCUS_CHANGED : 0u;
         object->out_of_focus_suspending = 0;
+        object->initialized = 0;
         return index + 1;
     }
     slog("domain table is full");
@@ -678,6 +685,7 @@ static void domain_close(uint32_t session, uint32_t id) {
         object->iface = D3_IF_NONE;
         object->pending = 0;
         object->out_of_focus_suspending = 0;
+        object->initialized = 0;
     }
 }
 
@@ -705,6 +713,66 @@ static void domain_set_out_of_focus_suspending(uint32_t session, uint32_t id, in
     DomainObject *object = &g_domain[id - 1];
     if (object->used && object->session == session)
         object->out_of_focus_suspending = enabled;
+}
+
+/* Mark a pctl service object ready.  Factory command 1 (CreateServiceWithout-
+   Initialize) hands out an object the guest then initializes with child command
+   1; factory command 0 hands out one that is already initialized. */
+static void domain_set_initialized(uint32_t session, uint32_t id, int initialized) {
+    if (id == 0 || id > DOMAIN_SLOTS)
+        return;
+    DomainObject *object = &g_domain[id - 1];
+    if (object->used && object->session == session)
+        object->initialized = initialized;
+}
+
+/* pctl (parental controls).  The guest boot path only needs the factory pair: on
+   HOS >= 4 the client sends factory command 1 (CreateServiceWithoutInitialize)
+   with a u64 pid_reserved and a matching pid, then calls the new service object's
+   Initialize (child command 1).  Anything else is left to the regular
+   unimplemented-command reply so a policy getter is never silently accepted. */
+static void pctl_command(Message *m, uint32_t command, uint32_t session) {
+    const uint32_t pid_reserved = m->w[m->magic + 4];
+    const uint32_t pid_high = m->w[m->magic + 5];
+    switch (command) {
+    case 0:
+    case 1: { /* CreateService / CreateServiceWithoutInitialize */
+        const int preinitialized = command == 0;
+        uint32_t object = domain_add(session, D3_IF_PCTL_SERVICE);
+        if (object == 0) {
+            slog("IParentalControlService::%s -> domain table full", "CreateService");
+            reply_domain(m, D3_RESULT(21, 7), 1);
+            break;
+        }
+        /* Factory 0 returns a ready object; factory 1 returns one the guest then
+           initializes (child command 1). */
+        domain_set_initialized(session, object, preinitialized);
+        slog("IParentalControlService factory cmd=%u pid_reserved=%#" PRIx32 "/%#" PRIx32
+             " -> object %u (initialized %d)",
+             command, pid_reserved, pid_high, object, preinitialized);
+        reply_domain_object(m, object);
+        break;
+    }
+    default:
+        slog("IParentalControlService factory cmd=%u -> unsupported", command);
+        unsupported_command(m, D3_IF_PCTL, command);
+        break;
+    }
+}
+
+/* A pctl service object, reached as the object one of the factory commands above
+   handed out. */
+static void pctl_service_command(Message *m, uint32_t command, uint32_t session) {
+    switch (command) {
+    case 1: /* Initialize */
+        domain_set_initialized(session, m->domain_object, 1);
+        slog("IParentalControlService::Initialize -> object %u ready", m->domain_object);
+        reply_domain(m, 0, 1);
+        break;
+    default:
+        unsupported_command(m, D3_IF_PCTL_SERVICE, command);
+        break;
+    }
 }
 
 /* IApplicationProxyService, reached as object 1 of appletOE. */
@@ -986,6 +1054,12 @@ static void domain_command(Message *m, uint32_t handle) {
              m->w[m->magic + 7]);
     }
     switch (iface) {
+    case D3_IF_PCTL:
+        pctl_command(m, m->command, handle);
+        break;
+    case D3_IF_PCTL_SERVICE:
+        pctl_service_command(m, m->command, handle);
+        break;
     case D3_IF_APPLET_OE:
         applet_oe_command(m, m->command, handle);
         break;

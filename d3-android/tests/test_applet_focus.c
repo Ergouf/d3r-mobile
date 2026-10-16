@@ -44,6 +44,14 @@ static int object_out_of_focus_suspending(uint32_t session, uint32_t id) {
     return object->used && object->session == session ? object->out_of_focus_suspending : 0;
 }
 
+/* Read back one object's initialized flag the same way. */
+static int object_initialized(uint32_t session, uint32_t id) {
+    if (id == 0 || id > DOMAIN_SLOTS)
+        return 0;
+    const DomainObject *object = &g_domain[id - 1];
+    return object->used && object->session == session ? object->initialized : 0;
+}
+
 #define MESSAGE_BYTES 0x100
 
 typedef struct {
@@ -131,6 +139,45 @@ static void request_send(uint32_t handle, uint32_t command, uint32_t object, uin
 static void request_send_bool(uint32_t handle, uint32_t command, uint32_t object, uint32_t arg0,
                               uint32_t *result, uint32_t *outarg) {
     request_send_full(handle, 0x130001u, command, object, arg0, result, outarg);
+}
+
+/* A pctl factory request as the guest sends it: the u64 pid_reserved travels in
+   the CMIF payload and the matching process id sits in the special header, so the
+   frame moves to word 8 and the CMIF magic to word 12.  The domain header word is
+   the observed factory value 0x180001. */
+static void request_build_factory(RequestBuffer *request, uint32_t command, uint32_t root) {
+    memset(request, 0, sizeof *request);
+    uint32_t *w = (uint32_t *)request->buffer;
+    w[0] = (uint32_t)(6u | (0xdu << 16));        /* type 6, raw descriptor count 13 */
+    w[1] = 0x80000000u | (16u + 4u + 4u);        /* special header, pid + two data words */
+    w[2] = 1u;                                   /* special header: pid present */
+    w[3] = 1u;                                   /* process id, low word */
+    w[4] = 0u;                                   /* process id, high word */
+    w[8] = 0x00180001u;                          /* domain header: cmd 1, 0x18 data */
+    w[9] = root;                                 /* domain object: the pctl root */
+    w[12] = CMIF_IN;
+    w[13] = 1;
+    w[14] = command;
+    w[15] = 0;                                   /* token */
+    w[16] = 0;                                   /* pid_reserved, low word */
+    w[17] = 0;                                   /* pid_reserved, high word */
+}
+
+/* Send a factory request on a pctl session and return the new object id. */
+static uint32_t pctl_factory(uint32_t handle, uint32_t command, uint32_t root) {
+    RequestBuffer request;
+    request_build_factory(&request, command, root);
+    d3_saved saved = {0};
+    saved.x[0] = (uint64_t)(uintptr_t)&request.buffer;
+    saved.x[2] = handle;
+    d3_svc_send_sync_request_user(&saved);
+    REQUIRE(saved.x[0] == 0);
+    uint32_t result = 0xdeadbeefu, object = 0xdeadbeefu;
+    reply_parse((const uint32_t *)request.buffer, &result, &object);
+    REQUIRE(result == 0);        /* the factory call itself succeeded */
+    REQUIRE(object != 0);        /* a real new child object */
+    REQUIRE(domain_iface(handle, object) == D3_IF_PCTL_SERVICE);
+    return object;
 }
 
 /* Convert one port session to a domain exactly as the guest does: the port
@@ -351,6 +398,55 @@ int main(void) {
     CHECK(domain_iface(session, pctl_root) == D3_IF_NONE);
     CHECK(domain_iface(session2, pctl_root) == D3_IF_NONE);
 
+    /* ---- pctl domain bootstrap (factory 0/1 + child Initialize) ---- */
+
+    /* The pctl root is its own object; its factory commands hand out fresh
+       service objects, never the root and never a fabricated 0. */
+    CHECK(pctl_root != 0);
+
+    /* factory 1 (CreateServiceWithoutInitialize, the HOS >= 4 path): a new object
+       is returned but is not initialized until the child Initialize runs. */
+    uint32_t svc1 = pctl_factory(pctl, 1, pctl_root);
+    CHECK(svc1 != 0 && svc1 != pctl_root);
+    CHECK(object_initialized(pctl, svc1) == 0);
+
+    /* factory 0 (CreateService): a fresh object that is already initialized. */
+    uint32_t svc0 = pctl_factory(pctl, 0, pctl_root);
+    CHECK(svc0 != 0 && svc0 != pctl_root && svc0 != svc1);
+    CHECK(object_initialized(pctl, svc0) == 1);
+
+    /* child Initialize (cmd 1) marks only its own object; the factory 1 object
+       becomes ready, the others keep their previous state, and the root - not a
+       service - is never marked. */
+    request_send(pctl, 1 /* Initialize */, svc1, &result, &arg);
+    CHECK(result == 0);
+    CHECK(object_initialized(pctl, svc1) == 1);
+    CHECK(object_initialized(pctl, svc0) == 1);       /* stays ready */
+    CHECK(object_initialized(pctl, pctl_root) == 0);  /* the root is not a service */
+
+    /* a later child stays uninitialized until its own Initialize, and a repeat
+       Initialize is harmless */
+    uint32_t svc2 = pctl_factory(pctl, 1, pctl_root);
+    CHECK(svc2 != 0 && svc2 != svc1 && svc2 != svc0);
+    CHECK(object_initialized(pctl, svc2) == 0);
+    request_send(pctl, 1, svc2, &result, &arg);
+    CHECK(object_initialized(pctl, svc2) == 1);
+    request_send(pctl, 1, svc2, &result, &arg);
+    CHECK(result == 0 && object_initialized(pctl, svc2) == 1);
+
+    /* unknown commands are still refused, never silently accepted */
+    request_send(pctl, 1032 /* GetSafetyLevel, unimplemented */, svc1, &result, &arg);
+    CHECK(result != 0);
+    request_send(pctl, 7 /* not a factory command */, pctl_root, &result, &arg);
+    CHECK(result != 0);
+
+    /* close clears the flag; a reused slot starts uninitialized */
+    domain_close(pctl, svc1);
+    CHECK(object_initialized(pctl, svc1) == 0);
+    uint32_t svc_reused = domain_add(pctl, D3_IF_PCTL_SERVICE);
+    CHECK(svc_reused == svc1); /* same slot */
+    CHECK(object_initialized(pctl, svc_reused) == 0);
+
     /* ---- ConvertCurrentObjectToDomain when the table is full ---- */
 
     /* No free slot: the conversion must report an error and hand back no object
@@ -384,7 +480,8 @@ int main(void) {
     puts("PASS: applet focus notification is one message per object, objects are "
          "independent, the queue empties after consume, wrong-session pops are "
          "vacuous, close/reset clears it, SetOutOfFocusSuspendingEnabled stores a "
-         "byte-normalized bool per object, and ConvertCurrentObjectToDomain "
-         "returns the actual per-session root id or a real error when full");
+         "byte-normalized bool per object, ConvertCurrentObjectToDomain "
+         "returns the actual per-session root id or a real error when full, and "
+         "pctl factory 0/1 with child Initialize manages per-object state");
     return 0;
 }
