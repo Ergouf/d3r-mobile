@@ -5,9 +5,15 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include <sys/ucontext.h>
 #include "guest_layout.h"
 #include "d3_service.h"
+
+// Android doesn't define SYS_gettid in older API levels, define it manually
+#ifndef SYS_gettid
+#define SYS_gettid __NR_gettid
+#endif
 
 // Global state
 extern uint64_t g_bias;
