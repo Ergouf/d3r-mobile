@@ -461,3 +461,25 @@ I d3gpu: probe: device memory backing=0x6c80000000 virtual=0x6a7fe00000
 注意：`-fvisibility=hidden` + `--exclude-libs,ALL` 让 C++ 符号保持库内私有，
 只有 `d3_gpu_*` 入口是 default 可见性；weak 引用不会从静态库里拉成员，
 所以 `--with-gpu` 必须走强引用宏 `D3_WITH_GPU`。
+
+## 7. Vulkan 实例/设备真机通过（M1 第一步）
+
+`gpu/host/vk_bringup.cpp` 用 Eden 的 `vulkan_common` 走完
+`OpenLibrary → CreateInstance(WindowSystemType::Android) → EnumeratePhysicalDevices
+→ CreateSurface → Vulkan::Device`，真机日志：
+
+```
+I d3gpu: vk: driver=Qualcomm devices=1 surface=0x0
+```
+
+即 Eden 的 Vulkan 初始化路径、Adreno 驱动探测、静态 libc++ 都在 APK 内正常。
+
+两个已踩的坑：
+
+1. `vkCreateAndroidSurfaceKHR` 会解引用窗口指针 —— 无窗口时必须真正 headless，
+   不能把 `VK_NULL_HANDLE` 当窗口去建 surface（会 SIGSEGV 在 libvulkan 里）。
+2. `vk::` 实际是 `Vulkan::vk`；`PhysicalDevice` 构造需要 `{VkPhysicalDevice, InstanceDispatch}`。
+
+下一步 M1 收尾：Java 侧加 `SurfaceView`，JNI 传 `Surface` →
+`ANativeWindow_fromSurface` → `d3_vk_probe(window)` → 建 swapchain →
+清屏 + present，真机截屏验证纯色。

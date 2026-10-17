@@ -79,12 +79,17 @@ extern "C" __attribute__((visibility("default"))) void d3_gpu_set_powered_on(boo
 // device memory backing) and reports it in logcat.  d3_jni.c calls this before
 // the guest starts so a device log proves the C++ runtime and the archive are
 // live inside libd3host.so.
+extern "C" int d3_vk_probe(void* native_window);
 extern "C" __attribute__((visibility("default"))) void d3_gpu_probe_init(void) {
     static Core::System system;
     auto& memory = system.DeviceMemory();
     __android_log_print(ANDROID_LOG_INFO, "d3gpu",
                         "probe: device memory backing=%p virtual=%p", (void*)memory.buffer.BackingBasePointer(),
                         (void*)memory.buffer.VirtualBasePointer());
+
+    // Vulkan bring-up runs headless for now; the swapchain step passes the
+    // ANativeWindow from the Java SurfaceView instead of nullptr.
+    d3_vk_probe(nullptr);
 }
 
 namespace Core {
