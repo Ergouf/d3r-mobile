@@ -1368,3 +1368,19 @@ return;                             /* ← 从不阻塞 */
    - 对事件对象按 timeout 真正等待（复用 `d3_sync` 的事件等待）
    - 返回真实 index，而不是永远 0
 2. 复跑观察 MultiWait 崩溃是否消失
+
+## 76. 句柄校验改变行为：崩溃位置移动
+
+在 `WaitSynchronizationN` 里加了最小校验——**未知句柄不再返回成功**，而是 `0xEA01`。
+真机复跑：
+
+- `WaitSynchronizationN count=1 handle=0x6 name= timeout=-1 -> index 0` 仍然出现
+  （说明 `0x6` 在 host 的 handle 表里有条目，只是名字为空）
+- 崩溃位置改变：`pc_off` 从 `0x34259c` 变为 `0x345d78`，`fault` 从 `0x38`
+  变为 `0x6f13bc2210`（一个看起来像 guest 映射区内的地址）
+
+即：行为已不同，说明这条路径确实影响 guest 的 MultiWait 状态，只是还没修对。
+`fault` 现在是一个"有效形态"的地址却不可访问，方向应从"句柄语义"转向
+"guest 期望的 MultiWait holder 初始化顺序"。
+
+设备包保持可运行（崩溃仍在，但有 dump）。
