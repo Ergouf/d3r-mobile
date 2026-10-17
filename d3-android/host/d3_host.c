@@ -2564,7 +2564,8 @@ typedef struct {
     int signaled;
 } HostEvent;
 
-#define HOST_EVENTS 256
+/* One event slot per handle slot, otherwise events above 0x10FF never get a real object and waits on them silently succeed. */
+#define HOST_EVENTS 0x400
 
 static HostEvent g_events[HOST_EVENTS];
 static pthread_mutex_t g_event_init = PTHREAD_MUTEX_INITIALIZER;
