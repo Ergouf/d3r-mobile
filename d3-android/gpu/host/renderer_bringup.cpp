@@ -196,9 +196,14 @@ extern "C" int d3_gpu_bridge_composite_test(void) {
                                                        static_cast<int>(kHeight)};
         framebuffer.blending = Tegra::BlendMode::Opaque;
 
-        std::vector<Tegra::FramebufferConfig> layers;
-        layers.push_back(framebuffer);
-        g_system->GPU().RequestComposite(std::move(layers), {});
+        // Two submissions: PresentManager records the frame push through the
+        // scheduler, so the callback only runs on the *next* flush.  A single
+        // composite would therefore never reach the present thread.
+        for (int i = 0; i < 2; ++i) {
+            std::vector<Tegra::FramebufferConfig> layers;
+            layers.push_back(framebuffer);
+            g_system->GPU().RequestComposite(std::move(layers), {});
+        }
         const auto& layout = g_window->GetFramebufferLayout();
         RendererReport("composite: %ux%u framebuffer submitted (gpu=%#llx) layout=%ux%u", kWidth, kHeight,
                        (unsigned long long)kGpuFramebuffer, layout.width, layout.height);

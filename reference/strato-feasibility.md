@@ -778,3 +778,26 @@ scheduler worker 实际执行回调）。下一个待查点就是这条队列回
 - `gpu.Start()` 已加入 host 适配层并真机验证（进程存活、各步骤日志齐全）
 - Eden 侧的临时日志已全部回滚（`git -C reference/eden checkout -- ...`）
 - 画面仍是 M1 清屏色；present 线程未消费帧
+
+## 29. 第一帧经 Eden 渲染器上屏（真机截屏）
+
+上一节定位到：`PresentManager::Present` 在 `use_present_thread` 模式下通过
+`scheduler.Record` 入队，回调要等**下一次** flush 才执行；单次 composite 永远
+到不了 present 线程。连续提交两次后，真机截图出现渐变内容：
+
+```
+(1280,480)=(86,134,113)   (1280,544)=(125,135,238)
+(1024,512)=(102,106,105)  (1536,512)=(97,161,90)
+```
+
+证据图：[`d3-android/gpu/probe/m3-composite-2026-10-18.png`](../d3-android/gpu/probe/m3-composite-2026-10-18.png)
+
+也就是 **`RequestComposite → BlitScreen → PresentManager → swapchain.Present` 整条
+链路在真机上跑通**，画面来自我们自己写的 640x360 RGBA framebuffer（不是 M1 的
+纯色清屏）。这是 M3 的"渲染管线就绪"，下一步是让 guest 的命令/帧buffer 驱动它。
+
+## 30. 下一步
+
+1. 把两次提交的 hack 换成正确时机：guest 每帧都会 flush，天然满足"下一次 flush"
+2. pushbuffer → `PushGPUEntries` 接入（GPU 线程已启动）
+3. nvdrv ioctl ↔ 通道 fd 映射
