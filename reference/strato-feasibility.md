@@ -1495,3 +1495,19 @@ x0=0x300 x8=0
 1. 不要等待“调用者自己”的线程句柄（`f == current thread` 时直接返回成功）
 2. `event_wait` 前校验 event 对象指针非空；`thread_wait` 前校验 ThreadStart 指针
 3. 再复跑，确认 guest 侧 `w24` 越界是否彻底消失
+
+## 85. 只等待事件对象后：回到 guest 侧越界崩溃
+
+把 N 形式的等待限定为 `D3_OBJ_EVENT`（线程句柄不再等待，避免等待调用者自己），
+真机结果：
+
+```
+pc_off=0x345d78  fault=0x6e03057210   (guest 映射区)
+```
+
+host libc 崩溃消失，但 guest 的 `w24` 越界崩溃**又回来了**。
+
+结论：`w24` 的坏值不是来自 `WaitSynchronizationN` 的返回值（返回 0 也一样），
+而是来自 `MultiWaitImpl` 自身的 holder 数组/计数状态。下一步必须直接看
+`sdk+0x335c00..0x335d38` 里 `w24` 的完整赋值链（`0x335d38: mov w24, w0` 之前的
+调用是哪个内核封装），才能知道那个 `w0` 到底代表什么。
