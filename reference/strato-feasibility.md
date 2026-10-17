@@ -980,3 +980,35 @@ guest 的 SIGSEGV 同时满足：
 1. 在 host 的 guest 线程创建处打印/清除 `pthread_sigmask`（确认是否屏蔽）
 2. 若是屏蔽，取消对 SIGSEGV 的屏蔽后再复现
 3. 或者用 `set-debug-app -w` + lldb 在启动前附加，绕过信号处理器
+
+## 46. 崩溃根因缩小：guest 主动断言 `Break(0)`（sdk+0x193ad8）
+
+从 dropbox 的 tombstone（`tombstone_17`，pid 18354，线程 `d3-guest`）与 D3Host 日志：
+
+```
+t...: d3_host_table ... bias 6e0e490000
+t...: Break assertion reason=0 arg=... size=4 lr=0x6e0e623ad8 (sdk+0x193ad8)
+E D3Host: guest assertion Break(0) lr=0x6e0e623ad8
+backtrace:
+  #00 abort
+  #01 fail()
+  #02 d3_hle_dispatch+5164
+  #03 <anonymous>
+```
+
+即：guest 执行了 `brk #0`（HVC/break 语义的断言），host 的 Break 处理把它转成
+`fail()` → abort。**不是随机 SIGSEGV，而是 guest 自身的断言失败。**
+
+`lr = sdk+0x193ad8`。用 `sdk.symbols.json` 查最近符号：
+`_ZN2nn2ec6detail15ShowShopPageArg14SetCallbackUrlEPKc` @ 0x193a10（+0xc8），
+但该符号只有 0x?? 大小未知，实际断言点很可能在相邻未导出函数里。
+
+本地已有更新版 sdk 二进制：`reference/extract/exefs_update/sdk.nso0`，
+下一轮可以直接反汇编 `0x193ad8 ± 0x100` 来确认断言位于哪个函数、断言文本是什么。
+
+## 47. 下一步
+
+1. 反汇编 `exefs_update/sdk.nso0` 在 0x193ad8 附近，找 `brk #0` 前的字符串/分支条件
+2. 对照 `d3-service.log` 最后几条 IPC（`GetGpuErrorDetectedSystemEvent` 之后），
+   确认是哪个服务返回错误触发了断言
+3. 补齐对应 HLE（最可能仍是 GPU/nvdrv 初始化相关）

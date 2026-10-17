@@ -2404,6 +2404,14 @@ static void *guest_thread_body(void *param) {
     ThreadStart *start = param;
     install_crash_handler();
     info("thread: start entry=%#" PRIx64 " arg=%#" PRIx64, start->entry, start->arg);
+    {
+        sigset_t mask;
+        if (pthread_sigmask(SIG_SETMASK, 0, &mask) == 0) {
+            info("thread: sigmask segv=%d bus=%d ill=%d abrt=%d", sigismember(&mask, SIGSEGV),
+                 sigismember(&mask, SIGBUS), sigismember(&mask, SIGILL),
+                 sigismember(&mask, SIGABRT));
+        }
+    }
     guest_call(start->entry, start->arg, 0);
     thread_mark_exited(start);
     info("thread: returned");
