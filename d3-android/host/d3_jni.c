@@ -1,16 +1,38 @@
 #include <jni.h>
+#include <android/native_window_jni.h>
 
 #include "d3_host.h"
 
-/* Provided by the Eden GPU port (gpu/host/gpu_host.cpp).  The plain C-only
- * build keeps this weak so it links without the archive; --with-gpu passes
- * -DD3_WITH_GPU to make it a strong reference (a weak one would not pull the
- * archive member out of libeden_gpu.a). */
+/* Provided by the Eden GPU port (gpu/host/gpu_host.cpp / vk_clear.cpp).  The
+ * plain C-only build keeps these weak so it links without the archive;
+ * --with-gpu passes -DD3_WITH_GPU to make them strong references (a weak
+ * undefined symbol would not pull an archive member out of libeden_gpu.a). */
 #ifdef D3_WITH_GPU
 extern void d3_gpu_probe_init(void);
+extern int d3_vk_clear(void *native_window);
+#define D3_GPU_CALL(fn, ...) fn(__VA_ARGS__)
 #else
 extern void d3_gpu_probe_init(void) __attribute__((weak));
+extern int d3_vk_clear(void *native_window) __attribute__((weak));
+#define D3_GPU_CALL(fn, ...)                                                   \
+    do {                                                                       \
+        if (fn != NULL) {                                                      \
+            fn(__VA_ARGS__);                                                   \
+        }                                                                      \
+    } while (0)
 #endif
+
+JNIEXPORT void JNICALL
+Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
+                                                   jobject surface) {
+    (void)activity;
+    ANativeWindow *window = ANativeWindow_fromSurface(env, surface);
+    if (window == NULL) {
+        return;
+    }
+    D3_GPU_CALL(d3_vk_clear, window);
+    ANativeWindow_release(window);
+}
 
 JNIEXPORT void JNICALL
 Java_com_d3mobile_host_MainActivity_nativeStart(JNIEnv *env, jobject activity,

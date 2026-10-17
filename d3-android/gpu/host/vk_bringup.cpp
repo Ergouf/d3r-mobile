@@ -58,11 +58,13 @@ extern "C" __attribute__((visibility("default"))) int d3_vk_probe(void* native_w
         // vkCreateAndroidSurfaceKHR dereferences the window, so a window-less
         // probe must stay headless instead of creating a null surface.
         VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+        Vulkan::vk::SurfaceKHR surface_owner;
         if (native_window) {
             Core::Frontend::EmuWindow::WindowSystemInfo window_info{};
             window_info.type = Core::Frontend::WindowSystemType::Android;
             window_info.render_surface = native_window;
-            raw_surface = *Vulkan::CreateSurface(instance, window_info);
+            surface_owner = Vulkan::CreateSurface(instance, window_info);
+            raw_surface = *surface_owner;
         }
 
         const Vulkan::vk::PhysicalDevice physical{devices[0], dispatch};

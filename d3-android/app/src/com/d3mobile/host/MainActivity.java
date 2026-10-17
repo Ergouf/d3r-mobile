@@ -6,6 +6,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -35,6 +37,12 @@ public class MainActivity extends Activity {
 
     private static final String TAG = "D3Recovery";
 
+    static {
+        // The SurfaceView can be created before the start button runs, so the
+        // native library has to be loadable from the very first callback.
+        System.loadLibrary("d3host");
+    }
+
     /*
      * Canonical app-private data root, as the package manager sees it:
      * /data/user/0/com.d3mobile.host.recovery (the same directory as
@@ -52,6 +60,7 @@ public class MainActivity extends Activity {
     private volatile boolean started = false;
 
     private native void nativeStart(String path);
+    private native void nativePresent(android.view.Surface surface);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -114,6 +123,24 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         statusView = new TextView(this);
         statusView.setTextSize(13);
+        SurfaceView preview = new SurfaceView(this);
+        preview.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override
+            public void surfaceCreated(SurfaceHolder holder) {
+                Log.i(TAG, "surfaceCreated; handing the window to the GPU bridge");
+                nativePresent(holder.getSurface());
+            }
+
+            @Override
+            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {}
+
+            @Override
+            public void surfaceDestroyed(SurfaceHolder holder) {}
+        });
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) (200 * getResources().getDisplayMetrics().density));
+        root.addView(preview, previewParams);
+
         scroll.addView(statusView);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(

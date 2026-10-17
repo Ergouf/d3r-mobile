@@ -483,3 +483,35 @@ I d3gpu: vk: driver=Qualcomm devices=1 surface=0x0
 下一步 M1 收尾：Java 侧加 `SurfaceView`，JNI 传 `Surface` →
 `ANativeWindow_fromSurface` → `d3_vk_probe(window)` → 建 swapchain →
 清屏 + present，真机截屏验证纯色。
+
+## 8. M1 达成：交换链 + 纯色上屏（真机截屏验证）
+
+`MainActivity` 增加 `SurfaceView`，`surfaceCreated` 调
+`nativePresent(holder.getSurface())` → `ANativeWindow_fromSurface` →
+`gpu/host/vk_clear.cpp: d3_vk_clear(window)`，用原始 Vulkan 完成
+「建交换链 → 取图 → 清成固定颜色 → present」。真机日志：
+
+```
+I d3gpu: vk-clear: swapchain 2484x475 format=37 images=4
+I d3gpu: vk-clear: presented image 0 result=0
+```
+
+截屏取样（2560x1600，SurfaceView 中心 x=1280,y=512）：**(40, 88, 209)**，
+与清屏色 `(0.05, 0.35, 0.85)` 一致。证据图：
+[`d3-android/gpu/probe/m1-clear-2026-10-18.png`](../d3-android/gpu/probe/m1-clear-2026-10-18.png)
+
+这一轮又踩了两个坑：
+
+1. **`System.loadLibrary` 必须在静态初始化里**：`SurfaceView` 的
+   `surfaceCreated` 比“点击启动”更早触发，否则 `nativePresent` 抛
+   `UnsatisfiedLinkError`。
+2. **`vk::SurfaceKHR` 是拥有型包装**：`*Vulkan::CreateSurface(...)` 取原始句柄后
+   临时对象立刻析构并销毁 surface，后续 `vkGetPhysicalDeviceSurfaceCapabilitiesKHR`
+   在 libvulkan 里 SIGSEGV。必须让 owner 活到使用结束。
+
+## 9. 下一步（M2）
+
+1. 用 Eden 的 `RendererVulkan`（而不是手写清屏）接 `EmuWindow` 子类，把
+   `SurfaceView` 的 `ANativeWindow` 变成真正的 `render_surface`
+2. `nvdrv` 的 `/dev/nvhost-gpu` ioctl → `GPU::PushGPUEntries` 打通
+3. 把 guest 的 framebuffer 清除/呈现命令翻译成第一次真实绘制
