@@ -946,3 +946,37 @@ host 里有 tracer 机制：`TRACE_PATH = D3_DATA_ROOT "/logs/d3-trace.txt"`，
    改用 host 内置处理器 + 直接写 pc/backtrace 到 `d3-crash.txt`
    （`install_crash_handler` 分支，需要把写文件路径改成可写目录）
 3. 或者用 `set-debug-app -w` + lldb 附加
+
+## 44. 崩溃落盘路径修正（仍未触发）
+
+host 的崩溃写盘路径是：
+
+```c
+#define CRASH_PATH         D3_PRIVATE_ROOT "/files/d3-crash.txt"
+#define CRASH_PATH_FALLBACK D3_PRIVATE_ROOT "/cache/d3-crash.txt"
+#define CRASH_PATH_SDCARD  D3_DATA_ROOT "/logs/d3-crash.txt"
+```
+
+之前的构建只传了 `--sandbox-root`，`D3_PRIVATE_ROOT` 变成
+`.../files/runtime/private`（不存在）。本轮改为显式指定：
+
+```
+--data-root /data/user/0/com.d3mobile.host.recovery/files/runtime
+--private-root /data/user/0/com.d3mobile.host.recovery
+```
+
+重装后跑 autostart，`files/` 下仍**没有** `d3-crash.txt`，说明崩溃处理器
+本身没有被调用（与前面"信号没走到我们的 handler"一致），而不是路径问题。
+
+## 45. 结论与下一步
+
+guest 的 SIGSEGV 同时满足：
+- 我们的 SIGSEGV handler 不执行
+- debuggerd 不生成新 tombstone（最新仍是 02:41:50）
+- tracer 子进程不落盘
+
+这种组合强烈提示崩溃线程**屏蔽了这些信号**（或进程当时已处于不可 dump 状态）。
+下一步建议：
+1. 在 host 的 guest 线程创建处打印/清除 `pthread_sigmask`（确认是否屏蔽）
+2. 若是屏蔽，取消对 SIGSEGV 的屏蔽后再复现
+3. 或者用 `set-debug-app -w` + lldb 在启动前附加，绕过信号处理器
