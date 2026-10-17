@@ -2881,7 +2881,7 @@ static void svc_call(d3_saved *saved, uint32_t id) {
                 g_batch_logs++;
                 info("WaitSynchronizationN count=%d -> timed out", count);
             }
-            set_saved(saved, 0, 0xEA01);
+            set_saved(saved, 0, (uint64_t)-1);
             return;
         }
         if (x[0])
