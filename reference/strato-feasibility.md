@@ -1314,3 +1314,30 @@ pc  sdk+0x33259c  nn::os::... (MultiWaitHolderOfEvent 路径)
    并确保 guest 包装后 `AddToObjectList` 里的 event 非空
 3. 若 SDK 需要 `nn::os::Event::Initialize(handle)` 的可等待对象，则 host 的 handle 表
    必须与 `WaitSynchronizationN` 的 handle 语义严格一致
+
+## 72. 反汇编现场指令：链表遍历返回 null 后解引用
+
+对 `pc = sdk+0x33259c` 反汇编（sdk.nso0）：
+
+```
+0x332578: add x19, x0, #0x1c8
+0x33257c: add x24, x0, #0x250
+0x33258c: mov x0, x19
+0x332590: bl  #0x5259a0        ; 取链表头/节点
+0x332594: cmp x0, x24
+0x332598: b.eq #0x3325c8
+0x33259c: ldr x25, [x0, #0x38] ; ← 崩溃：x0 为 0
+0x3325a8: blr x25              ; 节点 +0x38 是回调
+```
+
+即：`0x5259a0` 返回了 **null**，代码直接读 `[null+0x38]`。这是一个**侵入式链表
+（holder 列表）的遍历**，节点 +0x38 存回调指针。返回 null 说明链表的
+head/next 指针没被初始化 —— 与"MultiWait 持有的 event 未构造"一致。
+
+## 73. 下一步
+
+1. 在 host 侧检查 `GetEventHandle` 返回的 `0x1007` 是否被 SDK 接受了包装：
+   对比 `svcGetInfo(id=16)` 等返回值是否与事件对象相关
+2. 让 `ICommonStateGetter::GetEventHandle` 的事件既在 host handle 表可等待，
+   也让 SDK 侧的 `nn::os::Event` 构造路径能成功（可能要求 `GetInfo`/handle 元数据）
+3. 若 SDK 期望的是"可复位的命名事件"，补 `ClearEvent` 语义
