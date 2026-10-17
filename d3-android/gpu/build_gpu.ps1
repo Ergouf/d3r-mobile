@@ -46,9 +46,30 @@ $files = Get-ChildItem -Path (Join-Path $EdenSrc 'video_core') -Recurse -Filter 
          Where-Object { $p = $_.FullName; -not ($exclude | Where-Object { $p -match $_ }) } |
          ForEach-Object { $_.FullName }
 
+# Eden components the GPU path calls into directly, plus our host adapter.
+$files += @(
+    (Join-Path $EdenSrc 'common\assert.cpp'),
+    (Join-Path $EdenSrc 'common\cityhash.cpp'),
+    (Join-Path $EdenSrc 'common\dynamic_library.cpp'),
+    (Join-Path $EdenSrc 'common\address_space.cpp'),
+    (Join-Path $EdenSrc 'common\page_table.cpp'),
+    (Join-Path $EdenSrc 'common\multi_level_page_table.cpp'),
+    (Join-Path $EdenSrc 'common\fs\file.cpp'),
+    (Join-Path $EdenSrc 'common\fs\fs_util.cpp'),
+    (Join-Path $EdenSrc 'common\host_memory.cpp'),
+    (Join-Path $EdenSrc 'common\settings.cpp'),
+    (Join-Path $EdenSrc 'common\settings_common.cpp'),
+    (Join-Path $EdenSrc 'common\thread.cpp'),
+    (Join-Path $EdenSrc 'core\frontend\emu_window.cpp'),
+    (Join-Path $Eden 'externals\bc_decoder\bc_decoder.cpp'),
+    (Join-Path $Eden 'externals\stb\stb_dxt.cpp')
+)
+$files += Get-ChildItem -Path (Join-Path $Root 'd3-android\gpu\host') -Filter *.cpp -File |
+          ForEach-Object { $_.FullName }
+
 $common = @(
     '--target=aarch64-linux-android34', '-std=c++20', '-c', $Opt,
-    '-D_LIBCPP_ENABLE_EXPERIMENTAL=1', '-fPIC', '-fvisibility=hidden',
+    '-D_LIBCPP_ENABLE_EXPERIMENTAL=1', '-DFMT_HEADER_ONLY', '-fPIC', '-fvisibility=hidden',
     '-I', $Shim,
     '-I', (Join-Path $Third 'Vulkan-Headers\include'),
     '-I', (Join-Path $Third 'Vulkan-Utility-Libraries\include'),
@@ -67,7 +88,7 @@ Write-Host "objects: $($files.Count) translation units"
 $results = $files | ForEach-Object -Parallel {
     $cc  = $using:Clang
     $src = $_
-    $rel = $src.Substring($using:EdenSrc.Length + 1) -replace '[\\/]', '__' -replace '\.cpp$', '.o'
+    $rel = ($src.Substring(3) -replace '[\\/:]', '__') -replace '\.cpp$', '.o'
     $obj = Join-Path $using:ObjRoot $rel
     New-Item -ItemType Directory -Force -Path (Split-Path $obj) | Out-Null
     if ((Test-Path $obj) -and (Get-Item $obj).LastWriteTime -gt (Get-Item $src).LastWriteTime) {

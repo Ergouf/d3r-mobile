@@ -1,0 +1,1450 @@
+[
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_control_flow.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_control_flow.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_not_implemented.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_not_implemented.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_logical.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_logical.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_barriers.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_barriers.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_bitwise_conversion.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_bitwise_conversion.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_integer.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_integer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_convert.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_convert.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_composite.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_composite.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_context_get_set.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_context_get_set.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_floating_point.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_floating_point.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_memory.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_image.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_image.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_undefined.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_undefined.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_barriers.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_barriers.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_shared_memory.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_shared_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_special.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_special.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_select.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_select.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm_warp.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm_warp.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\reg_alloc.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\reg_alloc.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_atomic.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_atomic.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\glasm_emit_context.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\glasm_emit_context.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_bitwise_conversion.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_bitwise_conversion.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_control_flow.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_control_flow.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_composite.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_composite.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glasm\\emit_glasm.cpp",
+    "Rel": "shader_recompiler\\backend\\glasm\\emit_glasm.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_convert.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_convert.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_context_get_set.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_context_get_set.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_integer.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_integer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_floating_point.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_floating_point.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_logical.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_logical.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_memory.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_not_implemented.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_not_implemented.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_image.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_image.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_select.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_select.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_undefined.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_undefined.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_shared_memory.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_shared_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_special.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_special.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_barriers.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_barriers.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl_warp.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl_warp.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_bitwise_conversion.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_bitwise_conversion.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\var_alloc.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\var_alloc.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_composite.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_composite.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_context_get_set.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_context_get_set.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\glsl_emit_context.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\glsl_emit_context.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_atomic.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_atomic.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_control_flow.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_control_flow.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_convert.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_convert.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_floating_point.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_floating_point.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\glsl\\emit_glsl.cpp",
+    "Rel": "shader_recompiler\\backend\\glsl\\emit_glsl.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_image_atomic.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_image_atomic.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_integer.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_integer.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_select.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_select.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_logical.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_logical.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_shared_memory.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_shared_memory.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_undefined.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_undefined.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_memory.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_memory.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_warp.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_warp.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_special.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_special.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\condition.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\condition.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv_image.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv_image.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\spirv_emit_context.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\spirv_emit_context.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/spirv_emit_context.h:11:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\basic_block.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\basic_block.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\opcodes.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\opcodes.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\patch.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\patch.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\microinstruction.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\microinstruction.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\ir_emitter.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\ir_emitter.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\type.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\type.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\post_order.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\post_order.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\backend\\spirv\\emit_spirv.cpp",
+    "Rel": "shader_recompiler\\backend\\spirv\\emit_spirv.cpp",
+    "Ok": false,
+    "Errors": 1,
+    "First": "D:\\workspace\\Diablo\\reference\\eden\\src/shader_recompiler/backend/spirv/emit_spirv_instructions.h:9:10: fatal error: 'sirit/sirit.h' file not found",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\program.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\program.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\ir\\value.cpp",
+    "Rel": "shader_recompiler\\frontend\\ir\\value.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\decode.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\decode.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\opcodes.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\opcodes.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\indirect_branch_table_track.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\indirect_branch_table_track.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\control_flow.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\control_flow.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\translate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\translate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\structured_control_flow.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\structured_control_flow.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\atomic_operations_global_memory.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\atomic_operations_global_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\attribute_memory_to_physical.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\attribute_memory_to_physical.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\atomic_operations_shared_memory.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\atomic_operations_shared_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\barrier_operations.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\barrier_operations.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\bitfield_extract.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\bitfield_extract.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\bitfield_insert.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\bitfield_insert.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\branch_indirect.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\branch_indirect.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate_program.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate_program.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\condition_code_set.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\condition_code_set.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\common_funcs.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\common_funcs.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_compare_and_set.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_compare_and_set.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_fused_multiply_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_fused_multiply_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_min_max.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_min_max.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_set_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_set_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_multiply.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\double_multiply.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\exit_program.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\exit_program.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\find_leading_one.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\find_leading_one.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_compare_and_set.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_compare_and_set.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_compare.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_compare.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_conversion_floating_point.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_conversion_floating_point.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_conversion_integer.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_conversion_integer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_fused_multiply_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_fused_multiply_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_min_max.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_min_max.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_multi_function.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_multi_function.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_multiply.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_multiply.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_range_reduction.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_range_reduction.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_set_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_set_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_swizzled_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\floating_point_swizzled_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_fused_multiply_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_fused_multiply_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_helper.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_helper.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_multiply.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_multiply.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_set_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_set_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_set.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\half_floating_point_set.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\impl.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\impl.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_add_three_input.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_add_three_input.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_compare_and_set.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_compare_and_set.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_compare.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_compare.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_funnel_shift.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_funnel_shift.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_floating_point_conversion.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_floating_point_conversion.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_minimum_maximum.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_minimum_maximum.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_popcount.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_popcount.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_scaled_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_scaled_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_set_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_set_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_shift_left.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_shift_left.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_shift_right.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_shift_right.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_to_integer_conversion.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_to_integer_conversion.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_short_multiply_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\integer_short_multiply_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\internal_stage_buffer_entry_read.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\internal_stage_buffer_entry_read.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_constant.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_constant.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_effective_address.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_effective_address.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_store_attribute.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_store_attribute.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_store_local_shared.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_store_local_shared.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_store_memory.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\load_store_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\logic_operation_three_input.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\logic_operation_three_input.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\logic_operation.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\logic_operation.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_predicate_to_register.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_predicate_to_register.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_register_to_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_register_to_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_special_register.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_special_register.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_register.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\move_register.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\not_implemented.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\not_implemented.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\output_geometry.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\output_geometry.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\pixel_load.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\pixel_load.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\predicate_set_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\predicate_set_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\predicate_set_register.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\predicate_set_register.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\select_source_with_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\select_source_with_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\surface_atomic_operations.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\surface_atomic_operations.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\surface_load_store.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\surface_load_store.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_fetch.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_fetch.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_fetch_swizzled.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_fetch_swizzled.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_gather.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_gather.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_gather_swizzled.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_gather_swizzled.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_gradient.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_gradient.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_load_swizzled.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_load_swizzled.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_mipmap_level.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_mipmap_level.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_load.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_load.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_query.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\texture_query.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_helper.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_helper.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_minimum_maximum.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_minimum_maximum.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_multiply_add.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_multiply_add.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\vote.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\vote.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_set_predicate.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\video_set_predicate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\frontend\\maxwell\\translate\\impl\\warp_shuffle.cpp",
+    "Rel": "shader_recompiler\\frontend\\maxwell\\translate\\impl\\warp_shuffle.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\collect_shader_info_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\collect_shader_info_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\conditional_barrier_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\conditional_barrier_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\constant_propagation_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\constant_propagation_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\dead_code_elimination_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\dead_code_elimination_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\dual_vertex_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\dual_vertex_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\geometry_compaction_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\geometry_compaction_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\global_memory_to_storage_buffer_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\global_memory_to_storage_buffer_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\identity_removal_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\identity_removal_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\layer_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\layer_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\lower_fp64_to_fp32.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\lower_fp64_to_fp32.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\lower_fp16_to_fp32.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\lower_fp16_to_fp32.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\position_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\position_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\lower_int64_to_int32.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\lower_int64_to_int32.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\vendor_workaround_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\vendor_workaround_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\ssa_rewrite_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\ssa_rewrite_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\verification_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\verification_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\rescaling_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\rescaling_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\shader_recompiler\\ir_opt\\texture_pass.cpp",
+    "Rel": "shader_recompiler\\ir_opt\\texture_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  }
+]

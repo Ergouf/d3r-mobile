@@ -413,8 +413,35 @@ generated 69/69 shader headers   （含 convert_msaa_* 的 sint/uint 变体）
 | `post_processing/**`、`present/post_process.cpp` | ReShade 后处理（`effect_module.hpp` 未随仓库分发） |
 | 单独编译 `fidelityfx_fsr.frag` | 无 `#version` 的 include-only 片段，仅供 FSR 引用 |
 
-## 4. 下一步
+## 4. 链接现状（同一轮实测）
 
-1. 把这 119 个 TU 真正 `-c` 编成 `libeden_gpu.a`（验证 codegen 与 ABI）
-2. 在 host 侧实现 `Core::System` 的 8 个成员与 `Core::Memory::Memory`
-3. M1：一条清屏命令流（`GPU::PushGPUEntries` + `RequestComposite`）在真机出纯色
+`libeden_gpu.a` 现在包含 **136 个 TU / 16.4 MB**：119 个 `video_core`、Eden 的
+`core/device_memory*`、`common/{assert,cityhash,dynamic_library,address_space,page_table,
+multi_level_page_table,host_memory,settings,thread}`、`common/fs/{file,fs_util}`、
+`core/frontend/emu_window`、`externals/{bc_decoder,stb_dxt}`，以及我们的宿主适配层
+`gpu/host/{gpu_host,vma_impl}.cpp`。
+
+- **普通 `-shared` 链接已通过**（`libeden_gpu_probe.so`）
+- `-Wl,--no-undefined` 严格链接还剩这些宿主符号（按成本排序）：
+
+| 缺口 | 来源 | 处置 |
+|---|---|---|
+| `Layout::DefaultFrameLayout` | `core/frontend/framebuffer_layout.cpp` | 直接编进来 |
+| `Common::ADPF::*` | `common/adpf.cpp` | 直接编进来（Android 性能提示） |
+| `Common::TimeZone::*` | `common/time_zone.cpp` | 直接编进来 |
+| `Common::Log::Stop` | `common/logging.cpp` | 编进来，或改成我们的原子标志 |
+| `Common::GetLastErrorMsg` | `common/error.cpp` | 编进来 |
+| `Common::FS::{IsFile,...}`、`FS::Android::*` | `common/fs/fs.cpp`、`fs_android.cpp` | 需要把 JNIEnv/JavaVM 暴露给 host（我们本来就是 JNI app） |
+| `Shader::*`（8 个） | `src/shader_recompiler` | **首帧必需**：单独做覆盖率（见下） |
+| `sirit/sirit.h` | 外部 SPIR-V builder | 需克隆（ReinUsesLisp/sirit），20 个 shader_recompiler TU 依赖 |
+
+`shader_recompiler` 语法覆盖实测（同一探针）：**181 个 TU，161 通过，20 个只缺
+`sirit/sirit.h`** —— 也就是说着色器反编译这一整层几乎是零成本接入。
+
+## 5. 下一步
+
+1. 克隆 sirit + 把 `shader_recompiler` 并入构建（预计 181/181）
+2. 补上表里 6 个小依赖，达成 `-Wl,--no-undefined` 的严格链接（M0 完成）
+3. 把 `libeden_gpu.a` 链进 `libd3host.so`（静态 libc++，`-llog`），host 侧
+   `d3_gpu_set_guest_memory()` 绑定 guest RAM
+4. M1：一条清屏命令流（`GPU::PushGPUEntries` + `RequestComposite`）在真机出纯色
