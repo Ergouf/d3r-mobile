@@ -586,3 +586,17 @@ I d3gpu: channel: allocated and initialised (0xb4...)
 2. 把 host 现有 `nvdrv` ioctl 处理接到这套对象上（`/dev/nvhost-gpu` 的
    NvGpuChannel / NvGpuAS fd 与 `channel->bind_id` 对应）
 3. 再谈 `RequestComposite` 真实 framebuffer（需要 GMMU Map + guest RAM）
+
+## 15. M2 探查：空 `PushGPUEntries` 会卡住
+
+在通道初始化成功后追加：
+
+```cpp
+g_system->GPU().PushGPUEntries(channel->bind_id, Tegra::CommandList{});
+```
+
+真机上调用不返回（后续日志不再输出，进程仍存活、无 tombstone），说明空命令列表
+让 GPU 线程进入等待、`SubmitList` 不返回。结论：**不能靠空列表验证提交路径**，
+必须从 nvdrv 的 pushbuffer 路径带真实命令进来。
+
+当前设备包已回退到「渲染器 + 通道初始化」的稳定版本（清屏色在屏、进程存活）。

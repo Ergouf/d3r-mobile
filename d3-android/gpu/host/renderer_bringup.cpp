@@ -14,6 +14,7 @@
 #include "video_core/gpu.h"
 #include "video_core/host1x/host1x.h"
 #include "video_core/control/channel_state.h"
+#include "video_core/dma_pusher.h"
 #include "video_core/memory_manager.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
@@ -55,6 +56,11 @@ extern "C" __attribute__((visibility("default"))) int d3_gpu_channel_test(void) 
         channel->memory_manager = g_address_space.get();
         g_system->GPU().InitChannel(*channel, 0);
         RendererReport("channel: allocated and initialised (%p)", static_cast<void*>(channel.get()));
+
+        // NOTE: GPU::PushGPUEntries(channel->bind_id, Tegra::CommandList{}) was
+        // tried here; the call does not return on device (the GPU thread waits
+        // for work that an empty list never delivers), so real pushbuffer
+        // submission needs to come from the nvdrv path with actual commands.
         return 0;
     } catch (const std::exception& exception) {
         RendererReport("channel: failed: %s", exception.what());
