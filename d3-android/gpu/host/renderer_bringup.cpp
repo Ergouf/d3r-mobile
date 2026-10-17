@@ -137,6 +137,8 @@ extern "C" int d3_gpu_bridge_memtest(void) {
             auto& memory = g_system->ApplicationMemory();
             auto& gmmu = g_system->Host1x().memory_manager;
             const Core::Asid asid = gmmu.RegisterProcess(&memory);
+            // The GMMU asserts unless the device address range was allocated first.
+            gmmu.AllocateFixed(kGpuAddress, 4096);
             gmmu.Map(kGpuAddress, reinterpret_cast<VAddr>(page), 4096, asid);
             mapped = true;
         }
@@ -172,6 +174,7 @@ extern "C" int d3_gpu_bridge_composite_test(void) {
             auto& memory = g_system->ApplicationMemory();
             auto& gmmu = g_system->Host1x().memory_manager;
             const Core::Asid asid = gmmu.RegisterProcess(&memory);
+            gmmu.AllocateFixed(kGpuFramebuffer, kStride * kHeight);
             gmmu.Map(kGpuFramebuffer, reinterpret_cast<VAddr>(pixels), kStride * kHeight, asid);
             mapped = true;
         }

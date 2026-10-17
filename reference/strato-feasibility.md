@@ -855,3 +855,29 @@ t16433: thread: start ... WaitSynchronizationN count=0 -> timed out
    直接在 SIGSEGV 处拿 pc / 调用栈（最可靠）
 2. 或用 `adb bugreport` 取出 tombstone（`/data/tombstones` 需要 root 才能直接读）
 3. 拿到 pc 后用 `reference/d3-symbols` 的符号表换算 guest 偏移
+
+## 37. GMMU 用法修正：`Map` 前必须先 `AllocateFixed`
+
+dropbox 里取到的 tombstone（旧包）显示，之前的一类崩溃其实是**我们自己的 memtest**：
+
+```
+#01 AssertFatalImpl()
+#02 Common::SparseLargeVector<unsigned>::GetAndFault
+#03 Core::DeviceMemoryManager<MaxwellDeviceTraits>::Map(...)
+#04 d3_gpu_bridge_memtest
+```
+
+`DeviceMemoryManager::Map` 假定该 GPU 地址段已由 `Allocate`/`AllocateFixed` 分配；
+直接 `Map(0x100000, ...)` 会触发 `GetAndFault` 断言。已在两处测试代码里补上：
+
+```cpp
+gmmu.AllocateFixed(kGpuAddress, 4096);
+gmmu.Map(kGpuAddress, (VAddr)page, 4096, asid);
+```
+
+## 38. 取证手段确认可用
+
+`adb shell dumpsys dropbox --print` 可以直接拿到 tombstone（不需要 root），
+包含完整寄存器与 backtrace —— 这是后续定位 guest 崩溃的主要手段。
+
+注意：dropbox 里可能残留旧构建的记录，定位时要核对时间戳与 build 路径。
