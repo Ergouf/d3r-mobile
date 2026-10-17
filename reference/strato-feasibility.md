@@ -1284,3 +1284,33 @@ pc 换算到 sdk 偏移：`0x34259c - 0x10000 = 0x33259c`，符号表解析：
    若该对象不是合法的可等待对象，SDK 在登记 holder 时就会解引用空指针
 3. 修复方向：让 `ICommonStateGetter::GetEventHandle` 返回的事件具备完整的可等待语义
    （host 侧 event 对象与 `WaitSynchronization` 的 handle 表一致）
+
+## 70. 崩溃调用链解析（用 dump 里的 lr 序列）
+
+把 dump 中 `r_lr` 序列按 `bias` 换算并查符号表，得到完整链路：
+
+```
+pc  sdk+0x33259c  nn::os::... (MultiWaitHolderOfEvent 路径)
+    sdk+0x3361d0  nn::os::detail::MultiWaitHolderOfEvent::AddToObjectList()+0x20
+    sdk+0x335e50  nn::os::detail::MultiWaitImpl::WaitAnyImpl(bool, TimeSpan)+0x80
+    sdk+0x335b6c  nn::os::detail::MultiWaitImpl::InternalWaitAnyImpl(bool, TimeSpan)+0x5c
+    sdk+0x338464  nn::os::detail::MultiWaitImplByHorizon::WaitSynchronizationN(int,u32*,int,long)+0x24
+    sdk+0x336240  nn::os::detail::MultiWaitHolderOfEvent::RemoveFromObjectList()+0x20
+    sdk+0x20fc44  nn::sf::hipc::client::HipcSimpleClientSessionManagerBase::...::Deallocate(Handle)+0x24
+```
+
+结论：guest 正把某个 **Event holder** 加入 MultiWait 链表（`AddToObjectList`），
+而该 holder 的 event 指针为 **null**，于是读 `null+0x38` 崩溃。
+
+同时链路里出现 `HipcSimpleClientSessionManager::Deallocate`，说明这次等待与
+**会话/句柄释放**交织在一起 —— 很可能是我们把 `GetEventHandle` 返回的句柄
+（如 `0x1007`）当普通内核事件分配，而 SDK 期望的是能包进
+`nn::os::detail::EventType` 的对象，导致 holder 的 event 为空。
+
+## 71. 下一步
+
+1. 对照 `nn::os::Event` 的初始化路径，确认 SDK 需要什么样的 event 对象
+2. 让 `ICommonStateGetter::GetEventHandle` 返回的事件在 host 中具备完整可等待语义，
+   并确保 guest 包装后 `AddToObjectList` 里的 event 非空
+3. 若 SDK 需要 `nn::os::Event::Initialize(handle)` 的可等待对象，则 host 的 handle 表
+   必须与 `WaitSynchronizationN` 的 handle 语义严格一致
