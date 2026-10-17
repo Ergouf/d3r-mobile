@@ -1660,7 +1660,19 @@ static uint64_t hook_abort_impl(uint64_t a, uint64_t b, uint64_t c, uint64_t d) 
     return 0;
 }
 
+static uint64_t hook_assert_failure(uint64_t type, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+    info("OnAssertionFailure type=%" PRIu64, type);
+    log_cstr("assert arg1", a);
+    log_cstr("assert arg2", b);
+    log_cstr("assert arg3", c);
+    log_cstr("assert arg4", d);
+    abort();
+    return 0;
+}
+
 static const GuestHook g_hooks[] = {
+    {0x192600, (void *)hook_assert_failure, "nn::diag::detail::OnAssertionFailure(5 args)"},
+    {0x192750, (void *)hook_assert_failure, "nn::diag::detail::OnAssertionFailure(4 args)"},
     {0x1925e0, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,i)"},
     {0x192500, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,r,f)"},
     {0x1924a0, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,i,r,exc,v)"},
@@ -2911,6 +2923,18 @@ static void svc_call(d3_saved *saved, uint32_t id) {
                         pos += snprintf(text + pos, sizeof text - (size_t)pos, "%c", c);
                     }
                     info("Break x6 string [%s]", text);
+                }
+                {
+                    uint64_t fp = saved->x[29];
+                    for (int frame = 0; frame < 16 && fp != 0 && (fp & 7) == 0; ++frame) {
+                        uint64_t next = *(const uint64_t *)(uintptr_t)fp;
+                        uint64_t lr = *(const uint64_t *)(uintptr_t)(fp + 8);
+                        info("brk frame %d lr=%#" PRIx64 " (%s+%#" PRIx64 ")", frame, lr,
+                             module_of(lr), lr >= g_bias ? lr - g_bias : 0);
+                        if (next <= fp || next - fp > (1u << 22))
+                            break;
+                        fp = next;
+                    }
                 }
                 info("Break assertion reason=%" PRIu64 " arg=%#" PRIx64 " size=%" PRIu64
                     " lr=%#" PRIx64 " (%s+%#" PRIx64 ") x0=%#" PRIx64 " x1=%#" PRIx64

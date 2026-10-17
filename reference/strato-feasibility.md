@@ -1088,3 +1088,20 @@ SDK 的断言/异常统一端点"的判断，而不是业务代码里的 assert 
    AbortImpl 更早，能拿到 assertion type/file/line
 3. 若仍不命中，说明 Break(0) 来自 `os::UserExceptionInfo` 路径（未处理异常处理器），
    下一步 hook `nn::os::detail::...ExceptionHandler`
+
+## 55. 断言 hook 全部未命中；崩溃形态不稳定
+
+- `nn::diag::detail::OnAssertionFailure`（0x192600/0x192750）也装了 hook，**两次运行都没命中**
+- 同一天的其他运行里，guest 有时以 `Break(0)` 结束，有时直接 `signal 11`（进程消失、无 Break 日志）
+  —— 说明崩溃路径**不稳定**，可能有多条失败分支
+
+## 56. Break 现场：已加 x29 帧链打印（待命中）
+
+在 Break 分支里加了 16 层 x29 帧链打印（`brk frame N lr=... (sdk+0x...)`），
+下一次 Break 命中时可以直接读出调用链，不再依赖 lr 单点。
+
+## 57. 下一步
+
+1. 反复运行直到 Break 命中，读 `brk frame` 链
+2. 若命中仍无帧链（x29 被破坏），改用 host 保存的完整寄存器快照 + `/proc/self/maps` 做离线展开
+3. 同时对比 SIGSEGV 形态的 tombstone，判断两种死亡是否同一根因
