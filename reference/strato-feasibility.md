@@ -1169,3 +1169,15 @@ svc ICommonStateGetter::ReceiveMessage -> 15 (FocusStateChanged)
    guest 期望的布局（消息类型 + 必要字段/大小）
 2. 若 FocusStateChanged 不需要负载，也要把 `AppletMessageHolder` 的 size 字段写对
 3. 复跑观察是否越过这条消息
+
+## 62. 强制返回消息的实验：崩溃仍不稳定
+
+把 `ReceiveMessage` 的 `no messages` 分支改成总是返回 15（FocusStateChanged）后复跑：
+
+- 本次运行 guest 在 `GetEventHandle` 之后、`ReceiveMessage` 之前就 `signal 11`
+  （host 没打印任何 `ReceiveMessage` 回复）
+- 说明崩溃点是**时序相关**的，并非固定在某一条 IPC 的返回结构上
+
+综上，当前 guest 的死亡在 `appletOE` 初始化循环里随机出现，下一步需要：
+1. 用 `pprof`/信号采样定位真正的 fault pc（tombstone 里的 pc 更可靠）
+2. 或者把 applet 事件/消息循环按 guest 期望的速度和语义实现，减少竞态
