@@ -114,11 +114,17 @@ void PerfStats::EndGameFrame() {}
 // ---------------------------------------------------------------- GuestMemory
 namespace {
 
+// The guest runs in this process (its ELF is mapped where p_vaddr says), so a
+// guest virtual address is already a host pointer.  An explicit base is only
+// needed if a future loader relocates the image.
 inline u8* GuestPointer(u64 addr, std::size_t size) {
-    if (!g_guest_base || addr > g_guest_size || size > g_guest_size - addr) {
-        return nullptr;
+    if (g_guest_base) {
+        if (addr > g_guest_size || size > g_guest_size - addr) {
+            return nullptr;
+        }
+        return g_guest_base + addr;
     }
-    return g_guest_base + addr;
+    return reinterpret_cast<u8*>(addr);
 }
 
 } // namespace

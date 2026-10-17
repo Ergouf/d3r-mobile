@@ -631,3 +631,29 @@ I d3host: gpu bridge ready, channel=1
 2. 桥里用 GMMU `GetPointer` 读 pushbuffer，组 `Tegra::CommandList` 后
    `PushGPUEntries`（空列表已验证会阻塞，必须带真实命令）
 3. 真实 `FramebufferConfig` + `RequestComposite` 出第一帧
+
+## 18. M2 探查：GPU 可见内存必须来自 `Core::DeviceMemory`
+
+把 guest 地址当作宿主指针（NCE 风格，identity map）后，尝试：
+
+```cpp
+gmmu.RegisterProcess(&app_memory);
+gmmu.Map(0x100000, page_addr_in_process, 4096, asid);
+gmmu.GetPointer<u8>(0x100000);
+```
+
+真机上进程直接死亡（无新日志、无稳定 tombstone 行）。原因在
+`DeviceMemoryManager::Map` 的实现：
+
+```cpp
+auto phys_addr = static_cast<u32>(GetRawPhysicalAddr(ptr) >> page_bits) + 1U;
+```
+
+`GetRawPhysicalAddr` 是 `ptr - physical_base`，而 `physical_base` 是
+`DeviceMemory.buffer`（4 GiB 稀疏 memfd）的基址。传进来的栈页地址不在该窗口内，
+差值溢出成巨大的 `u32`，页表项因此损坏。
+
+结论：**能进 GPU 页表的地址必须坐落在 `Core::DeviceMemory` 的 backing 里**
+（即 nvmap/显存分配要从这块 memfd 划分），不能是任意 malloc/栈地址。
+
+当前设备包稳定（bridge + channel + renderer 均在，清屏色在屏）。

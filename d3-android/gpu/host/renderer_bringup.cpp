@@ -111,3 +111,34 @@ extern "C" int d3_gpu_bridge_start(void* native_window) {
 extern "C" int d3_gpu_bridge_channel_id(void) {
     return g_channel ? g_channel->bind_id : -1;
 }
+// Maps one page of process memory into the GPU address space and checks that
+// the translated pointer aliases the same bytes.  This is the plumbing every
+// pushbuffer and framebuffer read will use.
+extern "C" int d3_gpu_bridge_memtest(void) {
+    if (!g_system || !g_address_space) {
+        RendererReport("memtest: bridge not started");
+        return -1;
+    }
+    static u8 page[4096] __attribute__((aligned(4096)));
+    constexpr u64 kGpuAddress = 0x100000;
+    static bool mapped = false;
+    try {
+        if (!mapped) {
+            auto& memory = g_system->ApplicationMemory();
+            auto& gmmu = g_system->Host1x().memory_manager;
+            const Core::Asid asid = gmmu.RegisterProcess(&memory);
+            gmmu.Map(kGpuAddress, reinterpret_cast<VAddr>(page), sizeof(page), asid);
+            mapped = true;
+        }
+        page[0] = 0x5a;
+        page[1] = 0xa5;
+        const u8* translated = g_system->Host1x().memory_manager.GetPointer<u8>(kGpuAddress);
+        const bool ok = translated && translated[0] == 0x5a && translated[1] == 0xa5;
+        RendererReport("memtest: gpu=%#llx translated=%p ok=%d", (unsigned long long)kGpuAddress,
+                       static_cast<const void*>(translated), ok ? 1 : 0);
+        return ok ? 0 : -2;
+    } catch (const std::exception& exception) {
+        RendererReport("memtest: failed: %s", exception.what());
+        return -3;
+    }
+}
