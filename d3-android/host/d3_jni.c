@@ -80,7 +80,8 @@ static void d3_fault_logger(int sig, siginfo_t *info, void *ctx) {
 
 static void d3_install_fault_logger(void) {
     static int installed = 0;
-    if (installed) {
+    /* Opt-in: replacing ART's handlers changes how Java faults behave. */
+    if (installed || getenv("D3_FAULT_LOG") == NULL) {
         return;
     }
     struct sigaction sa;
