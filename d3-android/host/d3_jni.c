@@ -45,9 +45,10 @@ Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
     if (window == NULL) {
         return;
     }
+    /* M1 fallback: present a solid colour so the surface is never black while
+     * Eden's composite path is still being brought up. */
     D3_GPU_CALL(d3_vk_clear, window);
-    /* Bring Eden's real renderer up on the same surface; the clear above stays
-     * as the visual fallback until composites are driven by the guest. */
+    /* Eden's renderer + address space + channel. */
     D3_GPU_CALL(d3_gpu_renderer_init, window);
     D3_GPU_CALL(d3_gpu_bridge_start, window);
     __android_log_print(ANDROID_LOG_INFO, "d3host", "gpu bridge ready, channel=%d", D3_GPU_CHANNEL_ID());

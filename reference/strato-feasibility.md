@@ -717,3 +717,31 @@ I d3gpu: composite: 640x360 framebuffer submitted (gpu=0x200000)
   `OnFrameDisplayed`、swapchain 的 `Present` 是否只在 `SwapBuffers` 时触发，
   以及 `EmuWindow::OnFrameDisplayed` 是否需要被调用
 - pushbuffer 路径同样受益于异步模式（空列表不再阻塞），可以继续做真实命令提交
+
+## 25. composite 未上屏：排查结果
+
+线程视角确认 Eden 的线程都在跑（`adb shell ps -T`）：
+
+```
+VulkanWorker / VulkanPresent / GPUFencingThrea...
+```
+
+又试了「去掉 M1 的 clear，让渲染器独占 surface」：SurfaceView 变成**纯黑**
+`(0,0,0)`，说明 Eden 的 composite 已提交但没有把内容 present 到窗口（黑帧，
+而不是清屏帧）。恢复 clear + renderer 之后画面回到 `(40,88,209)`。
+
+即：composite → `present_manager.Present(frame)` 这段还没走通（可能卡在
+`swapchain.Present` 的获取/呈现条件，或 blit 输出为空）。下一步需要在
+`vk_blit_screen.cpp` / `vk_present_manager.cpp` 里加点日志，定位帧在哪一步丢失。
+
+## 26. 当前稳定状态（真机验证）
+
+```
+vk-clear: swapchain 2484x475 images=4 / presented result=0
+renderer: Vulkan::RendererVulkan ready (vendor=Qualcomm)
+channel: allocated and initialised
+gpu bridge ready, channel=1
+memtest: gpu=0x100000 translated=0x6c90000000 ok=1
+composite: 640x360 framebuffer submitted (gpu=0x200000)
+截屏中心 (40,88,209)
+```
