@@ -1427,3 +1427,26 @@ x4 = int64 timeout
 
 按正确 ABI 重写 case 0x18：解析 x0..x4，校验 handle 数组，事件真正等待，
 成功写真实 index、失败写 -1 并返回 `0xEA01`。这是下一轮的首要工作。
+
+## 79. 更正上一节的 ABI 判断（host 参数映射其实是对的）
+
+看完整代码后，`case 0x18` 的参数映射是**正确**的：
+
+```c
+uint64_t list = x[1];      /* x1 = Handle* handles */
+int32_t count = (int32_t)x[2];  /* x2 = count */
+if (x[0]) *(int32_t*)x[0] = 0;  /* x0 = s32* out_index */
+```
+
+注释也写明了 `svcWaitSynchronizationN(s32* out_index, Handle* handles, s32 count, bool wait_all, s64 timeout)`。
+所以上一轮"A[0]/x[1] 混用"的推断**不成立**，特此更正。
+
+真正的缺口是：**N 形式从不等待**——校验完句柄后直接写 `index = 0`、返回成功。
+单句柄分支（x[0] 落在 handle 区间时）才会走 `event_wait` / `thread_wait`。
+
+## 80. 下一步（修正后的方案）
+
+1. N 形式也走真实等待：对 `handles[0]` 调 `event_wait` / `thread_wait`，超时用 `x[4]`
+   （`x[3]` 是 `wait_all` 布尔值，不能当超时用——现在日志里 `timeout=-1` 就是误读 x[3]）
+2. 成功写真实 index；失败写 `-1` 并返回 `0xEA01`
+3. 复跑并观察 `w24` 越界是否消失
