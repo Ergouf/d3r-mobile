@@ -881,3 +881,25 @@ gmmu.Map(kGpuAddress, (VAddr)page, 4096, asid);
 包含完整寄存器与 backtrace —— 这是后续定位 guest 崩溃的主要手段。
 
 注意：dropbox 里可能残留旧构建的记录，定位时要核对时间戳与 build 路径。
+
+## 39. 崩溃取证开关：`<data root>/no-handler`
+
+host 的 `install_crash_handler()` 里有一个显式开关：
+
+```c
+static int tombstone_mode(void) {
+    struct stat st;
+    return stat(D3_DATA_ROOT "/no-handler", &st) == 0;
+}
+...
+if (tombstone_mode()) { info("crash handler disabled, using debuggerd"); return; }
+```
+
+- 存在 `no-handler` 文件 → host 不装处理器，交给 debuggerd 出 tombstone
+  （但本机 dropbox 只记录到 02:41:50 为止，之后的 guest 崩溃没有被收录）
+- 不存在 → host 处理器生效，理应打印 trace / 写 dump；当前观察不到任何输出，
+  需要确认 `D3_DATA_ROOT` 的实际编译值（`files/runtime` 只有空的 `logs/`）
+
+本轮结论：guest 的 SIGSEGV 现场目前两条取证通道都不完整（dropbox 无新记录、
+host 处理器无输出）。下一步先把 `D3_DATA_ROOT` 与实际落盘路径对齐，再决定用
+`no-handler`（debuggerd）还是 host 处理器。
