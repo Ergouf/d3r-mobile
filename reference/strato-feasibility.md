@@ -840,3 +840,18 @@ t16433: thread: start ... WaitSynchronizationN count=0 -> timed out
 1. 在 host 的 SVC 分发里给"退出类"系统调用加日志（找到是哪条 SVC / 哪个返回码让流程终止）
 2. 确认退出是否由 guest 主动调用（`svcExitProcess` / `svcExitThread`）触发
 3. 若是主动退出，回溯调用点（符号级）定位 guest 为什么会走到那里
+
+## 35. 信号 11 存在，但我们的 handler 收不到
+
+- `Zygote: Process ... exited due to signal 11 (Segmentation fault)` 明确说明是 SIGSEGV
+- 把 fault logger 临时改为**总是安装**并去掉 `SA_ONSTACK` 后仍然没有任何 `d3fault` 日志
+  → 该信号没有走到我们的处理器：很可能所在线程**屏蔽了 SIGSEGV**，或崩溃发生在
+  信号处理上下文里（嵌套），内核直接按默认动作终止
+- 目前日志只能看到最后一条 `WaitSynchronizationN count=0 -> timed out`
+
+## 36. 下一轮取证方案
+
+1. `adb shell am set-debug-app -w com.d3mobile.host.recovery` 后用 lldb 附加，
+   直接在 SIGSEGV 处拿 pc / 调用栈（最可靠）
+2. 或用 `adb bugreport` 取出 tombstone（`/data/tombstones` 需要 root 才能直接读）
+3. 拿到 pc 后用 `reference/d3-symbols` 的符号表换算 guest 偏移
