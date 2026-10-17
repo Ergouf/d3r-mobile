@@ -903,3 +903,27 @@ if (tombstone_mode()) { info("crash handler disabled, using debuggerd"); return;
 本轮结论：guest 的 SIGSEGV 现场目前两条取证通道都不完整（dropbox 无新记录、
 host 处理器无输出）。下一步先把 `D3_DATA_ROOT` 与实际落盘路径对齐，再决定用
 `no-handler`（debuggerd）还是 host 处理器。
+
+## 40. guest 已走到 GPU 初始化边界（重要）
+
+把 `D3_DATA_ROOT` 对齐到 app 可写目录后
+（`build_host.py --sandbox-root /data/user/0/com.d3mobile.host.recovery/files/runtime`），
+可以从 `files/runtime/data/logs/d3-service.log` 读到完整 IPC 记录。关键尾部：
+
+```
+IApplicationFunctions::GetGpuErrorDetectedSystemEvent -> handle 0x1005
+svc cmif port=appletOE cmd=0 ... words0..15=... 0x1005 ...
+t17669: svc #0x18 (WaitSynchronizationN) count=1 handle=0x6 -> index 0
+<进程 SIGSEGV>
+```
+
+即 guest 已经完成 applet/GPU 错误事件注册，在**等待返回后**的下一条路径上崩溃。
+这比"死在 nvdrv 之前"更精确：它死在 **GPU 初始化刚起步**的位置，还没发出
+`nvdrv::Open`。
+
+## 41. 下一步取证（host 自带 tracer）
+
+host 里有 tracer 机制：`TRACE_PATH = D3_DATA_ROOT "/logs/d3-trace.txt"`，
+由触发文件开启（见 `d3_host.c` 的 tracer 段），能记录致命信号前后的 256 个事件。
+下一步开启 tracer 跑一次 autostart，拿到崩溃前最后几条事件（SVC / IPC），
+再用 `reference/d3-symbols` 换算 guest pc。
