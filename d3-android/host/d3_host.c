@@ -2890,8 +2890,9 @@ static void svc_call(d3_saved *saved, uint32_t id) {
            result.  x3 is wait_all (bool); the timeout is x4.  An infinite
            timeout is capped so a missing signal stalls briefly instead of
            hanging the app. */
-        if (first != 0xFFFFFFFFu && (d3_handle_kind(first) == D3_OBJ_THREAD ||
-                                     d3_handle_kind(first) == D3_OBJ_EVENT)) {
+        /* Skip thread handles here: their object pointers are sometimes stale
+           (fault 0x300 came from a bogus ThreadStart).  Only events are waited. */
+        if (first != 0xFFFFFFFFu && d3_handle_kind(first) == D3_OBJ_EVENT) {
             int64_t wait_timeout = (int64_t)x[4];
             if (wait_timeout < 0)
                 wait_timeout = 2000000;

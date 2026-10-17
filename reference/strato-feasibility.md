@@ -1563,3 +1563,23 @@ if (d3_handle_kind(first) == D3_OBJ_THREAD && d3_handle_arg(first) != 0) {
 当就绪下标。因此 host 必须在**所有**失败路径返回 `-1`，而当前只有
 `count <= 0` 分支改了；`wait_result != 0` 分支仍返回 `index 0 / success`。
 下一步：统一该分支也返回 `-1`，并对事件等待的超时使用真实 `x[4]`。
+
+## 91. 跳过线程等待后仍是 fault 0x300 → 问题在 event 对象指针
+
+把 N 形式改成"只等待事件"（线程句柄完全跳过）后重建复跑：
+
+```
+fault=0x0000000000000300
+pc_off=0x00000003b2b26198   (host libc)
+```
+
+依旧是 `0x300` 这个"小整数当指针"的崩溃，说明问题出在 **event 对象指针本身**：
+`d3_handle_arg(handle)` 对 `D3_OBJ_EVENT` 返回了 0x300 之类的无效值，或者
+`event_wait` 把对象内部偏移当成指针解引用。
+
+## 92. 下一轮
+
+1. 读 `event_wait()` 与 `d3_handle_alloc/arg`：确认 EVENT 对象的 `arg` 存的是
+   `Event*` 还是某个下标/状态值
+2. 修正分配处：EVENT 的 `arg` 必须是对象指针（并做非空校验）
+3. 复跑，观察 0x300 崩溃是否消失、是否回到 guest `0x345d78`
