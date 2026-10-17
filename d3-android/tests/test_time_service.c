@@ -26,6 +26,15 @@
      5. Unknown commands on the root (D3_IF_TIME) and on the child
         (D3_IF_TIME_ZONE) are refused with a non-zero result, never a fake success.
 
+     6. Root CMIF command 20 (GetSharedMemory, [6.0.0+]) must hand back EXACTLY
+        one out handle in the HIPC slot -- a fresh D3_OBJ_SHARED_MEM whose arg is
+        the 0x1000 byte block the SDK maps read-only -- and no out object id and
+        no fabricated success.  This is the request the device got stuck on
+        (`domain time:u object 13 iface 22 cmd 20` -> error 0x278 -> Break0):
+        the SDK's time init asks for this shared memory and aborts when the
+        command is refused.  The root object stays usable afterwards, and a
+        non-domain session gets the same handle in the HIPC slot.
+
      Non-domain note: command 3 on a `time:u` session that has NOT been converted
      to a domain must return a MOVE SESSION handle (an ITimeZoneService session in
      the HIPC handle slot), not a domain object id.
@@ -269,6 +278,35 @@ int main(void) {
     CHECK(domain_iface(session, r.out0) == D3_IF_TIME_ZONE);
     uint32_t zone_b = r.out0;
 
+    /* ---- 6. root cmd 20 (GetSharedMemory) -> one shared-memory handle ---- */
+
+    /* The SDK's time init (libnx _timeGetSharedMemoryNativeHandle) asks the root
+       for the handle to the 0x1000 byte time block.  Exactly one moved handle
+       must arrive in the HIPC slot; it must not also be smuggled into the CMIF
+       out argument as if it were a domain object. */
+    domain_send(session, 20, root, 0, &r);
+    CHECK(r.result == 0);                       /* the method itself succeeds */
+    CHECK(r.domain_reply);                      /* still a domain reply */
+    CHECK(r.special && r.move_handles == 1);    /* exactly one out handle */
+    CHECK(r.handle != 0);                       /* a real allocated handle */
+    CHECK(d3_handle_kind(r.handle) == D3_OBJ_SHARED_MEM);
+    CHECK(d3_handle_arg(r.handle) == D3_TIME_SHARED_MEMORY_BYTES);
+    CHECK(d3_handle_arg(r.handle) == 0x1000);   /* the size the SDK maps */
+    CHECK(r.out0 == 0);                         /* no out object id, no fake id */
+    uint32_t shmem = r.handle;
+
+    /* A second call hands back a fresh handle, and the root stays D3_IF_TIME. */
+    domain_send(session, 20, root, 0, &r);
+    CHECK(r.result == 0 && r.handle != 0);
+    CHECK(r.handle != shmem);
+    CHECK(d3_handle_kind(r.handle) == D3_OBJ_SHARED_MEM);
+    CHECK(domain_iface(session, root) == D3_IF_TIME);
+
+    /* The child object (a TimeZoneService) does not answer GetSharedMemory: only
+       the root owns the block, so the child must refuse it with a real error. */
+    domain_send(session, 20, zone, 0, &r);
+    CHECK(r.result != 0);
+
     /* ---- 3. two sessions are isolated; foreign ids are unreachable; close ---- */
 
     uint32_t root2 = 0;
@@ -340,6 +378,18 @@ int main(void) {
     CHECK(r.handle != plain_session);            /* a new child session, not the caller */
     CHECK(r.out0 == 0);                          /* no extra payload word: the handle is the only out */
 
+    /* A non-domain session's cmd 20 also answers with one handle in the HIPC
+       slot (never a domain object id and never an extra payload word). */
+    Buffer plain_shm;
+    build_plain(&plain_shm, 20, 0);
+    send_buffer(plain_session, &plain_shm, &r);
+    CHECK(r.result == 0);
+    CHECK(!r.domain_reply);
+    CHECK(r.special && r.move_handles == 1);
+    CHECK(r.handle != 0);
+    CHECK(d3_handle_kind(r.handle) == D3_OBJ_SHARED_MEM);
+    CHECK(r.out0 == 0);
+
     /* ---- whole-session close: d3_handle_close frees every slot of the session ---- */
 
     uint32_t root_w = 0;
@@ -404,9 +454,12 @@ int main(void) {
 
     puts("PASS: time:u converts to a D3_IF_TIME root (not iface 0), domain root "
          "cmd 3 hands out exactly one D3_IF_TIME_ZONE child distinct from the root, "
-         "two sessions stay isolated with foreign ids unreachable and closed ids "
+         "root cmd 20 hands back exactly one fresh D3_OBJ_SHARED_MEM out handle of "
+         "0x1000 bytes with no out object id (and the child refuses it), two "
+         "sessions stay isolated with foreign ids unreachable and closed ids "
          "invalid, an exhausted domain table makes cmd 3 return a non-zero error "
          "with no fabricated object id, unknown root/child commands are refused, "
-         "and a non-domain session's cmd 3 returns a move session handle");
+         "and a non-domain session's cmd 3 returns a move session handle while "
+         "cmd 20 returns a shared-memory handle");
     return 0;
 }

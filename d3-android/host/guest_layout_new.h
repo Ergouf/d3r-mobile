@@ -48,11 +48,15 @@ void handle_break_0x26(d3_saved *saved);
 int d3_hle_dispatch(d3_saved *saved, int kind, uint64_t extra);
 
 // Logging macros
+/* Guest threads are real threads now, so every line carries the host tid to
+   make interleaved logs attributable. */
+long d3_host_tid(void);
+
 #define info(fmt, ...) \
-    do { if (g_loud > 0) printf("[D3Host] " fmt "\n", ##__VA_ARGS__); } while(0)
+    do { if (g_loud > 0) printf("[D3Host t%ld] " fmt "\n", d3_host_tid(), ##__VA_ARGS__); } while(0)
 
 #define slog(fmt, ...) \
-    do { if (g_loud > 0) printf("[D3Host] " fmt "\n", ##__VA_ARGS__); } while(0)
+    do { if (g_loud > 0) printf("[D3Host t%ld] " fmt "\n", d3_host_tid(), ##__VA_ARGS__); } while(0)
 
 #define fail(fmt, ...) \
     do { \

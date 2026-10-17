@@ -1,0 +1,954 @@
+[
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\compatible_formats.cpp",
+    "Rel": "video_core\\compatible_formats.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\dirty_flags.cpp",
+    "Rel": "video_core\\dirty_flags.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\framebuffer_config.cpp",
+    "Rel": "video_core\\framebuffer_config.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\fsr.cpp",
+    "Rel": "video_core\\fsr.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_base.cpp",
+    "Rel": "video_core\\renderer_base.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\gpu_thread.cpp",
+    "Rel": "video_core\\gpu_thread.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\cdma_pusher.cpp",
+    "Rel": "video_core\\cdma_pusher.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\dma_pusher.cpp",
+    "Rel": "video_core\\dma_pusher.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\shader_notify.cpp",
+    "Rel": "video_core\\shader_notify.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\macro.cpp",
+    "Rel": "video_core\\macro.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\memory_manager.cpp",
+    "Rel": "video_core\\memory_manager.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\gpu.cpp",
+    "Rel": "video_core\\gpu.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\transform_feedback.cpp",
+    "Rel": "video_core\\transform_feedback.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\shader_cache.cpp",
+    "Rel": "video_core\\shader_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\surface.cpp",
+    "Rel": "video_core\\surface.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\control\\scheduler.cpp",
+    "Rel": "video_core\\control\\scheduler.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\control\\channel_state.cpp",
+    "Rel": "video_core\\control\\channel_state.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\control\\channel_state_cache.cpp",
+    "Rel": "video_core\\control\\channel_state_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\shader_environment.cpp",
+    "Rel": "video_core\\shader_environment.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\engine_upload.cpp",
+    "Rel": "video_core\\engines\\engine_upload.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\buffer_cache\\buffer_cache.cpp",
+    "Rel": "video_core\\buffer_cache\\buffer_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\draw_manager.cpp",
+    "Rel": "video_core\\engines\\draw_manager.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\fermi_2d.cpp",
+    "Rel": "video_core\\engines\\fermi_2d.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\kepler_compute.cpp",
+    "Rel": "video_core\\engines\\kepler_compute.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\kepler_memory.cpp",
+    "Rel": "video_core\\engines\\kepler_memory.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\sw_blitter\\blitter.cpp",
+    "Rel": "video_core\\engines\\sw_blitter\\blitter.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\maxwell_3d.cpp",
+    "Rel": "video_core\\engines\\maxwell_3d.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\frame_gen\\lsfg_translate.cpp",
+    "Rel": "video_core\\frame_gen\\lsfg_translate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\video_core.cpp",
+    "Rel": "video_core\\video_core.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\frame_gen\\lossless_dll.cpp",
+    "Rel": "video_core\\frame_gen\\lossless_dll.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\gpu_logging\\freedreno_debug.cpp",
+    "Rel": "video_core\\gpu_logging\\freedreno_debug.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\sw_blitter\\converter.cpp",
+    "Rel": "video_core\\engines\\sw_blitter\\converter.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\maxwell_dma.cpp",
+    "Rel": "video_core\\engines\\maxwell_dma.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\gpu_logging\\qualcomm_debug.cpp",
+    "Rel": "video_core\\gpu_logging\\qualcomm_debug.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\engines\\puller.cpp",
+    "Rel": "video_core\\engines\\puller.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\gpu_logging\\gpu_state_capture.cpp",
+    "Rel": "video_core\\gpu_logging\\gpu_state_capture.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\host1x\\syncpoint_manager.cpp",
+    "Rel": "video_core\\host1x\\syncpoint_manager.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\host1x\\control.cpp",
+    "Rel": "video_core\\host1x\\control.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\gpu_logging\\gpu_logging.cpp",
+    "Rel": "video_core\\gpu_logging\\gpu_logging.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\host1x\\host1x.cpp",
+    "Rel": "video_core\\host1x\\host1x.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\host1x\\gpu_device_memory_manager.cpp",
+    "Rel": "video_core\\host1x\\gpu_device_memory_manager.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\host1x\\sync_manager.cpp",
+    "Rel": "video_core\\host1x\\sync_manager.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\host1x\\nvdec.cpp",
+    "Rel": "video_core\\host1x\\nvdec.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_null\\renderer_null.cpp",
+    "Rel": "video_core\\renderer_null\\renderer_null.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\fixed_pipeline_state.cpp",
+    "Rel": "video_core\\renderer_vulkan\\fixed_pipeline_state.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_null\\null_rasterizer.cpp",
+    "Rel": "video_core\\renderer_null\\null_rasterizer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\pipeline_statistics.cpp",
+    "Rel": "video_core\\renderer_vulkan\\pipeline_statistics.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\maxwell_to_vk.cpp",
+    "Rel": "video_core\\renderer_vulkan\\maxwell_to_vk.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_blit_screen.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_blit_screen.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\blit_image.cpp",
+    "Rel": "video_core\\renderer_vulkan\\blit_image.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_command_pool.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_command_pool.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_buffer_cache.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_buffer_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_descriptor_buffer.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_descriptor_buffer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\renderer_vulkan.cpp",
+    "Rel": "video_core\\renderer_vulkan\\renderer_vulkan.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_compute_pass.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_compute_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_buffer_cache_base.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_buffer_cache_base.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_descriptor_pool.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_descriptor_pool.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_master_semaphore.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_master_semaphore.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_multi_range_buffer.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_multi_range_buffer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_fence_manager.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_fence_manager.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_compute_pipeline.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_compute_pipeline.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_resource_pool.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_resource_pool.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_present_manager.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_present_manager.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_graphics_pipeline.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_graphics_pipeline.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_render_pass_cache.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_render_pass_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_shader_util.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_shader_util.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_pipeline_cache.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_pipeline_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_state_tracker.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_state_tracker.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_staging_buffer_pool.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_staging_buffer_pool.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_swapchain.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_swapchain.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_scheduler.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_scheduler.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_query_cache.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_query_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\frame_gen_pacer.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\frame_gen_pacer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_update_descriptor.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_update_descriptor.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\filters.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\filters.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_texture_cache.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_texture_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\frame_gen.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\frame_gen.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_rasterizer.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_rasterizer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_texture_cache_base.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_texture_cache_base.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\fsr.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\fsr.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\fxaa.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\fxaa.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_alpha.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_alpha.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\vk_turbo_mode.cpp",
+    "Rel": "video_core\\renderer_vulkan\\vk_turbo_mode.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_beta.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_beta.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_chain.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_chain.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_common.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_common.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_delta.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_delta.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\layer.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\layer.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_gamma.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_gamma.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_generate.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_generate.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_mipmaps.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_mipmaps.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\lsfg_shaders.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\lsfg_shaders.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\sgsr.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\sgsr.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\textures\\astc.cpp",
+    "Rel": "video_core\\textures\\astc.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\textures\\bcn.cpp",
+    "Rel": "video_core\\textures\\bcn.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\smaa.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\smaa.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\textures\\workers.cpp",
+    "Rel": "video_core\\textures\\workers.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\textures\\decoders.cpp",
+    "Rel": "video_core\\textures\\decoders.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\util.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\util.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\decode_bc.cpp",
+    "Rel": "video_core\\texture_cache\\decode_bc.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\format_lookup_table.cpp",
+    "Rel": "video_core\\texture_cache\\format_lookup_table.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\textures\\texture.cpp",
+    "Rel": "video_core\\textures\\texture.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\nsight_aftermath_tracker.cpp",
+    "Rel": "video_core\\vulkan_common\\nsight_aftermath_tracker.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\renderer_vulkan\\present\\window_adapt_pass.cpp",
+    "Rel": "video_core\\renderer_vulkan\\present\\window_adapt_pass.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\accelerated_swizzle.cpp",
+    "Rel": "video_core\\texture_cache\\accelerated_swizzle.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\formatter.cpp",
+    "Rel": "video_core\\texture_cache\\formatter.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\image_base.cpp",
+    "Rel": "video_core\\texture_cache\\image_base.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\image_view_base.cpp",
+    "Rel": "video_core\\texture_cache\\image_view_base.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\vulkan_library.cpp",
+    "Rel": "video_core\\vulkan_common\\vulkan_library.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\vulkan_instance.cpp",
+    "Rel": "video_core\\vulkan_common\\vulkan_instance.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\image_info.cpp",
+    "Rel": "video_core\\texture_cache\\image_info.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\vulkan_debug_callback.cpp",
+    "Rel": "video_core\\vulkan_common\\vulkan_debug_callback.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\vulkan_surface.cpp",
+    "Rel": "video_core\\vulkan_common\\vulkan_surface.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\image_view_info.cpp",
+    "Rel": "video_core\\texture_cache\\image_view_info.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\vulkan_memory_allocator.cpp",
+    "Rel": "video_core\\vulkan_common\\vulkan_memory_allocator.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\util.cpp",
+    "Rel": "video_core\\texture_cache\\util.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\texture_cache\\texture_cache.cpp",
+    "Rel": "video_core\\texture_cache\\texture_cache.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\vulkan_wrapper.cpp",
+    "Rel": "video_core\\vulkan_common\\vulkan_wrapper.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  },
+  {
+    "File": "D:\\workspace\\Diablo\\reference\\eden\\src\\video_core\\vulkan_common\\vulkan_device.cpp",
+    "Rel": "video_core\\vulkan_common\\vulkan_device.cpp",
+    "Ok": true,
+    "Errors": 0,
+    "First": "",
+    "Text": null
+  }
+]

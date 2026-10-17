@@ -1,0 +1,107 @@
+<#
+  Build the Eden GPU subtree (video_core, Vulkan scope) into libeden_gpu.a and
+  report unresolved-symbol counts.  M0 acceptance: the archive builds and its
+  object files only reference the host interface we implement.
+
+  Usage:
+    pwsh -File build_gpu.ps1            # incremental compile + archive
+    pwsh -File build_gpu.ps1 -Clean
+#>
+param(
+    [switch]$Clean,
+    [int]$Throttle = 8,
+    [string]$Opt = '-O1'
+)
+
+$ErrorActionPreference = 'Stop'
+
+$Root    = 'D:\workspace\Diablo'
+$Shim    = Join-Path $Root 'd3-android\gpu\shim'
+$Third   = Join-Path $Root 'd3-android\gpu\third_party'
+$Gen     = Join-Path $Root 'd3-android\gpu\gen\include'
+$Eden    = Join-Path $Root 'reference\eden'
+$EdenSrc = Join-Path $Eden 'src'
+$ObjRoot = Join-Path $Root 'd3-android\build\gpu-obj'
+$Lib     = Join-Path $Root 'd3-android\build\libeden_gpu.a'
+$Bin     = 'D:\workspace\Gdict\android_sdk\ndk\28.2.13676358\toolchains\llvm\prebuilt\windows-x86_64\bin'
+$Clang   = Join-Path $Bin 'clang++.exe'
+$Ar      = Join-Path $Bin 'llvm-ar.exe'
+
+if ($Clean) {
+    Remove-Item -Recurse -Force $ObjRoot -ErrorAction SilentlyContinue
+    Remove-Item -Force $Lib -ErrorAction SilentlyContinue
+}
+
+# Directories that cannot contribute to the first Vulkan frame.
+$exclude = @(
+    '\\renderer_opengl\\',
+    '\\host1x\\codecs\\',
+    '\\host1x\\ffmpeg\.cpp$',
+    '\\host1x\\vic\.cpp$',
+    '\\post_processing\\',
+    '\\present\\post_process\.cpp$'
+)
+
+$files = Get-ChildItem -Path (Join-Path $EdenSrc 'video_core') -Recurse -Filter *.cpp -File |
+         Where-Object { $p = $_.FullName; -not ($exclude | Where-Object { $p -match $_ }) } |
+         ForEach-Object { $_.FullName }
+
+$common = @(
+    '--target=aarch64-linux-android34', '-std=c++20', '-c', $Opt,
+    '-D_LIBCPP_ENABLE_EXPERIMENTAL=1', '-fPIC', '-fvisibility=hidden',
+    '-I', $Shim,
+    '-I', (Join-Path $Third 'Vulkan-Headers\include'),
+    '-I', (Join-Path $Third 'Vulkan-Utility-Libraries\include'),
+    '-I', (Join-Path $Third 'VMA\include'),
+    '-I', $Gen,
+    '-I', (Join-Path $Third 'fmt\include'),
+    '-I', (Join-Path $Third 'boost\boost_1_86_0'),
+    '-I', (Join-Path $Eden 'externals\stb'),
+    '-I', (Join-Path $Eden 'externals\bc_decoder'),
+    '-I', $EdenSrc,
+    '-Wno-ignored-attributes'
+)
+
+Write-Host "objects: $($files.Count) translation units"
+
+$results = $files | ForEach-Object -Parallel {
+    $cc  = $using:Clang
+    $src = $_
+    $rel = $src.Substring($using:EdenSrc.Length + 1) -replace '[\\/]', '__' -replace '\.cpp$', '.o'
+    $obj = Join-Path $using:ObjRoot $rel
+    New-Item -ItemType Directory -Force -Path (Split-Path $obj) | Out-Null
+    if ((Test-Path $obj) -and (Get-Item $obj).LastWriteTime -gt (Get-Item $src).LastWriteTime) {
+        [pscustomobject]@{ Src = $src; Obj = $obj; Ok = $true; Cached = $true; Err = '' }
+        return
+    }
+    $out = @(& $cc @using:common $src -o $obj 2>&1 | ForEach-Object { "$_" })
+    [pscustomobject]@{
+        Src = $src; Obj = $obj; Ok = ($LASTEXITCODE -eq 0); Cached = $false
+        Err = ($out | Where-Object { $_ -match 'error:' } | Select-Object -First 1)
+    }
+} -ThrottleLimit $Throttle
+
+$failed = @($results | Where-Object { -not $_.Ok })
+$built  = @($results | Where-Object { $_.Ok })
+Write-Host ("compiled {0}/{1} (cached {2})" -f $built.Count, $results.Count, @($built | Where-Object Cached).Count)
+if ($failed.Count) {
+    $failed | Select-Object -First 15 Src, Err | Format-Table -AutoSize -Wrap
+    throw "$($failed.Count) translation units failed"
+}
+
+$objs = $built | ForEach-Object { $_.Obj }
+& $Ar rcs $Lib @objs
+if ($LASTEXITCODE -ne 0) { throw "llvm-ar failed" }
+
+Write-Host ""
+Write-Host ("archive: {0} ({1:N1} MB)" -f $Lib, ((Get-Item $Lib).Length / 1MB))
+Write-Host ""
+Write-Host "== undefined symbols (grouped by namespace prefix) =="
+$nm = Join-Path $Bin 'llvm-nm.exe'
+& $nm -u --demangle $Lib 2>$null |
+    ForEach-Object { ($_ -replace '^\s+U\s+', '').Trim() } |
+    Where-Object { $_ } |
+    ForEach-Object {
+        if ($_ -match '^(Core|Tegra|VideoCore|Common|Settings|Shader|FFmpeg|Vulkan)::') { $Matches[1] + '::' } else { 'extern "C" / std' }
+    } |
+    Group-Object | Sort-Object Count -Descending | Select-Object Count, Name | Format-Table -AutoSize

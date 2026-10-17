@@ -2,12 +2,15 @@
 #include "d3_sync.h"
 #include "d3_service.h"
 
+#include <android/log.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+#define sync_log(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "D3Host", fmt, ##__VA_ARGS__)
 
 enum {
     SYNC_INVALID_ADDRESS = 0xcc01,
@@ -159,8 +162,10 @@ uint32_t d3_sync_lock(uint32_t owner, uint32_t *mutex, uint32_t tag) {
     } else if (!sync_owner(owner)) {
         result = SYNC_INVALID_HANDLE;
     } else {
+        sync_log("sync: lock %p tag=%u blocks", (void *)mutex, tag);
         sync_append(&waiter);
         result = sync_sleep(&waiter, 0);
+        sync_log("sync: lock %p woke result=%#x", (void *)mutex, result);
     }
     pthread_mutex_unlock(&g_sync_lock);
     pthread_cond_destroy(&waiter.ready);
@@ -174,6 +179,7 @@ uint32_t d3_sync_unlock(uint32_t *mutex, uint32_t tag) {
     if (!sync_tag(tag))
         return SYNC_INVALID_HANDLE;
     pthread_mutex_lock(&g_sync_lock);
+    sync_log("sync: unlock %p tag=%u", (void *)mutex, tag);
     if ((__atomic_load_n(mutex, __ATOMIC_ACQUIRE) & ~D3_SYNC_WAIT_MASK) != tag)
         result = SYNC_INVALID_STATE;
     else
@@ -214,9 +220,11 @@ uint32_t d3_sync_wait(uint32_t *mutex, uint32_t *key, uint32_t tag, int64_t time
         if (timeout == 0) {
             result = D3_SYNC_TIMED_OUT;
         } else {
+            sync_log("sync: wait %p blocks timeout=%" PRId64, (void *)key, timeout);
             sync_append(&waiter);
             /* Horizon leaves the mutex unowned on timeout. The SDK reacquires it. */
             result = sync_sleep(&waiter, timeout < 0 ? 0 : &deadline);
+            sync_log("sync: wait %p woke result=%#x", (void *)key, result);
         }
     }
     pthread_mutex_unlock(&g_sync_lock);

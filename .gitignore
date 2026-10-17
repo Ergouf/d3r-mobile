@@ -44,3 +44,11 @@ temp/
 cache/
 .git/
 
+
+# Vendored third-party checkouts and extracted game data stay local.
+reference/eden/
+reference/extract/
+reference/d2r-mobile/
+d3-android/gpu/third_party/
+d3-android/gpu/gen/
+d3-android/gpu/probe/.spv_tmp/

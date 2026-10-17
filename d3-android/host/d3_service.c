@@ -32,7 +32,7 @@
 
 enum {
     PORT_NONE = 0, PORT_SM, PORT_FSP, PORT_LM, PORT_LOGGER, PORT_OFFLINE,
-    PORT_UNKNOWN, PORT_SET, PORT_TIME, PORT_TIME_ZONE
+    PORT_UNKNOWN, PORT_SET, PORT_TIME, PORT_TIME_ZONE, PORT_NVDRV, PORT_VI_MGR, PORT_VI_APP
 };
 
 #define HANDLE_SLOTS 0x400
@@ -105,6 +105,11 @@ void d3_service_dump(const char *what, uint64_t address, const void *data, size_
 typedef struct {
     int kind;
     uint64_t arg;
+    /* Identity of the session's domain-object table.  CloneCurrentObject returns
+       a second handle to the same session, and the guest then sends its domain
+       messages through whichever clone it likes, so domain objects are keyed by
+       this and not by the raw handle value. */
+    uint32_t domain_key;
     char name[NAME_CHARS];
 } Object;
 
@@ -140,6 +145,7 @@ uint32_t d3_handle_alloc(int kind, const char *name, uint64_t arg) {
             continue;
         object->kind = kind;
         object->arg = arg;
+        object->domain_key = D3_HANDLE_FIRST + index;
         snprintf(object->name, NAME_CHARS, "%s", name != 0 ? name : "");
         return D3_HANDLE_FIRST + index;
     }
@@ -162,6 +168,12 @@ uint64_t d3_handle_arg(uint32_t handle) {
     return object != 0 ? object->arg : 0;
 }
 
+/* The domain-object table this handle addresses; clones of one session share it. */
+uint32_t d3_handle_domain_key(uint32_t handle) {
+    Object *object = object_of(handle);
+    return object != 0 ? object->domain_key : handle;
+}
+
 void d3_handle_set_arg(uint32_t handle, uint64_t arg) {
     Object *object = object_of(handle);
     if (object != 0)
@@ -180,6 +192,7 @@ int d3_handle_close(uint32_t handle) {
         domain_close_session(handle);
     g_obj[index].kind = D3_OBJ_NONE;
     g_obj[index].arg = 0;
+    g_obj[index].domain_key = 0;
     g_obj[index].name[0] = 0;
     return 0;
 }
@@ -205,6 +218,10 @@ static int port_kind(const char *name) {
         return PORT_LM;
     if (strcmp(name, "set") == 0 || strcmp(name, "set:") == 0)
         return PORT_SET;
+    if (strcmp(name, "nvdrv") == 0)
+        return PORT_NVDRV;
+    if (strncmp(name, "vi:", 3) == 0)
+        return PORT_VI_MGR;
     if (strcmp(name, "time:u") == 0)
         return PORT_TIME;
     if (strcmp(name, "ITimeZoneService") == 0)
@@ -219,6 +236,11 @@ static int port_kind(const char *name) {
     }
     return PORT_UNKNOWN;
 }
+
+/* Host-only tags for interfaces the generated table does not name yet. */
+#define D3_IF_NVDRV 0x10003
+#define D3_IF_VI_MANAGER 0x10004
+#define D3_IF_VI_APP 0x10005
 
 /* Which interface object id 1 of a converted session stands for. */
 static int port_iface(const char *name) {
@@ -242,6 +264,10 @@ static int port_iface(const char *name) {
         return D3_IF_TIME;
     if (strcmp(name, "ITimeZoneService") == 0)
         return D3_IF_TIME_ZONE;
+    if (strcmp(name, "nvdrv") == 0)
+        return D3_IF_NVDRV;
+    if (strncmp(name, "vi:", 3) == 0)
+        return D3_IF_VI_MANAGER;
     return D3_IF_NONE;
 }
 
@@ -550,6 +576,12 @@ static void control_command(Message *m, uint32_t command, uint32_t handle) {
         slog("control %s CloneCurrentObject", name);
         {
             uint32_t clone = d3_handle_alloc(D3_OBJ_SESSION, name, d3_handle_arg(handle));
+            if (clone != 0) {
+                Object *parent = object_of(handle);
+                Object *child = object_of(clone);
+                if (parent != 0 && child != 0)
+                    child->domain_key = parent->domain_key;
+            }
             if (clone == 0) {
                 reply_result(m, D3_RESULT(21, 7));
                 break;
@@ -802,6 +834,7 @@ typedef struct {
     int used;
     uint32_t session;
     int iface;
+    uint64_t arg; /* interface-private state (an index into g_files for IFile) */
     uint32_t pending; /* queued ReceiveMessage messages not yet consumed */
     int out_of_focus_suspending; /* ISelfController::SetOutOfFocusSuspendingEnabled */
     int initialized; /* a service object the guest has been told is ready */
@@ -826,7 +859,7 @@ static uint32_t domain_add(uint32_t session, int iface) {
         if (object->used)
             continue;
         object->used = 1;
-        object->session = session;
+        object->session = d3_handle_domain_key(session);
         object->iface = iface;
         object->pending =
             iface == D3_IF_COMMON_STATE_GETTER ? D3_APPLET_MESSAGE_FOCUS_CHANGED : 0u;
@@ -842,14 +875,14 @@ static int domain_iface(uint32_t session, uint32_t id) {
     if (id == 0 || id > DOMAIN_SLOTS)
         return D3_IF_NONE;
     DomainObject *object = &g_domain[id - 1];
-    return object->used && object->session == session ? object->iface : D3_IF_NONE;
+    return object->used && object->session == d3_handle_domain_key(session) ? object->iface : D3_IF_NONE;
 }
 
 static void domain_close(uint32_t session, uint32_t id) {
     if (id == 0 || id > DOMAIN_SLOTS)
         return;
     DomainObject *object = &g_domain[id - 1];
-    if (object->used && object->session == session) {
+    if (object->used && object->session == d3_handle_domain_key(session)) {
         object->used = 0;
         object->iface = D3_IF_NONE;
         object->pending = 0;
@@ -859,6 +892,13 @@ static void domain_close(uint32_t session, uint32_t id) {
 }
 
 static void domain_close_session(uint32_t session) {
+    /* Clones share one object table, so only the last handle to close drops it. */
+    uint32_t key = d3_handle_domain_key(session);
+    for (uint32_t index = 0; index < HANDLE_SLOTS; index++) {
+        if (g_obj[index].kind != D3_OBJ_NONE && g_obj[index].domain_key == key &&
+            D3_HANDLE_FIRST + index != session)
+            return;
+    }
     for (uint32_t id = 1; id <= DOMAIN_SLOTS; id++)
         domain_close(session, id);
 }
@@ -871,7 +911,7 @@ static uint32_t domain_take_pending(uint32_t session, uint32_t id) {
     if (id == 0 || id > DOMAIN_SLOTS)
         return 0;
     DomainObject *object = &g_domain[id - 1];
-    if (!object->used || object->session != session)
+    if (!object->used || object->session != d3_handle_domain_key(session))
         return 0;
     uint32_t message = object->pending;
     object->pending = 0;
@@ -885,7 +925,7 @@ static void domain_set_out_of_focus_suspending(uint32_t session, uint32_t id, in
     if (id == 0 || id > DOMAIN_SLOTS)
         return;
     DomainObject *object = &g_domain[id - 1];
-    if (object->used && object->session == session)
+    if (object->used && object->session == d3_handle_domain_key(session))
         object->out_of_focus_suspending = enabled;
 }
 
@@ -896,7 +936,7 @@ static void domain_set_initialized(uint32_t session, uint32_t id, int initialize
     if (id == 0 || id > DOMAIN_SLOTS)
         return;
     DomainObject *object = &g_domain[id - 1];
-    if (object->used && object->session == session)
+    if (object->used && object->session == d3_handle_domain_key(session))
         object->initialized = initialized;
 }
 
@@ -1087,6 +1127,10 @@ static void common_state_getter_command(Message *m, uint32_t command, uint32_t s
         m->w[m->payload + 4] = 0;
         reply_send(m);
         break;
+    case 0x42: /* SetCpuBoostMode(int): a clock hint the host has no use for. */
+        slog("ICommonStateGetter::SetCpuBoostMode(%d) -> ok", (int)m->w[m->magic + 4]);
+        reply_domain(m, 0, 1);
+        break;
     case 9:
         slog("ICommonStateGetter::GetCurrentFocusState -> in focus");
         reply_prepare(m, 0, 2, 1);
@@ -1207,29 +1251,420 @@ static void debug_functions_command(Message *m, uint32_t command) {
     reply_domain(m, 0, 1);
 }
 
+/* [6.0.0+] The service owns one 0x1000 byte shared memory (steady clock time
+   points and system clock contexts) and hands callers a native handle to it.
+   libnx maps exactly this size (nx/source/services/time.c), and the SDK asks for
+   the handle with command 20. */
+#define D3_TIME_SHARED_MEMORY_BYTES 0x1000u
+
 static void time_service_command(Message *m, uint32_t command, uint32_t session) {
-    if (command != 3) {
+    switch (command) {
+    case 3:
+        if (m->domain) {
+            uint32_t object = domain_add(session, D3_IF_TIME_ZONE);
+            slog("ITimeService::GetTimeZoneService -> object %u", object);
+            if (object == 0)
+                reply_domain(m, D3_RESULT(21, 7), 1);
+            else
+                reply_domain_object(m, object);
+            return;
+        }
+        {
+            uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "ITimeZoneService", PORT_TIME_ZONE);
+            slog("ITimeService::GetTimeZoneService -> session %#x", handle);
+            if (handle == 0) {
+                reply_result(m, D3_RESULT(21, 7));
+                return;
+            }
+            reply_prepare(m, 1, 0, 0);
+            m->w[m->handle_slot_out] = handle;
+            reply_send(m);
+        }
+        return;
+    case 20: {
+        /* GetSharedMemory: a native handle to the read-only time block, which the
+           caller maps with MapSharedMemory.  The block is not backed by a real
+           clock yet, so the caller reads zeros (the epoch plus its own steady
+           tick); the handle is what carries the SDK's time init past this point.
+           An out handle is never a domain object, so a domain session still puts
+           it in the HIPC slot. */
+        uint32_t handle = d3_handle_alloc(D3_OBJ_SHARED_MEM, "time-shmem",
+                                          D3_TIME_SHARED_MEMORY_BYTES);
+        slog("ITimeService::GetSharedMemory -> handle %#x", handle);
+        if (handle == 0) {
+            if (m->domain)
+                reply_domain(m, D3_RESULT(21, 7), 1);
+            else
+                reply_result(m, D3_RESULT(21, 7));
+            return;
+        }
+        if (m->domain) {
+            reply_domain_handle(m, handle);
+        } else {
+            reply_prepare(m, 1, 0, 0);
+            m->w[m->handle_slot_out] = handle;
+            reply_send(m);
+        }
+        return;
+    }
+    default:
         unsupported_command(m, D3_IF_TIME, command);
         return;
     }
-    if (m->domain) {
-        uint32_t object = domain_add(session, D3_IF_TIME_ZONE);
-        slog("ITimeService::GetTimeZoneService -> object %u", object);
-        if (object == 0)
+}
+
+/* fssrv::sf::IFileSystem.  Command 1 is OpenFile, which carries a path such as
+   "data:/CPKs/Common.cpk"; the rest are scalar queries.  Files are addressed by
+   object id afterwards, so IFile gets its own interface tag. */
+
+/* IFile is addressed by object id once OpenFile hands one out, so it needs its
+   own interface tag.  The data itself lives on the host: paths arrive as
+   "data:/..." and resolve under D3_DATA_ROOT/romfs. */
+#define D3_IF_FILE 0x10002
+
+typedef struct {
+    int used;
+    int fd;
+    uint64_t size;
+    uint64_t offset;
+} HostFile;
+
+static HostFile g_files[32];
+
+/* Game data cannot live in the APK (13 GB of CPKs), so it is staged on the
+   device and the first readable copy wins.  /data/local/tmp is the only place
+   adb can push to that the app may also read. */
+static const char *const g_romfs_roots[] = {
+    "/data/local/tmp/d3romfs",
+    D3_DATA_ROOT "/romfs",
+};
+
+static int host_file_open(const char *path) {
+    char host[512];
+    const char *name = path;
+    int fd = -1;
+    if (strncmp(name, "data:", 5) == 0)
+        name += 5;
+    while (*name == '/')
+        name++;
+    if (*name == 0)
+        return -1;
+    for (size_t root = 0; root < sizeof g_romfs_roots / sizeof g_romfs_roots[0]; root++) {
+        snprintf(host, sizeof host, "%s/%s", g_romfs_roots[root], name);
+        fd = open(host, O_RDONLY);
+        if (fd >= 0)
+            break;
+    }
+    if (fd < 0) {
+        slog("fs: open %s failed errno %d", name, errno);
+        return -1;
+    }
+    for (int index = 0; index < (int)(sizeof g_files / sizeof g_files[0]); index++) {
+        if (g_files[index].used)
+            continue;
+        struct stat info;
+        if (fstat(fd, &info) != 0) {
+            close(fd);
+            return -1;
+        }
+        g_files[index].used = 1;
+        g_files[index].fd = fd;
+        g_files[index].size = (uint64_t)info.st_size;
+        g_files[index].offset = 0;
+        slog("fs: opened %s (%llu bytes)", host, (unsigned long long)info.st_size);
+        return index;
+    }
+    close(fd);
+    return -1;
+}
+
+/* Extract the first path-looking printable run from a request buffer. */
+static int message_path(const Message *m, char *out, size_t size) {
+    const unsigned char *bytes = (const unsigned char *)m->w;
+    char run[256];
+    size_t used = 0;
+    for (size_t index = 0; index < 0x1000; index++) {
+        unsigned char byte = bytes[index];
+        if (byte >= 0x20 && byte < 0x7f) {
+            if (used < sizeof run - 1)
+                run[used++] = (char)byte;
+        } else {
+            run[used] = 0;
+            if (used >= 6 && strchr(run, ':') != 0 && strchr(run, '/') != 0 &&
+                strncmp(run, "SFCI", 4) != 0 && strncmp(run, "SFCO", 4) != 0) {
+                snprintf(out, size, "%s", run);
+                return 0;
+            }
+            used = 0;
+        }
+    }
+    return -1;
+}
+
+static void fsp_srv_command(Message *m, uint32_t command, uint32_t session) {
+    slog("fsp-srv command %u", command);
+    switch (command) {
+    case 1: { /* OpenFile(path, mode) -> an IFile domain object */
+        char path[256];
+        int file = message_path(m, path, sizeof path) == 0 ? host_file_open(path) : -1;
+        if (file < 0) {
+            reply_domain(m, 0x7D402u, 1);
+            break;
+        }
+        uint32_t object = domain_add(session, D3_IF_FILE);
+        if (object == 0) {
+            close(g_files[file].fd);
+            g_files[file].used = 0;
+            reply_domain(m, D3_RESULT(21, 7), 1);
+            break;
+        }
+        g_domain[object - 1].arg = (uint64_t)file;
+        slog("fsp-srv OpenFile -> object %u", object);
+        reply_domain_object(m, object);
+        break;
+    }
+    case 1005:
+    case 1011: { /* free/total space query: report a roomy card, which is what
+                    nn::fs::QueryMountRomCacheSize sizes the romfs cache from */
+        uint64_t size = 0x40000000ull;
+        reply_prepare(m, 0, 4, 1);
+        memcpy(&m->w[m->payload + 4], &size, sizeof size);
+        reply_send(m);
+        break;
+    }
+    default:
+        /* The IFileSystem command set is not recovered yet.  A success reply
+           without the out object nn::fs expects only reaches an assertion, so
+           answer with a real fs result instead: MAKERESULT(2, 1002) is what the
+           SDK itself checks for "path not found", which callers can handle. */
+        slog("fsp-srv cmd=%u -> fs not-found", command);
+        reply_domain(m, 0x7D402u, 1);
+        break;
+    }
+}
+
+static void file_command(Message *m, uint32_t command, uint32_t session) {
+    (void)session;
+    int index = -1;
+    if (m->domain_object >= 1 && m->domain_object <= DOMAIN_SLOTS) {
+        DomainObject *object = &g_domain[m->domain_object - 1];
+        if (object->used && object->iface == D3_IF_FILE)
+            index = (int)object->arg;
+    }
+    if (index < 0 || index >= (int)(sizeof g_files / sizeof g_files[0])) {
+        unsupported_command(m, D3_IF_FILE, command);
+        return;
+    }
+    HostFile *file = &g_files[index];
+    switch (command) {
+    case 0: /* Read: no data served yet, report end of file */
+        slog("IFile::Read -> 0");
+        reply_prepare(m, 0, 2, 1);
+        m->w[m->payload + 4] = 0;
+        reply_send(m);
+        break;
+    case 2: /* Flush */
+    case 3: /* SetSize */
+        slog("IFile cmd %u -> ok", command);
+        reply_domain(m, 0, 1);
+        break;
+    case 4: /* GetSize */
+        slog("IFile::GetSize -> %llu", (unsigned long long)file->size);
+        reply_prepare(m, 0, 4, 1);
+        memcpy(&m->w[m->payload + 4], &file->size, sizeof file->size);
+        reply_send(m);
+        break;
+    default:
+        unsupported_command(m, D3_IF_FILE, command);
+        break;
+    }
+}
+
+/* nv::nvdrv::INvDrvServices (the private "nvdrv" port).  Device fds are only
+   bookkeeping for now: the ioctls that would configure a channel are accepted
+   so the SDK can finish graphics initialisation and reveal what it asks for. */
+static uint32_t nvdrv_next_fd = 0x100;
+
+/* A service command may arrive on a plain session or on a domain object; the
+   reply shape differs, so route through one helper. */
+static void reply_ok(Message *m, uint32_t params) {
+    if (m->domain)
+        reply_domain(m, 0, params);
+    else
+        reply_result(m, 0);
+}
+
+static void nvdrv_command(Message *m, uint32_t command, uint32_t session) {
+    (void)session;
+    switch (command) {
+    case 0: { /* Open(path, Out<fd>) */
+        /* The path usually arrives through a mapped buffer, so the request words
+           hold a guest pointer rather than the text itself. */
+        const size_t limit = m->magic + 8u < MESSAGE_WORDS ? m->magic + 8u : MESSAGE_WORDS;
+        for (size_t index = 0; index < limit; index++) {
+            const uint64_t word = m->w[index];
+            if (word < 0x1000 || word > 0x7fffffffffull)
+                continue;
+            /* Not every word that looks like a pointer is one: handle values such
+               as 0x1006 sit above any sane low-address check and fault on read. */
+            char raw[64];
+            struct iovec local = { raw, sizeof raw };
+            struct iovec remote = { (void *)(uintptr_t)word, sizeof raw };
+            if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != (ssize_t)sizeof raw)
+                continue;
+            char sample[64];
+            size_t used = 0;
+            for (; used + 1 < sizeof sample; used++) {
+                const char c = raw[used];
+                if (c < 0x20 || c >= 0x7f)
+                    break;
+                sample[used] = c;
+            }
+            sample[used] = 0;
+            if (used >= 4)
+                slog("nvdrv::Open path? \"%s\" (word %zu)", sample, index);
+        }
+        uint32_t fd = nvdrv_next_fd++;
+        slog("nvdrv::Open -> fd %u", fd);
+        reply_prepare(m, 0, 2, 1);
+        m->w[m->payload + 4] = fd;
+        reply_send(m);
+        break;
+    }
+    case 1: /* Ioctl */
+    case 11: /* Ioctl2 */
+    case 12: /* Ioctl3 */
+        slog("nvdrv::Ioctl cmd=%#x fd=%u -> ok", m->w[m->magic + 4], m->w[m->magic + 5]);
+        reply_ok(m, 1);
+        break;
+    case 2: /* Close */
+        reply_ok(m, 1);
+        break;
+    case 3: /* Initialize */
+        slog("nvdrv::Initialize -> ok");
+        reply_ok(m, 1);
+        break;
+    case 4: { /* QueryEvent(fd, Out<event handle>) */
+        uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "nvdrv-event", 0);
+        slog("nvdrv::QueryEvent -> handle %#x", event);
+        if (event == 0)
             reply_domain(m, D3_RESULT(21, 7), 1);
         else
-            reply_domain_object(m, object);
-        return;
+            reply_domain_handle(m, event);
+        break;
     }
-    uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "ITimeZoneService", PORT_TIME_ZONE);
-    slog("ITimeService::GetTimeZoneService -> session %#x", handle);
-    if (handle == 0) {
-        reply_result(m, D3_RESULT(21, 7));
-        return;
+    case 13: /* SetConfiguration(u64) */
+        slog("nvdrv::SetConfiguration %#x", m->w[m->magic + 4]);
+        reply_ok(m, 1);
+        break;
+    default:
+        slog("nvdrv cmd=%u -> ok (stub)", command);
+        reply_ok(m, 1);
+        break;
     }
-    reply_prepare(m, 1, 0, 0);
-    m->w[m->handle_slot_out] = handle;
+}
+
+/* vi:m / vi:s / vi:u are the display manager; GetDisplayService hands back an
+   IApplicationDisplayService object.  The display path itself is not modelled
+   yet, so the application object answers with zeroed results and logs what the
+   title asks for. */
+static void reply_u64(Message *m, uint64_t value) {
+    reply_prepare(m, 0, 4, m->domain ? 1 : 0);
+    memcpy(&m->w[m->payload + 4], &value, sizeof value);
     reply_send(m);
+}
+
+static void vi_app_command(Message *m, uint32_t command, uint32_t session) {
+    (void)session;
+    switch (command) {
+    case 100: /* GetRelayService */
+    case 101: /* GetSystemDisplayService */
+    case 102: /* GetManagerDisplayService */
+    case 103: /* GetIndirectDisplayTransactionService */
+    {
+        uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "vi-sub", PORT_VI_APP);
+        slog("IApplicationDisplayService cmd=%u -> session %#x", command, handle);
+        if (handle == 0)
+            reply_result(m, D3_RESULT(21, 7));
+        else
+            reply_handle(m, handle);
+        break;
+    }
+    case 1000: /* ListDisplays: one display */
+        slog("IApplicationDisplayService::ListDisplays -> 1");
+        reply_u64(m, 1);
+        break;
+    case 1010: /* OpenDisplay */
+    case 1011: /* OpenDefaultDisplay */
+        slog("IApplicationDisplayService cmd=%u -> display id 1", command);
+        reply_u64(m, 1);
+        break;
+    case 1020: /* CloseDisplay */
+        reply_ok(m, 1);
+        break;
+    case 2012: { /* CreateStrayLayer (this SDK numbers it 2012, not 2030).  The
+                    reply carries a layer id plus a parcel holding the layer's
+                    native window object. */
+        if (m->recv_buffer_count >= 1 && m->recv_buffer_slot + 3 <= MESSAGE_WORDS) {
+            const uint32_t *word = &m->w[m->recv_buffer_slot];
+            const uint64_t size = map_descriptor_size(word);
+            const uint64_t address = map_descriptor_address(word);
+            if (size >= 0x20 && address != 0) {
+                /* Parcel header {data_size, data_offset, objects_size, objects_offset}
+                   followed by one native-window object. */
+                uint32_t window = d3_handle_alloc(D3_OBJ_EVENT, "layer-window", 0);
+                uint32_t parcel[8] = {0u, 0u, 4u, 0x10u, window, 0u, 0u, 0u};
+                memcpy((void *)(uintptr_t)address, parcel, sizeof parcel);
+                slog("CreateStrayLayer parcel -> %#" PRIx64 " size %#" PRIx64 " window %#x", address,
+                     size, window);
+            } else {
+                slog("CreateStrayLayer: no usable receive buffer (size %#" PRIx64 ")", size);
+            }
+        } else {
+            slog("CreateStrayLayer: no receive descriptor");
+        }
+        slog("IApplicationDisplayService::CreateStrayLayer -> layer 1");
+        reply_u64(m, 1);
+        break;
+    }
+    case 1102: /* GetDisplayResolution -> width, height */
+        slog("IApplicationDisplayService::GetDisplayResolution -> 1920x1080");
+        reply_prepare(m, 0, 6, m->domain ? 1 : 0);
+        {
+            uint64_t width = 1920, height = 1080;
+            memcpy(&m->w[m->payload + 4], &width, sizeof width);
+            memcpy(&m->w[m->payload + 6], &height, sizeof height);
+        }
+        reply_send(m);
+        break;
+    default:
+        slog("IApplicationDisplayService cmd=%u -> ok (stub)", command);
+        reply_ok(m, 1);
+        break;
+    }
+}
+
+static void vi_manager_command(Message *m, uint32_t command, uint32_t session) {
+    if (command == 2 || command == 1 || command == 0) { /* GetDisplayService */
+        if (m->domain) {
+            uint32_t object = domain_add(session, D3_IF_VI_APP);
+            slog("IDisplayManager cmd=%u -> display object %u", command, object);
+            if (object == 0)
+                reply_domain(m, D3_RESULT(21, 7), 1);
+            else
+                reply_domain_object(m, object);
+        } else {
+            uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "vi-app", PORT_VI_APP);
+            slog("IDisplayManager cmd=%u -> display session %#x", command, handle);
+            if (handle == 0)
+                reply_result(m, D3_RESULT(21, 7));
+            else
+                reply_handle(m, handle);
+        }
+        return;
+    }
+    slog("IDisplayManager cmd=%u -> stub", command);
+    reply_ok(m, 1);
 }
 
 static void domain_command(Message *m, uint32_t handle) {
@@ -1285,6 +1720,21 @@ static void domain_command(Message *m, uint32_t handle) {
         break;
     case D3_IF_APPLICATION_FUNCTIONS:
         application_functions_command(m, m->command, handle);
+        break;
+    case D3_IF_FSP_SRV:
+        fsp_srv_command(m, m->command, handle);
+        break;
+    case D3_IF_FILE:
+        file_command(m, m->command, handle);
+        break;
+    case D3_IF_NVDRV:
+        nvdrv_command(m, m->command, handle);
+        break;
+    case D3_IF_VI_MANAGER:
+        vi_manager_command(m, m->command, handle);
+        break;
+    case D3_IF_VI_APP:
+        vi_app_command(m, m->command, handle);
         break;
     case D3_IF_NONE:
         slog("domain %s has no object %u (iface %d)", name, m->domain_object, iface);
@@ -1393,6 +1843,15 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
         break;
     case PORT_SET:
         set_command(&m, m.command);
+        break;
+    case PORT_NVDRV:
+        nvdrv_command(&m, m.command, handle);
+        break;
+    case PORT_VI_MGR:
+        vi_manager_command(&m, m.command, handle);
+        break;
+    case PORT_VI_APP:
+        vi_app_command(&m, m.command, handle);
         break;
     default:
         reply_unsupported(&m, name, m.command, (int)d3_handle_arg(handle));

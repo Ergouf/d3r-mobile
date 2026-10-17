@@ -5,6 +5,7 @@
 #include "../guest_layout.h"
 
 #include <android/log.h>
+#include <dlfcn.h>
 #include <elf.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -19,7 +20,9 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <time.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 /* Phase 4. The veneer enters d3_hle_dispatch on the host TLS. The SVCs the guest
@@ -112,10 +115,13 @@ _Static_assert(sizeof(MemInfo) == 0x28, "Horizon MemoryInfo");
 
 __attribute__((format(printf, 1, 2)))
 static void info(const char *fmt, ...) {
+    char line[1024];
+    int head = snprintf(line, sizeof line, "t%ld: ", (long)syscall(SYS_gettid));
     va_list ap;
     va_start(ap, fmt);
-    __android_log_vprint(ANDROID_LOG_INFO, LOG_TAG, fmt, ap);
+    vsnprintf(line + head, sizeof line - (size_t)head, fmt, ap);
     va_end(ap);
+    __android_log_write(ANDROID_LOG_INFO, LOG_TAG, line);
 }
 
 static void __attribute__((noreturn)) __attribute__((format(printf, 1, 2))) fail(const char *fmt, ...) {
@@ -480,11 +486,17 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
        their own TLS while the preceding signal action runs. */
     const ucontext_t *uc = context;
     const mcontext_t *mc = &uc->uc_mcontext;
-    uint64_t fault_tid = (uint64_t)raw_syscall4(RAW_SYS_GETTID, 0, 0, 0, 0);
-    if (fault_tid != g_guest_tid) {
-        chain_signal(sig, si, context);
-        return;
+    static __thread int in_handler;
+    if (in_handler) {
+        /* A fault while dumping can never be reported; let the default action run. */
+        default_signal(sig);
     }
+    in_handler = 1;
+    uint64_t fault_tid = (uint64_t)raw_syscall4(RAW_SYS_GETTID, 0, 0, 0, 0);
+    /* Every thread is dumped: guest workers and host helper threads are just as
+       fatal, and restricting the dump to the main guest thread hid several
+       crashes completely. */
+    const int guest_fault = fault_tid == g_guest_tid;
     uint64_t interrupted_tp;
     uint64_t interrupted_x18;
     __asm__ volatile("mrs %0, tpidr_el0" : "=r"(interrupted_tp));
@@ -523,6 +535,18 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
     dump_field("lr", lr);
     dump_field("lr_off", lr >= g_bias ? lr - g_bias : lr);
     dump_field("sp", (uint64_t)mc->sp);
+    {
+        /* Faults in host code are indistinguishable by offset alone: name the
+           containing host function so the dump is self-describing. */
+        Dl_info host;
+        if (dladdr((void *)(uintptr_t)pc, &host) && host.dli_sname) {
+            dump_text("host_sym=");
+            dump_text(host.dli_sname);
+            dump_text("\n");
+            if (host.dli_fbase)
+                dump_field("host_off", pc - (uint64_t)(uintptr_t)host.dli_fbase);
+        }
+    }
     dump_field("host_tp", g_host_tp);
     dump_field("guest_tp", g_guest_tp);
     dump_field("last_kind", g_last_kind);
@@ -537,7 +561,7 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
         dump_field("r_lr", entry->lr);
         dump_field("r_x0", entry->x0);
     }
-    if (fault_tid == g_guest_tid) {
+    if (guest_fault) {
         dump_memory_links(19, (uint64_t)mc->regs[19]);
         dump_memory_links(20, (uint64_t)mc->regs[20]);
         dump_memory_links(21, (uint64_t)mc->regs[21]);
@@ -1193,6 +1217,448 @@ static void protect_guest_segment(uint64_t base, const Elf64_Phdr *ph) {
         fail("guest data mprotect errno %d", errno);
 }
 
+/* -------------------------------------------------------------------------
+   SDK symbol hooks.
+
+   The guest is a stripped merge of rtld + main + sdk: no .symtab, no usable
+   .dynsym.  The names are recoverable from the copy of the title the user owns
+   (the program NCA's exefs), so reference/extract/exefs_update/sdk.symbols.json
+   holds 25142 nnSdk exports as offsets from the sdk module base.  The merge
+   places that module at vaddr 0x10000, verified byte-for-byte against the
+   image, so a symbol's guest address is 0x10000 + its recorded offset.
+
+   A hook rewrites the entry with
+
+       ldr x16, #8     0x58000050
+       br  x16         0xd61f0200
+       .quad host_fn
+
+   which leaves x0..x7 (the guest's arguments) and x30 (its return address)
+   untouched, so the host body runs with the guest's own ABI and returns
+   straight to the guest caller.  nnsdk's nn::time entry points are replaced
+   with host clocks, which is what keeps the SDK from ever opening the time
+   service -- the GetSharedMemory path that aborted boot with 0x2a2. */
+
+typedef struct {
+    uint64_t vaddr;
+    void *target;
+    const char *name;
+} GuestHook;
+
+static uint64_t hook_time_initialize(void) {
+    return 0;
+}
+
+static uint64_t hook_time_is_initialized(void) {
+    return 1;
+}
+
+/* nn::socket::Initialize opens bsd:u and maps its buffer shared memory; with no
+   network service behind the host the SDK's own path only reaches an assertion.
+   The title is single player, so a successful no-op is enough to keep booting. */
+static uint64_t hook_success(void) {
+    return 0;
+}
+
+/* nn::fs sizes the romfs cache from the card and then asserts when the answer
+   does not fit; the host owns the romfs, so the guest just gets a fixed budget. */
+static uint64_t hook_fs_rom_cache_size(uint64_t out) {
+    if (out)
+        *(uint64_t *)(uintptr_t)out = 0x2000000ull;
+    return 0;
+}
+
+static int64_t hook_time_now(void) {
+    return (int64_t)time(NULL);
+}
+
+static uint64_t hook_time_get_current_time(uint64_t out) {
+    if (out)
+        *(int64_t *)(uintptr_t)out = (int64_t)time(NULL);
+    return 0;
+}
+
+/* CalendarTime is {s16 year; s8 month, day, hour, minute, second, pad} and
+   CalendarAdditionalInfo is {u32 wday; u32 yday; char tzname[8]; u32 dst;
+   s32 utc offset}, per the public Horizon ABI. */
+static uint64_t hook_time_to_calendar(uint64_t calendar_out, uint64_t info_out, uint64_t posix) {
+    struct tm tm;
+    time_t stamp = posix ? (time_t)*(const int64_t *)(uintptr_t)posix : time(NULL);
+    if (localtime_r(&stamp, &tm) == NULL)
+        return 1;
+    if (calendar_out) {
+        int8_t *calendar = (int8_t *)(uintptr_t)calendar_out;
+        int16_t year = (int16_t)(tm.tm_year + 1900);
+        memcpy(calendar, &year, sizeof year);
+        calendar[2] = (int8_t)(tm.tm_mon + 1);
+        calendar[3] = (int8_t)tm.tm_mday;
+        calendar[4] = (int8_t)tm.tm_hour;
+        calendar[5] = (int8_t)tm.tm_min;
+        calendar[6] = (int8_t)tm.tm_sec;
+        calendar[7] = 0;
+    }
+    if (info_out) {
+        uint8_t *info = (uint8_t *)(uintptr_t)info_out;
+        const char *zone = tm.tm_zone ? tm.tm_zone : "UTC";
+        memset(info, 0, 0x18);
+        memcpy(info, &(uint32_t){(uint32_t)tm.tm_wday}, sizeof(uint32_t));
+        memcpy(info + 4, &(uint32_t){(uint32_t)tm.tm_yday}, sizeof(uint32_t));
+        for (int i = 0; i < 7 && zone[i]; i++)
+            info[8 + i] = (uint8_t)zone[i];
+        memcpy(info + 0x10, &(uint32_t){tm.tm_isdst > 0}, sizeof(uint32_t));
+        memcpy(info + 0x14, &(int32_t){(int32_t)tm.tm_gmtoff}, sizeof(int32_t));
+    }
+    return 0;
+}
+
+/* nn::fs's public API is a thin wrapper over the fssrv IPC.  Replacing it here
+   avoids modelling IFile/IDirectory objects at all: the arguments are ordinary
+   pointers, so the host can read and write the guest's buffers directly.
+   Paths like "data:/CPKs/Common.cpk" resolve under the staged game data. */
+
+#define D3_FS_HANDLES 32
+
+typedef struct {
+    int used;
+    int fd;
+    int64_t size;
+} FsHandle;
+
+static FsHandle g_fs_handles[D3_FS_HANDLES];
+
+/* The staged game data is readable but not writable by the app, so anything the
+   title creates has to live in the app's own storage; reads fall back to the
+   shared copy. */
+static const char *const g_guest_data_roots[] = {
+    "/data/local/tmp/d3romfs",
+};
+
+#define D3_GUEST_WRITE_ROOT D3_PRIVATE_ROOT "/files/romfs"
+
+static FsHandle *fs_handle_of(uint64_t handle) {
+    if (handle < 1 || handle > D3_FS_HANDLES)
+        return 0;
+    FsHandle *slot = &g_fs_handles[handle - 1];
+    return slot->used ? slot : 0;
+}
+
+/* "data:/CPKs/x.cpk" -> "CPKs/x.cpk"; mount prefixes are not part of the
+   on-host layout. */
+static const char *guest_data_name(const char *path) {
+    const char *name = path;
+    if (strncmp(name, "data:", 5) == 0)
+        name += 5;
+    while (*name == '/')
+        name++;
+    return name;
+}
+
+static void make_parents(const char *host) {
+    char dir[512];
+    snprintf(dir, sizeof dir, "%s", host);
+    char *slash = strrchr(dir, '/');
+    if (slash == 0)
+        return;
+    *slash = 0;
+    for (char *walk = dir + 1; *walk; walk++) {
+        if (*walk == '/') {
+            *walk = 0;
+            mkdir(dir, 0777);
+            *walk = '/';
+        }
+    }
+    mkdir(dir, 0777);
+}
+
+static int guest_data_host(const char *path, char *out, size_t size, int create) {
+    const char *name = guest_data_name(path);
+    if (*name == 0)
+        return -1;
+    snprintf(out, size, "%s/%s", create ? D3_GUEST_WRITE_ROOT : g_guest_data_roots[0], name);
+    if (create)
+        make_parents(out);
+    if (create) {
+        char dir[512];
+        snprintf(dir, sizeof dir, "%s", out);
+        char *slash = strrchr(dir, '/');
+        if (slash != 0) {
+            *slash = 0;
+            for (char *walk = dir + 1; *walk; walk++) {
+                if (*walk == '/') {
+                    *walk = 0;
+                    mkdir(dir, 0777);
+                    *walk = '/';
+                }
+            }
+            mkdir(dir, 0777);
+        }
+    }
+    return 0;
+}
+
+static int fs_open_host_mode(const char *path, int writable) {
+    char host[512];
+    int fd = -1;
+    /* Writable opens go to the app's own tree first, reads fall back to the
+       staged read-only copy. */
+    if (writable && guest_data_host(path, host, sizeof host, 1) == 0) {
+        fd = open(host, O_RDWR | O_CREAT, 0666);
+        if (fd >= 0)
+            info("fs: opened(rw) %s", host);
+    }
+    if (fd < 0 && guest_data_host(path, host, sizeof host, 0) == 0)
+        fd = open(host, O_RDONLY);
+    if (fd < 0) {
+        info("fs: open %s failed errno %d", path, errno);
+        return -1;
+    }
+    for (int index = 0; index < D3_FS_HANDLES; index++) {
+        if (g_fs_handles[index].used)
+            continue;
+        struct stat statbuf;
+        if (fstat(fd, &statbuf) != 0) {
+            close(fd);
+            return -1;
+        }
+        g_fs_handles[index].used = 1;
+        g_fs_handles[index].fd = fd;
+        g_fs_handles[index].size = (int64_t)statbuf.st_size;
+        info("fs: opened %s (%lld bytes) as handle %d", host, (long long)statbuf.st_size, index + 1);
+        return index + 1;
+    }
+    close(fd);
+    return -1;
+}
+
+/* nn::fs reports a missing path as MAKERESULT(2, 7); callers branch on exactly
+   this value to tell "optional file absent" from a real failure. */
+#define D3_FS_NOT_FOUND 0xE02u
+
+static uint64_t hook_fs_open_file(uint64_t out, uint64_t path, uint64_t mode) {
+    info("fs: OpenFile %s mode=%#" PRIx64, path ? (const char *)(uintptr_t)path : "(null)", mode);
+    /* mode bit 0 is read; the title opens with 1 and only creates through
+       nn::fs::CreateFile, so a plain open must never create. */
+    int handle = path ? fs_open_host_mode((const char *)(uintptr_t)path, (mode & 2) != 0) : -1;
+    if (handle < 0)
+        return D3_FS_NOT_FOUND;
+    if (out)
+        *(int64_t *)(uintptr_t)out = handle;
+    return 0;
+}
+
+static uint64_t hook_fs_close_file(uint64_t handle) {
+    FsHandle *slot = fs_handle_of(handle);
+    if (slot == 0)
+        return D3_FS_NOT_FOUND;
+    close(slot->fd);
+    slot->used = 0;
+    return 0;
+}
+
+static int64_t fs_read(uint64_t handle, int64_t offset, uint64_t buffer, uint64_t size) {
+    FsHandle *slot = fs_handle_of(handle);
+    info("fs: read begin h=%llu off=%lld buf=%#" PRIx64 " size=%llu", (unsigned long long)handle,
+         (long long)offset, buffer, (unsigned long long)size);
+    if (slot == 0 || buffer == 0) {
+        info("fs: read rejected");
+        return -1;
+    }
+    if (offset < 0)
+        offset = 0;
+    if (offset >= slot->size) {
+        info("fs: read past end (%lld >= %lld)", (long long)offset, (long long)slot->size);
+        return 0;
+    }
+    /* Callers compute the length as fileSize - offset; an offset past the end
+       underflows into a huge size, which only ever means "nothing left". */
+    if (size == 0 || (int64_t)size < 0 || size > (uint64_t)(slot->size - offset)) {
+        size = (uint64_t)(slot->size - offset);
+        info("fs: read clamped to %llu", (unsigned long long)size);
+    }
+    ssize_t got = pread(slot->fd, (void *)(uintptr_t)buffer, (size_t)size, (off_t)offset);
+    info("fs: read end got=%lld", (long long)got);
+    return got < 0 ? -1 : (int64_t)got;
+}
+
+static uint64_t hook_fs_read_file(uint64_t handle, uint64_t offset, uint64_t buffer, uint64_t size) {
+    return fs_read(handle, (int64_t)offset, buffer, size) < 0 ? D3_FS_NOT_FOUND : 0;
+}
+
+static uint64_t hook_fs_read_file_count(uint64_t out, uint64_t handle, uint64_t offset, uint64_t buffer,
+                                        uint64_t size) {
+    int64_t got = fs_read(handle, (int64_t)offset, buffer, size);
+    if (got < 0)
+        return D3_FS_NOT_FOUND;
+    if (out)
+        *(uint64_t *)(uintptr_t)out = (uint64_t)got;
+    return 0;
+}
+
+static uint64_t hook_fs_get_file_size(uint64_t out, uint64_t handle) {
+    FsHandle *slot = fs_handle_of(handle);
+    if (slot == 0)
+        return D3_FS_NOT_FOUND;
+    if (out)
+        *(int64_t *)(uintptr_t)out = slot->size;
+    return 0;
+}
+
+static uint64_t hook_fs_create_file(uint64_t path, uint64_t size, uint64_t mode) {
+    (void)mode;
+    char host[512];
+    if (path == 0 || guest_data_host((const char *)(uintptr_t)path, host, sizeof host, 1) != 0)
+        return D3_FS_NOT_FOUND;
+    int fd = open(host, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) {
+        info("fs: create %s failed errno %d", host, errno);
+        return D3_FS_NOT_FOUND;
+    }
+    if ((int64_t)size > 0 && ftruncate(fd, (off_t)(int64_t)size) != 0)
+        info("fs: truncate %s errno %d", host, errno);
+    close(fd);
+    info("fs: created %s (%lld bytes)", host, (long long)size);
+    return 0;
+}
+
+static uint64_t hook_fs_write_file(uint64_t handle, uint64_t offset, uint64_t buffer, uint64_t size,
+                                   uint64_t option) {
+    (void)option;
+    FsHandle *slot = fs_handle_of(handle);
+    if (slot == 0 || buffer == 0 || size > (1ull << 30))
+        return D3_FS_NOT_FOUND;
+    ssize_t put = pwrite(slot->fd, (const void *)(uintptr_t)buffer, (size_t)size, (off_t)(int64_t)offset);
+    info("fs: write h=%llu off=%lld size=%llu -> %lld", (unsigned long long)handle, (long long)offset,
+         (unsigned long long)size, (long long)put);
+    if (put < 0)
+        return D3_FS_NOT_FOUND;
+    if ((int64_t)(offset + size) > slot->size)
+        slot->size = (int64_t)(offset + size);
+    return 0;
+}
+
+static uint64_t hook_fs_flush_file(uint64_t handle) {
+    FsHandle *slot = fs_handle_of(handle);
+    if (slot != 0)
+        fsync(slot->fd);
+    return 0;
+}
+
+static uint64_t hook_fs_set_file_size(uint64_t handle, uint64_t size) {
+    FsHandle *slot = fs_handle_of(handle);
+    if (slot == 0)
+        return D3_FS_NOT_FOUND;
+    if (ftruncate(slot->fd, (off_t)(int64_t)size) != 0)
+        return D3_FS_NOT_FOUND;
+    slot->size = (int64_t)size;
+    info("fs: SetFileSize h=%llu -> %llu", (unsigned long long)handle, (unsigned long long)size);
+    return 0;
+}
+
+/* nn::vi::native::DeserializeNativeWindow(holder, parcel, size) turns the parcel
+   from CreateStrayLayer into a NativeWindow.  The real object is a binder-backed
+   handle the host does not model yet, so the holder is handed a stable zeroed
+   block instead: everything that later treats it as an opaque pointer keeps
+   working, and the display path can be grown behind it. */
+static unsigned char g_native_window[0x100];
+static unsigned char g_vi_layer[0x100];
+
+/* The real nn::vi::Layer is built from a binder-backed native window.  Handing
+   the title a stable placeholder layer keeps its display code running while the
+   window system stays unimplemented. */
+static uint64_t hook_vi_create_layer(uint64_t out, uint64_t display, uint64_t arg2, uint64_t arg3) {
+    (void)display;
+    (void)arg2;
+    (void)arg3;
+    if (out)
+        *(uint64_t *)(uintptr_t)out = (uint64_t)(uintptr_t)g_vi_layer;
+    info("vi: CreateLayer -> placeholder %p", (void *)g_vi_layer);
+    return 0;
+}
+
+/* A zeroed block makes the first dereference land on 0; pointing the head at the
+   tail keeps a shallow chain of loads inside the block. */
+static void native_window_init(void) {
+    *(uint64_t *)&g_native_window[0] = (uint64_t)(uintptr_t)&g_native_window[0x40];
+    *(uint64_t *)&g_native_window[0x40] = (uint64_t)(uintptr_t)&g_native_window[0x80];
+}
+
+static uint64_t hook_vi_deserialize_native_window(uint64_t holder, uint64_t parcel, uint64_t size) {
+    (void)parcel;
+    (void)size;
+    native_window_init();
+    if (holder)
+        *(uint64_t *)(uintptr_t)holder = (uint64_t)(uintptr_t)g_native_window;
+    info("vi: DeserializeNativeWindow -> dummy %p", (void *)g_native_window);
+    return 0;
+}
+
+static uint64_t hook_vi_get_native_window(uint64_t out, uint64_t layer) {
+    (void)layer;
+    if (out)
+        *(uint64_t *)(uintptr_t)out = (uint64_t)(uintptr_t)g_native_window;
+    info("vi: GetNativeWindow -> dummy");
+    return 0;
+}
+
+static const GuestHook g_hooks[] = {
+    {0x39e2d0, (void *)hook_time_initialize, "_ZN2nn4time10InitializeEv"},
+    {0x39e5e0, (void *)hook_time_is_initialized, "_ZN2nn4time13IsInitializedEv"},
+    {0x3a14a0, (void *)hook_time_get_current_time, "StandardUserSystemClock::GetCurrentTime"},
+    {0x3a1520, (void *)hook_time_now, "StandardUserSystemClock::now"},
+    {0x3a1820, (void *)hook_time_to_calendar, "ToCalendarTime"},
+    {0x37b2e0, (void *)hook_success, "nn::socket::Initialize"},
+    {0x37b300, (void *)hook_success, "nn::socket::Finalize"},
+    {0x90650, (void *)hook_success, "nn::applet::SetCpuBoostMode"},
+    {0x2275f0, (void *)hook_fs_rom_cache_size, "nn::fs::QueryMountRomCacheSize(Pm)"},
+    {0x227710, (void *)hook_fs_rom_cache_size, "nn::fs::QueryMountRomCacheSize(Pm,AppId)"},
+    {0x227830, (void *)hook_fs_rom_cache_size, "nn::fs::QueryMountRomCacheSize(Pm,i)"},
+    {0x227960, (void *)hook_success, "nn::fs::MountRom(Pc,void*,u64)"},
+    {0x227af0, (void *)hook_success, "nn::fs::MountRom(Pc,AppId,void*,u64)"},
+    {0x227c80, (void *)hook_success, "nn::fs::MountRom(Pc,i,void*,u64)"},
+    {0x206eb0, (void *)hook_fs_open_file, "nn::fs::OpenFile(FileHandle*,Pc,int)"},
+    {0x205700, (void *)hook_fs_close_file, "nn::fs::CloseFile"},
+    {0x205950, (void *)hook_fs_read_file, "nn::fs::ReadFile(h,off,buf,size)"},
+    {0x205980, (void *)hook_fs_read_file_count, "nn::fs::ReadFile(out,h,off,buf,size)"},
+    {0x205d50, (void *)hook_fs_get_file_size, "nn::fs::GetFileSize(s64*,h)"},
+    {0x205f60, (void *)hook_fs_create_file, "nn::fs::CreateFile(Pc,s64)"},
+    {0x208bb0, (void *)hook_fs_create_file, "nn::fs::CreateFile(Pc,s64,int)"},
+    {0x205a20, (void *)hook_fs_write_file, "nn::fs::WriteFile(h,off,buf,size,opt)"},
+    {0x205b60, (void *)hook_fs_flush_file, "nn::fs::FlushFile(h)"},
+    {0x205c50, (void *)hook_fs_set_file_size, "nn::fs::SetFileSize(h,s64)"},
+    {0x3cc020, (void *)hook_vi_deserialize_native_window, "nn::vi::native::DeserializeNativeWindow"},
+    {0x3c9d10, (void *)hook_vi_get_native_window, "nn::vi::GetNativeWindow"},
+    {0x3c9830, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d)"},
+    {0x3c9880, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d,s)"},
+    {0x3c98a0, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d,w,h)"},
+    {0x3ca080, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d,f)"},
+    {0x3c9c60, (void *)hook_success, "nn::vi::SetLayerScalingMode"},
+    {0x3c9c70, (void *)hook_success, "nn::vi::SetLayerCrop"},
+    {0x3c9da0, (void *)hook_success, "nn::vi::SetLayerPosition"},
+    {0x3c9e20, (void *)hook_success, "nn::vi::SetLayerSize"},
+    {0x3c9ea0, (void *)hook_success, "nn::vi::SetLayerZ"},
+    {0x3c9f10, (void *)hook_success, "nn::vi::GetLayerZ"},
+    {0x3c9fa0, (void *)hook_success, "nn::vi::SetLayerVisibility"},
+    {0x3ca010, (void *)hook_success, "nn::vi::SetLayerAlpha"},
+    {0x3ca0e0, (void *)hook_success, "nn::vi::AddToLayerStack"},
+    {0x3ca150, (void *)hook_success, "nn::vi::RemoveFromLayerStack"},
+    {0x3c6bf0, (void *)hook_success, "nn::vi::SetDisplayLayerStack"},
+};
+
+static void install_guest_hooks(uint64_t base, uint64_t image_size) {
+    for (size_t index = 0; index < sizeof g_hooks / sizeof g_hooks[0]; index++) {
+        const GuestHook *hook = &g_hooks[index];
+        if (hook->vaddr + 16 > image_size)
+            fail("hook %s outside image", hook->name);
+        uint32_t *stub = (uint32_t *)(uintptr_t)(base + hook->vaddr);
+        uint64_t target = (uint64_t)(uintptr_t)hook->target;
+        stub[0] = 0x58000050u; /* ldr x16, #8 */
+        stub[1] = 0xd61f0200u; /* br x16 */
+        memcpy(&stub[2], &target, sizeof target);
+        __builtin___clear_cache((char *)stub, (char *)stub + 16);
+        info("hook %s at %#" PRIx64 " -> %p", hook->name, base + hook->vaddr, hook->target);
+    }
+}
+
 static void load_guest(const char *path) {
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     struct stat file_stat;
@@ -1279,6 +1745,9 @@ static void load_guest(const char *path) {
             fail("guest relocation outside image");
         *(uint64_t *)(uintptr_t)(base + relocation->r_offset) = base + (uint64_t)relocation->r_addend;
     }
+    /* The image is still writable here: patch the SDK entry points before the
+       segment protections go on. */
+    install_guest_hooks(base, reserve_size);
     for (size_t i = 0; i < g_guest_phnum; i++) {
         if (g_guest_phdr[i].p_type == PT_LOAD)
             protect_guest_segment(base, &g_guest_phdr[i]);
@@ -1356,11 +1825,14 @@ static void compose_regions(void) {
                 fail("too many regions");
             g_reg[g_nreg++] = (Region){g_heap, g_heap_cur, MEM_NORMAL, PERM_RW};
         }
-        if (g_heap_cap > g_heap_cur) {
-            if (g_nreg >= MAX_REG)
-                fail("too many regions");
-            g_reg[g_nreg++] = (Region){g_heap + g_heap_cur, g_heap_cap - g_heap_cur, MEM_INACCESSIBLE, 0};
-        }
+        /* The cap is only a host-side reservation, not something the guest asked
+           for, so the uncommitted tail is not a region at all: query_memory's
+           gap path already reports address space outside every region as
+           MEM_FREE, which is what Horizon says and what the SDK's
+           virtual-address allocator needs (it rejects any candidate whose
+           state is not MEM_FREE).  Listing the tail as a region also made every
+           later MapSharedMemory into it look like an overlap to
+           compose_regions. */
     }
     for (int i = 0; i < MAX_STACK_MAPS; i++) {
         const StackMap *mapping = &g_stack_maps[i];
@@ -1863,6 +2335,159 @@ static uint64_t map_shared_at(uint64_t address, uint64_t size, uint64_t permissi
     return address;
 }
 
+/* svcStartThread used to be bookkeeping only, so every worker the title created
+   never ran.  A guest thread starts with TPIDR_EL0 = 0 exactly like the kernel
+   leaves it; the title's own trampoline installs its thread pointer. */
+static void guest_call(uint64_t fn, uint64_t arg0, uint64_t arg1);
+
+typedef struct {
+    uint64_t entry;
+    uint64_t arg;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int initialized;
+    int exited;
+} ThreadStart;
+
+static void thread_state_init(ThreadStart *start) {
+    if (start->initialized)
+        return;
+    pthread_condattr_t attr;
+    pthread_mutex_init(&start->mutex, 0);
+    pthread_condattr_init(&attr);
+    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    pthread_cond_init(&start->cond, &attr);
+    pthread_condattr_destroy(&attr);
+    start->initialized = 1;
+}
+
+static void thread_mark_exited(ThreadStart *start) {
+    if (start == 0)
+        return;
+    thread_state_init(start);
+    pthread_mutex_lock(&start->mutex);
+    start->exited = 1;
+    pthread_cond_broadcast(&start->cond);
+    pthread_mutex_unlock(&start->mutex);
+}
+
+/* A thread handle is waitable in Horizon: waiting on it means waiting for the
+   thread to finish. */
+static uint32_t thread_wait(ThreadStart *start, int64_t timeout_ns) {
+    thread_state_init(start);
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    if (timeout_ns > 0) {
+        deadline.tv_sec += (time_t)(timeout_ns / 1000000000);
+        deadline.tv_nsec += (long)(timeout_ns % 1000000000);
+        if (deadline.tv_nsec >= 1000000000) {
+            deadline.tv_sec++;
+            deadline.tv_nsec -= 1000000000;
+        }
+    }
+    pthread_mutex_lock(&start->mutex);
+    while (!start->exited) {
+        if (timeout_ns < 0) {
+            pthread_cond_wait(&start->cond, &start->mutex);
+            continue;
+        }
+        if (timeout_ns == 0 || pthread_cond_timedwait(&start->cond, &start->mutex, &deadline) != 0)
+            break;
+    }
+    const int exited = start->exited;
+    pthread_mutex_unlock(&start->mutex);
+    return exited ? 0u : 0xEA01u;
+}
+
+static void *guest_thread_body(void *param) {
+    /* The handle keeps referring to this record, so it must outlive the thread. */
+    ThreadStart *start = param;
+    install_crash_handler();
+    info("thread: start entry=%#" PRIx64 " arg=%#" PRIx64, start->entry, start->arg);
+    guest_call(start->entry, start->arg, 0);
+    thread_mark_exited(start);
+    info("thread: returned");
+    return 0;
+}
+
+/* Events were pure stubs: SignalEvent/ClearEvent returned success without
+   changing any state and WaitSynchronization never waited, so a multi-threaded
+   title could not synchronise at all.  Each event handle now owns a real
+   condition variable; a successful wait consumes the signal, matching the
+   auto-clear behaviour of Horizon events. */
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int initialized;
+    int signaled;
+} HostEvent;
+
+#define HOST_EVENTS 256
+
+static HostEvent g_events[HOST_EVENTS];
+static pthread_mutex_t g_event_init = PTHREAD_MUTEX_INITIALIZER;
+
+static HostEvent *event_of(uint32_t handle) {
+    if (handle < D3_HANDLE_FIRST || handle >= D3_HANDLE_FIRST + HOST_EVENTS)
+        return 0;
+    HostEvent *event = &g_events[handle - D3_HANDLE_FIRST];
+    pthread_mutex_lock(&g_event_init);
+    if (!event->initialized) {
+        pthread_condattr_t attr;
+        pthread_mutex_init(&event->mutex, 0);
+        pthread_condattr_init(&attr);
+        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+        pthread_cond_init(&event->cond, &attr);
+        pthread_condattr_destroy(&attr);
+        event->signaled = 0;
+        event->initialized = 1;
+    }
+    pthread_mutex_unlock(&g_event_init);
+    return event;
+}
+
+static void event_signal(uint32_t handle, int signaled) {
+    HostEvent *event = event_of(handle);
+    if (event == 0)
+        return;
+    pthread_mutex_lock(&event->mutex);
+    event->signaled = signaled;
+    if (signaled)
+        pthread_cond_broadcast(&event->cond);
+    pthread_mutex_unlock(&event->mutex);
+}
+
+/* Returns 0 on success and 0xEA01 (timed out) when the deadline passes. */
+static uint32_t event_wait(uint32_t handle, int64_t timeout_ns) {
+    HostEvent *event = event_of(handle);
+    if (event == 0)
+        return 0;
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    if (timeout_ns > 0) {
+        deadline.tv_sec += (time_t)(timeout_ns / 1000000000);
+        deadline.tv_nsec += (long)(timeout_ns % 1000000000);
+        if (deadline.tv_nsec >= 1000000000) {
+            deadline.tv_sec++;
+            deadline.tv_nsec -= 1000000000;
+        }
+    }
+    pthread_mutex_lock(&event->mutex);
+    while (!event->signaled) {
+        if (timeout_ns < 0) {
+            pthread_cond_wait(&event->cond, &event->mutex);
+            continue;
+        }
+        if (timeout_ns == 0 || pthread_cond_timedwait(&event->cond, &event->mutex, &deadline) != 0)
+            break;
+    }
+    const uint32_t result = event->signaled ? 0u : 0xEA01u;
+    if (event->signaled)
+        event->signaled = 0;
+    pthread_mutex_unlock(&event->mutex);
+    return result;
+}
+
 static void panic_guest(const char *what, const d3_saved *saved) {
     info("%s x0=%#" PRIx64 " x1=%#" PRIx64 " x2=%#" PRIx64 " x3=%#" PRIx64 " x4=%#" PRIx64
          " x5=%#" PRIx64 " x6=%#" PRIx64 " x7=%#" PRIx64,
@@ -1952,19 +2577,56 @@ static void svc_call(d3_saved *saved, uint32_t id) {
     case 0x70:
     case 0x72:
         if (id == 0x08) {
-            uint32_t created = d3_handle_alloc(D3_OBJ_THREAD, "thread", 0);
+            /* svcCreateThread(Handle* out, entry, arg, stack_top, priority, core) */
+            const uint64_t out = x[0];
+            ThreadStart *start = calloc(1, sizeof *start);
+            if (start == 0)
+                fail("CreateThread calloc");
+            start->entry = x[1];
+            start->arg = x[2];
+            uint32_t created = d3_handle_alloc(D3_OBJ_THREAD, "thread", (uint64_t)(uintptr_t)start);
+            if (out != 0)
+                *(uint32_t *)(uintptr_t)out = created;
             set_saved(saved, 0, 0);
             set_saved(saved, 1, created);
-            info("CreateThread -> %#x", created);
+            info("CreateThread -> %#x entry=%#" PRIx64 " arg=%#" PRIx64, created, x[1], x[2]);
             return;
         }
         if (id == 0x09) {
+            /* Bring-up knob: a marker file keeps StartThread inert, which lets the
+               main thread run further while the thread start path is unfinished. */
+            static int spawn = -1;
+            if (spawn < 0) {
+                char path[256];
+                snprintf(path, sizeof path, "%s/notheads", D3_DATA_ROOT);
+                spawn = access(path, R_OK) != 0;
+                info("StartThread: spawning %s", spawn ? "enabled" : "disabled");
+            }
             uint32_t handle = (uint32_t)x[0];
-            info("StartThread handle=%#x", handle);
+            if (!spawn) {
+                info("StartThread handle=%#x suppressed", handle);
+                set_saved(saved, 0, 0);
+                return;
+            }
+            ThreadStart *start = (ThreadStart *)(uintptr_t)d3_handle_arg(handle);
+            if (start == 0) {
+                info("StartThread handle=%#x has no start record", handle);
+                set_saved(saved, 0, 0);
+                return;
+            }
+            pthread_t thread;
+            if (pthread_create(&thread, 0, guest_thread_body, start) != 0)
+                fail("StartThread pthread_create errno %d", errno);
+            pthread_detach(thread);
+            info("StartThread handle=%#x spawned", handle);
             set_saved(saved, 0, 0);
             return;
         }
-        panic_guest(id == 0x0A ? "ExitThread" : id == 0x33 ? "GetThreadContext3"
+        if (id == 0x0A) { /* ExitThread */
+            info("ExitThread");
+            pthread_exit(0);
+        }
+        panic_guest(id == 0x33 ? "GetThreadContext3"
                     : id == 0x40 ? "CreateSession" : id == 0x41 ? "AcceptSession"
                     : id == 0x43 ? "ReplyAndReceive" : id == 0x44 ? "ReplyAndReceiveWithUserBuffer"
                     : id == 0x70 ? "CreatePort" : "ConnectToPort", saved);
@@ -2005,14 +2667,15 @@ static void svc_call(d3_saved *saved, uint32_t id) {
     case 0x10:
         set_saved(saved, 0, 0);
         return;
-    case 0x11:
-    case 0x12:
-    case 0x17:
-        if (d3_handle_kind((uint32_t)x[0]) != D3_OBJ_EVENT && g_batch_logs < 24) {
+    case 0x11: /* SignalEvent */
+    case 0x12: /* ClearEvent */
+    case 0x17: /* ResetSignal */
+        if (g_batch_logs < 24) {
             g_batch_logs++;
             info("svc #%u handle=%#x kind=%d", (unsigned)id, (uint32_t)x[0],
                  d3_handle_kind((uint32_t)x[0]));
         }
+        event_signal((uint32_t)x[0], id == 0x11);
         set_saved(saved, 0, 0);
         return;
     case 0x13:
@@ -2032,23 +2695,59 @@ static void svc_call(d3_saved *saved, uint32_t id) {
         return;
     }
     case 0x16:
-        if (d3_handle_close((uint32_t)x[0]) != 0 && g_batch_logs < 24) {
+        if (g_batch_logs < 40) {
+            g_batch_logs++;
+            info("CloseHandle(%#x) kind=%d name=%s", (uint32_t)x[0],
+                 d3_handle_kind((uint32_t)x[0]), d3_handle_name((uint32_t)x[0]));
+        }
+        if (d3_handle_close((uint32_t)x[0]) != 0 && g_batch_logs < 40) {
             g_batch_logs++;
             info("CloseHandle(%#x) unknown", (uint32_t)x[0]);
         }
         set_saved(saved, 0, 0);
         return;
     case 0x18: {
+        /* Single handle form is (handle, timeout); the N form passes a list. */
+        if (x[0] >= D3_HANDLE_FIRST && x[0] < D3_HANDLE_FIRST + HOST_EVENTS) {
+            const uint32_t handle = (uint32_t)x[0];
+            uint32_t result;
+            if (d3_handle_kind(handle) == D3_OBJ_THREAD)
+                result = thread_wait((ThreadStart *)(uintptr_t)d3_handle_arg(handle), (int64_t)x[1]);
+            else
+                result = event_wait(handle, (int64_t)x[1]);
+            if (g_batch_logs < 32) {
+                g_batch_logs++;
+                info("WaitSynchronization handle=%#x timeout=%" PRId64 " -> %#x", handle,
+                     (int64_t)x[1], result);
+            }
+            set_saved(saved, 0, result);
+            set_saved(saved, 1, 0);
+            return;
+        }
+        /* svcWaitSynchronizationN(s32* out_index, Handle* handles, s32 count,
+           bool wait_all, s64 timeout).  The SDK returns *out_index verbatim when
+           the result is zero, so it must never be left uninitialised. */
         uint64_t list = x[1];
         int32_t count = (int32_t)x[2];
         uint32_t first = 0xFFFFFFFFu;
         if (list && count > 0)
             memcpy(&first, (const void *)(uintptr_t)list, sizeof first);
+        if (count <= 0) {
+            if (x[0])
+                *(int32_t *)(uintptr_t)x[0] = -1;
+            if (g_batch_logs < 32) {
+                g_batch_logs++;
+                info("WaitSynchronizationN count=%d -> timed out", count);
+            }
+            set_saved(saved, 0, 0xEA01);
+            return;
+        }
+        if (x[0])
+            *(int32_t *)(uintptr_t)x[0] = 0;
         set_saved(saved, 0, 0);
-        set_saved(saved, 1, 0);
-        if (g_batch_logs < 24) {
+        if (g_batch_logs < 32) {
             g_batch_logs++;
-            info("WaitSynchronization count=%d handle=%#x name=%s timeout=%" PRId64,
+            info("WaitSynchronizationN count=%d handle=%#x name=%s timeout=%" PRId64 " -> index 0",
                  count, first, d3_handle_name(first), (int64_t)x[3]);
         }
         return;
@@ -2390,12 +3089,66 @@ static void boot_sequence(void) {
     info("nnMain returned");
 }
 
+/* The guest can stop making SVCs and then die inside its own code, which leaves
+   no host-side trace.  A periodic SIGPROF gives a poor-man's PC profile so the
+   last samples show where it was executing. */
+
+/* The handler only records into a preallocated ring: logging from a signal
+   handler is not async-signal-safe.  A flusher thread prints the samples. */
+#define SAMPLE_SLOTS 256
+static volatile uint64_t g_sample_pc[SAMPLE_SLOTS];
+static volatile int g_sample_count;
+
+static void sample_handler(int sig, siginfo_t *siginfo, void *context) {
+    (void)sig;
+    (void)siginfo;
+    const ucontext_t *state = context;
+    const int slot = g_sample_count;
+    if (slot >= SAMPLE_SLOTS)
+        return;
+    g_sample_pc[slot] = (uint64_t)state->uc_mcontext.pc;
+    g_sample_count = slot + 1;
+}
+
+static void *sample_flusher(void *arg) {
+    (void)arg;
+    int printed = 0;
+    for (int tick = 0; tick < 200; tick++) {
+        usleep(50000);
+        const int count = g_sample_count;
+        while (printed < count && printed < SAMPLE_SLOTS) {
+            info("sample pc=%#" PRIx64, (uint64_t)g_sample_pc[printed]);
+            printed++;
+        }
+    }
+    return 0;
+}
+
+static void d3_host_exit_check(void) {
+    __android_log_print(ANDROID_LOG_ERROR, "D3Host", "process exiting via libc exit()");
+}
+
+static void *guest_sampler(void *arg) {
+    uint64_t tid = (uint64_t)(uintptr_t)arg;
+    for (int tick = 0; tick < 600 && g_sample_count < SAMPLE_SLOTS; tick++) {
+        usleep(5000);
+        syscall(SYS_tgkill, getpid(), (pid_t)tid, SIGPROF);
+    }
+    return 0;
+}
+
 static void *guest_thread(void *arg) {
     (void)arg;
     prctl(PR_SET_NAME, (unsigned long)"d3-guest", 0, 0, 0);
     g_guest_tid = (uint64_t)gettid();
     /* sigaltstack is per thread: without one here a stack fault cannot be reported. */
     install_crash_handler();
+    {
+        struct sigaction sample = {0};
+        sample.sa_sigaction = sample_handler;
+        sample.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        sigaction(SIGPROF, &sample, 0);
+    }
     __asm__ volatile("mrs %0, tpidr_el0" : "=r"(g_host_tp));
     __asm__ volatile("mov %0, x18" : "=r"(g_host_x18));
     g_table[D3_HOST_OFF_DISPATCH / 8] = (uint64_t)(uintptr_t)d3_hle_dispatch;
@@ -2405,6 +3158,13 @@ static void *guest_thread(void *arg) {
     g_table[D3_HOST_OFF_MAGIC / 8] = D3_HOST_MAGIC;
     info("host tp %" PRIx64 " guest tp %" PRIx64 " tlr %" PRIx64 " bias %" PRIx64,
          g_host_tp, g_guest_tp, g_tlr, g_bias);
+    {
+        pthread_t sampler, flusher;
+        if (pthread_create(&flusher, 0, sample_flusher, 0) == 0)
+            pthread_detach(flusher);
+        if (pthread_create(&sampler, 0, guest_sampler, (void *)(uintptr_t)g_guest_tid) == 0)
+            pthread_detach(sampler);
+    }
     register_fixed();
     if (pause_requested()) {
         info("paused for inspection, tid %" PRIu64, g_guest_tid);
@@ -2430,6 +3190,9 @@ int d3_host_start(const char *guest_path) {
     if (trace_requested())
         start_tracer();
     install_crash_handler();
+    /* A silent death with no signal and no dump means the process exited through
+       libc; this records that it happened even though the caller is unknown. */
+    atexit(d3_host_exit_check);
     d3_service_open();
     load_guest(path);
     if (g_table[D3_HOST_OFF_MAGIC / 8] != D3_HOST_MAGIC)

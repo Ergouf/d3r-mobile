@@ -26,6 +26,7 @@ uint32_t d3_handle_alloc(int kind, const char *name, uint64_t arg);
 int d3_handle_kind(uint32_t handle);
 const char *d3_handle_name(uint32_t handle);
 uint64_t d3_handle_arg(uint32_t handle);
+uint32_t d3_handle_domain_key(uint32_t handle);
 void d3_handle_set_arg(uint32_t handle, uint64_t arg);
 int d3_handle_close(uint32_t handle);
 void d3_handle_dump(void);
