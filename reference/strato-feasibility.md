@@ -413,27 +413,28 @@ generated 69/69 shader headers   （含 convert_msaa_* 的 sint/uint 变体）
 | `post_processing/**`、`present/post_process.cpp` | ReShade 后处理（`effect_module.hpp` 未随仓库分发） |
 | 单独编译 `fidelityfx_fsr.frag` | 无 `#version` 的 include-only 片段，仅供 FSR 引用 |
 
-## 4. 链接现状（同一轮实测）
+## 4. 链接现状（M0 完成）
 
-`libeden_gpu.a` 现在包含 **344 个 TU / 64.5 MB**：`video_core`、`shader_recompiler`、
-sirit（Eden 自己的 fork）+ SPIRV-Headers、Eden 的 `core/device_memory*`、
+`libeden_gpu.a` 包含 **349 个 TU / 64.7 MB**：`video_core`、`shader_recompiler`、
+sirit（`eden-emulator/sirit`）+ SPIRV-Headers、Eden 的 `core/device_memory*`、
 `common/{assert,cityhash,dynamic_library,address_space,page_table,multi_level_page_table,
-host_memory,settings,thread,adpf,error,logging,time_zone}`、`common/fs/{file,fs_util,fs,fs_android}`、
+host_memory,settings,thread,adpf,error,logging,time_zone,string_util}`、
+`common/fs/{file,fs_util,fs,fs_android,path_util}`、`common/android/{android_common,id_cache}`、
 `core/frontend/{emu_window,framebuffer_layout}`、`externals/{bc_decoder,stb_dxt}`，
-以及宿主适配层 `gpu/host/{gpu_host,vma_impl}.cpp`。
+以及宿主适配层 `gpu/host/{gpu_host,vma_impl,nvdec_stub}.cpp`。
 
-- `-shared` 链接已通过；`-Wl,--no-undefined` 严格链接只剩下列符号：
+```
+349/349 TU 编译通过
+-Wl,--no-undefined 严格链接通过  →  libeden_gpu_probe.so  8.0 MB
+```
 
-| 缺口 | 来源 | 处置 |
-|---|---|---|
-| `Sirit::Module::OpLoad/OpStore(..., optional<MemoryAccessMask>)` | sirit 版本与 Eden 期望不一致 | 对齐 Eden 实际 pin 的 sirit commit |
-| `Common::Android::{GetEnvForThread,ToJString,GetJString}` | `common/android/android_common.cpp` | 编进来（我们本来就是 JNI app） |
-| `Common::FS::ValidatePath` | `common/fs/path_util.cpp` | 编进来，或只保留 `GetEdenPath` 的桩 |
-| `Tegra::Decoders::{H264,VP8,VP9}` ctor/dtor、`Vic` | NVDEC/VIC | 桩掉（暗黑3 不用视频解码），或整体编 `host1x/codecs` |
+视频解码（NVDEC）与 VIC 用 `gpu/host/nvdec_stub.cpp` 占位（暗黑3 不使用），
+JNI 相关的 `InitJNI/NetworkShutdown/InitFFmpegOnLoad` 同样为零实现。
 
 ## 5. 下一步
 
-1. 上述 4 项收尾 → `-Wl,--no-undefined` 通过，M0 完成
-2. 把 `libeden_gpu.a` 链进 `libd3host.so`（静态 libc++，`-llog -landroid -ljnigraphics`），
+1. 把 `libeden_gpu.a` 链进 `libd3host.so`（静态 libc++，`-llog -landroid -ljnigraphics`），
    host 侧 `d3_gpu_set_guest_memory()` 绑定 guest RAM
-3. M1：一条清屏命令流（`GPU::PushGPUEntries` + `RequestComposite`）在真机出纯色
+2. M1：真实 `ANativeWindow` + 一条清屏命令流（`GPU::PushGPUEntries` +
+   `RequestComposite`）在真机出纯色
+3. M2：`nvdrv` ioctl → `PushGPUEntries` 打通；M3：着色器/纹理路径出第一帧

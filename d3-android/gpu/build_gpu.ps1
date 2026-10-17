@@ -76,6 +76,10 @@ $files += Get-ChildItem -Path (Join-Path $EdenSrc 'shader_recompiler') -Recurse 
 $files += Get-ChildItem -Path (Join-Path $Third 'sirit\src') -Recurse -Filter *.cpp -File |
           ForEach-Object { $_.FullName }
 $files += (Join-Path $EdenSrc 'common\fs\fs_android.cpp')
+$files += (Join-Path $EdenSrc 'common\fs\path_util.cpp')
+$files += (Join-Path $EdenSrc 'common\android\android_common.cpp')
+$files += (Join-Path $EdenSrc 'common\android\id_cache.cpp')
+$files += (Join-Path $EdenSrc 'common\string_util.cpp')
 $files += Get-ChildItem -Path (Join-Path $Root 'd3-android\gpu\host') -Filter *.cpp -File |
           ForEach-Object { $_.FullName }
 

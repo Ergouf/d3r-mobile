@@ -234,28 +234,6 @@ void FreeMemoryPages(void* ptr, std::size_t size) noexcept {
 }
 
 
-namespace FS {
 
-const std::filesystem::path& GetEdenPath(EdenPath eden_path) {
-    static std::filesystem::path root = [] {
-        const char* env = std::getenv("D3_EDEN_DIR");
-        return std::filesystem::path{env ? env : "/data/local/tmp/d3/eden"};
-    }();
-    static std::filesystem::path cache;
-    switch (eden_path) {
-    case EdenPath::ShaderDir:
-        cache = root / "shader";
-        break;
-    case EdenPath::CacheDir:
-        cache = root / "cache";
-        break;
-    default:
-        cache = root;
-        break;
-    }
-    return cache;
-}
-
-} // namespace FS
 
 } // namespace Common
