@@ -202,7 +202,7 @@ HostState& State() {
 Tegra::GPU& System::GPU() {
     auto& state = State();
     if (!state.gpu) {
-        state.gpu = std::make_unique<Tegra::GPU>(*this, false, false);
+        state.gpu = std::make_unique<Tegra::GPU>(*this, true, false);
     }
     return *state.gpu;
 }

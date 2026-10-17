@@ -696,3 +696,24 @@ I d3gpu: memtest: gpu=0x100000 translated=0x6c90000000 ok=1
 1. 用 backing 里的 pushbuffer 组真实 `Tegra::CommandList`（不能空列表）
 2. 通过 nvdrv ioctl 的 fd ↔ `bind_id` 映射把 pbuffer 交给桥
 3. pushbuffer 生效后再谈 composite（此时 GPU 线程已具备工作流）
+
+## 23. 关键修复：GPU 线程改异步，阻塞消失
+
+`Tegra::GPU(system, is_async=false, ...)` 会让 `SubmitList` / `RequestComposite`
+在同步模式下等 GPU 线程完成——空列表或没有后续工作流时就是永久阻塞。
+适配层改为 `is_async=true` 后：
+
+```
+I d3gpu: composite: 640x360 framebuffer submitted (gpu=0x200000)
+```
+
+调用立即返回、进程存活。**这是之前两次"卡住"的真正原因**（不是逻辑死锁）。
+
+## 24. 当前状态与下一步
+
+- composite 已被接收，但截屏仍是 M1 的清屏色（三处采样均为 `(40,88,209)`），
+  说明 present manager 还没有真正把这一帧 blit 上屏
+- 下一步要查 `vk_present_manager` / `vk_blit_screen` 的驱动条件：
+  `OnFrameDisplayed`、swapchain 的 `Present` 是否只在 `SwapBuffers` 时触发，
+  以及 `EmuWindow::OnFrameDisplayed` 是否需要被调用
+- pushbuffer 路径同样受益于异步模式（空列表不再阻塞），可以继续做真实命令提交
