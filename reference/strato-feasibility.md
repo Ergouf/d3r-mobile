@@ -1341,3 +1341,30 @@ head/next 指针没被初始化 —— 与"MultiWait 持有的 event 未构造"�
 2. 让 `ICommonStateGetter::GetEventHandle` 的事件既在 host handle 表可等待，
    也让 SDK 侧的 `nn::os::Event` 构造路径能成功（可能要求 `GetInfo`/handle 元数据）
 3. 若 SDK 期望的是"可复位的命名事件"，补 `ClearEvent` 语义
+
+## 74. 又一个语义缺口：`WaitSynchronizationN` 立即返回成功，从不真正等待
+
+代码走查（`d3_host.c` case 0x18）：
+
+```c
+memcpy(&first, (const void *)(uintptr_t)list, sizeof first);
+if (count <= 0) { ... result = 0xEA01; return; }
+if (x[0]) *(int32_t *)x[0] = 0;     /* index = 0 */
+set_saved(saved, 0, 0);             /* success */
+info("WaitSynchronizationN count=%d handle=%#x name=%s ... -> index 0", ...);
+return;                             /* ← 从不阻塞 */
+```
+
+即：**任何等待都立刻返回“第 0 个对象已就绪”**，既不看句柄是否合法，也不等待。
+
+这与 guest 侧 `nn::os` 的 MultiWait 实现不匹配：SDK 在 `AddToObjectList`/`RemoveFromObjectList`
+里维护 holder 链表并期望内核等待的时序；立刻返回会让它的簿记与真实状态脱节，
+与我们看到的“链表遍历返回 null → 读 [null+0x38]”一致。
+
+## 75. 下一步（明确）
+
+1. 实现真正的 `WaitSynchronizationN`：
+   - 逐个校验句柄（`d3_handle_name` 已知对象），未知句柄返回 `0xEA01`
+   - 对事件对象按 timeout 真正等待（复用 `d3_sync` 的事件等待）
+   - 返回真实 index，而不是永远 0
+2. 复跑观察 MultiWait 崩溃是否消失
