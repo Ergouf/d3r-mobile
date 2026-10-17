@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "core/core.h"
+#include "gpu_bridge.h"
 #include "emu_window_d3.h"
 #include "video_core/gpu.h"
 #include "video_core/host1x/host1x.h"
@@ -30,6 +31,7 @@ void RendererReport(const char* format, ...) {
 std::unique_ptr<Core::System> g_system;
 std::unique_ptr<D3::EmuWindowD3> g_window;
 std::unique_ptr<Tegra::MemoryManager> g_address_space;
+std::shared_ptr<Tegra::Control::ChannelState> g_channel;
 
 } // namespace
 
@@ -55,6 +57,7 @@ extern "C" __attribute__((visibility("default"))) int d3_gpu_channel_test(void) 
         }
         channel->memory_manager = g_address_space.get();
         g_system->GPU().InitChannel(*channel, 0);
+        g_channel = channel;
         RendererReport("channel: allocated and initialised (%p)", static_cast<void*>(channel.get()));
 
         // NOTE: GPU::PushGPUEntries(channel->bind_id, Tegra::CommandList{}) was
@@ -96,4 +99,15 @@ extern "C" __attribute__((visibility("default"))) int d3_gpu_renderer_init(void*
         RendererReport("renderer: failed with an unknown error");
         return -3;
     }
+}
+extern "C" int d3_gpu_bridge_start(void* native_window) {
+    const int renderer_status = d3_gpu_renderer_init(native_window);
+    if (renderer_status != 0) {
+        return renderer_status;
+    }
+    return d3_gpu_channel_test();
+}
+
+extern "C" int d3_gpu_bridge_channel_id(void) {
+    return g_channel ? g_channel->bind_id : -1;
 }

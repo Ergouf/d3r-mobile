@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <android/log.h>
 #include <android/native_window_jni.h>
 
 #include "d3_host.h"
@@ -12,12 +13,18 @@ extern void d3_gpu_probe_init(void);
 extern int d3_vk_clear(void *native_window);
 extern int d3_gpu_renderer_init(void *native_window);
 extern int d3_gpu_channel_test(void);
+extern int d3_gpu_bridge_start(void *native_window);
+extern int d3_gpu_bridge_channel_id(void);
 #define D3_GPU_CALL(fn, ...) fn(__VA_ARGS__)
+#define D3_GPU_CHANNEL_ID() d3_gpu_bridge_channel_id()
 #else
 extern void d3_gpu_probe_init(void) __attribute__((weak));
 extern int d3_vk_clear(void *native_window) __attribute__((weak));
 extern int d3_gpu_renderer_init(void *native_window) __attribute__((weak));
 extern int d3_gpu_channel_test(void) __attribute__((weak));
+extern int d3_gpu_bridge_start(void *native_window) __attribute__((weak));
+extern int d3_gpu_bridge_channel_id(void) __attribute__((weak));
+#define D3_GPU_CHANNEL_ID() (-1)
 #define D3_GPU_CALL(fn, ...)                                                   \
     do {                                                                       \
         if (fn != NULL) {                                                      \
@@ -38,7 +45,8 @@ Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
     /* Bring Eden's real renderer up on the same surface; the clear above stays
      * as the visual fallback until composites are driven by the guest. */
     D3_GPU_CALL(d3_gpu_renderer_init, window);
-    D3_GPU_CALL(d3_gpu_channel_test);
+    D3_GPU_CALL(d3_gpu_bridge_start, window);
+    __android_log_print(ANDROID_LOG_INFO, "d3host", "gpu bridge ready, channel=%d", D3_GPU_CHANNEL_ID());
     ANativeWindow_release(window);
 }
 

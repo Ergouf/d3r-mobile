@@ -600,3 +600,34 @@ g_system->GPU().PushGPUEntries(channel->bind_id, Tegra::CommandList{});
 必须从 nvdrv 的 pushbuffer 路径带真实命令进来。
 
 当前设备包已回退到「渲染器 + 通道初始化」的稳定版本（清屏色在屏、进程存活）。
+
+## 16. M2 接口层：C ↔ C++ 桥打通
+
+新增 [`gpu/host/gpu_bridge.h`](../d3-android/gpu/host/gpu_bridge.h)（纯 C ABI）：
+
+```c
+int d3_gpu_bridge_start(void* native_window);  /* renderer + AS + channel */
+int d3_gpu_bridge_channel_id(void);            /* bind_id 或 -1 */
+```
+
+host 侧 `d3_jni.c` 直接调用并打印，真机日志：
+
+```
+I d3gpu: renderer: Vulkan::RendererVulkan ready (vendor=Qualcomm)
+I d3gpu: channel: allocated and initialised (0xb4...)
+I d3host: gpu bridge ready, channel=1
+```
+
+也就是 **C 侧（nvdrv 服务的宿主）已经能驱动 C++ 的 Eden GPU 栈**，这是 M2 把
+`/dev/nvhost-gpu` ioctl 接进来的接缝。
+
+注意：非 `--with-gpu` 构建里桥函数是 weak，调用点必须走 `D3_GPU_CHANNEL_ID()`
+这类宏，不能直接调用弱符号（否则空指针调用）。
+
+## 17. M2 剩余
+
+1. 在 `d3_service.c` 的 nvdrv ioctl 处理里保存 channel fd ↔ `bind_id`，把
+   pbuffer 地址/size 通过桥提交
+2. 桥里用 GMMU `GetPointer` 读 pushbuffer，组 `Tegra::CommandList` 后
+   `PushGPUEntries`（空列表已验证会阻塞，必须带真实命令）
+3. 真实 `FramebufferConfig` + `RequestComposite` 出第一帧
