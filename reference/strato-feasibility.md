@@ -927,3 +927,22 @@ host 里有 tracer 机制：`TRACE_PATH = D3_DATA_ROOT "/logs/d3-trace.txt"`，
 由触发文件开启（见 `d3_host.c` 的 tracer 段），能记录致命信号前后的 256 个事件。
 下一步开启 tracer 跑一次 autostart，拿到崩溃前最后几条事件（SVC / IPC），
 再用 `reference/d3-symbols` 换算 guest pc。
+
+## 42. tracer 与 debuggerd 两条路都没产出（本轮实测）
+
+1. 创建 `<D3_DATA_ROOT>/trace` 触发内置 tracer 后跑 autostart：
+   `files/runtime/logs/d3-trace.txt` **不存在**（tracer 子进程没有落盘，
+   可能是 ptrace attach 被 SELinux 拒绝，或崩溃早于 tracer 首次写入）
+2. 改成 `<D3_DATA_ROOT>/no-handler`（由 debuggerd 接管）后跑：
+   `dumpsys dropbox` 里**没有新增** `data_app_native_crash`（最新仍是 02:41:50）
+
+同时确认 host 没有改 `PR_SET_DUMPABLE` / `core_pattern`。
+
+## 43. 下一步
+
+1. `adb shell ls -lt /data/tombstones` 看是否有新文件；有则用
+   `dumpsys dropbox --print SYSTEM_TOMBSTONE` 按时间戳取内容
+2. 若无新 tombstone，说明 debuggerd 未介入（SELinux / dumpable 限制），
+   改用 host 内置处理器 + 直接写 pc/backtrace 到 `d3-crash.txt`
+   （`install_crash_handler` 分支，需要把写文件路径改成可写目录）
+3. 或者用 `set-debug-app -w` + lldb 附加
