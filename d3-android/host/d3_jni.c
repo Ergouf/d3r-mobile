@@ -49,7 +49,7 @@ Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
     D3_GPU_CALL(d3_gpu_renderer_init, window);
     D3_GPU_CALL(d3_gpu_bridge_start, window);
     __android_log_print(ANDROID_LOG_INFO, "d3host", "gpu bridge ready, channel=%d", D3_GPU_CHANNEL_ID());
-    /* d3_gpu_bridge_memtest() is available but disabled: mapping arbitrary process pages crashes, GPU-visible memory must come from Core::DeviceMemory. */
+    D3_GPU_CALL(d3_gpu_bridge_memtest);
     ANativeWindow_release(window);
 }
 

@@ -119,15 +119,19 @@ extern "C" int d3_gpu_bridge_memtest(void) {
         RendererReport("memtest: bridge not started");
         return -1;
     }
-    static u8 page[4096] __attribute__((aligned(4096)));
+    // GPU-visible memory has to live inside Core::DeviceMemory: the page table
+    // stores (pointer - backing_base), so any other page would overflow it.
+    static u8* page = nullptr;
     constexpr u64 kGpuAddress = 0x100000;
+    constexpr u64 kBackingOffset = 256ULL << 20; // past the kernel reserve
     static bool mapped = false;
     try {
         if (!mapped) {
+            page = g_system->DeviceMemory().buffer.BackingBasePointer() + kBackingOffset;
             auto& memory = g_system->ApplicationMemory();
             auto& gmmu = g_system->Host1x().memory_manager;
             const Core::Asid asid = gmmu.RegisterProcess(&memory);
-            gmmu.Map(kGpuAddress, reinterpret_cast<VAddr>(page), sizeof(page), asid);
+            gmmu.Map(kGpuAddress, reinterpret_cast<VAddr>(page), 4096, asid);
             mapped = true;
         }
         page[0] = 0x5a;

@@ -657,3 +657,23 @@ auto phys_addr = static_cast<u32>(GetRawPhysicalAddr(ptr) >> page_bits) + 1U;
 （即 nvmap/显存分配要从这块 memfd 划分），不能是任意 malloc/栈地址。
 
 当前设备包稳定（bridge + channel + renderer 均在，清屏色在屏）。
+
+## 19. M2 打通：GPU 地址翻译（真机验证）
+
+按上一节的结论，把 GPU 可见页改成 `Core::DeviceMemory` backing 内的偏移
+（256 MiB 起，避开内核保留区），再走 `RegisterProcess → Map → GetPointer`：
+
+```
+I d3gpu: memtest: gpu=0x100000 translated=0x6c90000000 ok=1
+```
+
+`0x6c90000000 = backing(0x6c80000000) + 256 MiB`，写进去的 `0x5a/0xa5` 读回一致。
+也就是 **GPU 页表翻译链路（DAddr → 宿主指针）在真机上可用**，这正是 pushbuffer
+读取和 framebuffer 扫描出来要用的通路。
+
+## 20. 下一步（M2 收尾）
+
+1. 用同一套 Map 把 pushbuffer 放进 backing，桥里读命令字 → 组
+   `Tegra::CommandList` → `PushGPUEntries`（不能再提交空列表）
+2. nvdrv ioctl 里把 pbuffer 的 GPU 地址/长度传给桥
+3. 真实 framebuffer（backing 内的 BGRA 缓冲）→ `RequestComposite` → 第一帧
