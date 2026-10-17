@@ -677,3 +677,22 @@ I d3gpu: memtest: gpu=0x100000 translated=0x6c90000000 ok=1
    `Tegra::CommandList` → `PushGPUEntries`（不能再提交空列表）
 2. nvdrv ioctl 里把 pbuffer 的 GPU 地址/长度传给桥
 3. 真实 framebuffer（backing 内的 BGRA 缓冲）→ `RequestComposite` → 第一帧
+
+## 21. M2 探查：`RequestComposite` 会阻塞（不是崩溃）
+
+把 640x360 的 RGBA 渐变写进 DeviceMemory backing、`Map` 到 GPU 地址 0x200000，
+再调 `GPU::RequestComposite({framebuffer}, {})`：
+
+- 真机上调用**不返回**（后续日志无输出、进程存活、无 tombstone）
+- 与空 `PushGPUEntries` 的现象一致：GPU 线程侧的提交/呈现路径在没有
+  真实的通道工作流时不会完成
+
+结论：composite 不能作为第一个被调用的入口，必须先有 guest 侧的真实工作流
+（通道提交 → GPU 线程 → rasterizer → present），也就是 M2 的 pushbuffer 路径
+必须先通。当前设备包已回退到稳定版本（渲染器 + 通道 + 地址翻译自检均在）。
+
+## 22. 下一轮计划
+
+1. 用 backing 里的 pushbuffer 组真实 `Tegra::CommandList`（不能空列表）
+2. 通过 nvdrv ioctl 的 fd ↔ `bind_id` 映射把 pbuffer 交给桥
+3. pushbuffer 生效后再谈 composite（此时 GPU 线程已具备工作流）

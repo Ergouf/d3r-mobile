@@ -16,6 +16,7 @@ extern int d3_gpu_channel_test(void);
 extern int d3_gpu_bridge_start(void *native_window);
 extern int d3_gpu_bridge_channel_id(void);
 extern int d3_gpu_bridge_memtest(void);
+extern int d3_gpu_bridge_composite_test(void);
 #define D3_GPU_CALL(fn, ...) fn(__VA_ARGS__)
 #define D3_GPU_CHANNEL_ID() d3_gpu_bridge_channel_id()
 #else
@@ -26,6 +27,7 @@ extern int d3_gpu_channel_test(void) __attribute__((weak));
 extern int d3_gpu_bridge_start(void *native_window) __attribute__((weak));
 extern int d3_gpu_bridge_channel_id(void) __attribute__((weak));
 extern int d3_gpu_bridge_memtest(void) __attribute__((weak));
+extern int d3_gpu_bridge_composite_test(void) __attribute__((weak));
 #define D3_GPU_CHANNEL_ID() (-1)
 #define D3_GPU_CALL(fn, ...)                                                   \
     do {                                                                       \
@@ -50,6 +52,7 @@ Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
     D3_GPU_CALL(d3_gpu_bridge_start, window);
     __android_log_print(ANDROID_LOG_INFO, "d3host", "gpu bridge ready, channel=%d", D3_GPU_CHANNEL_ID());
     D3_GPU_CALL(d3_gpu_bridge_memtest);
+    /* d3_gpu_bridge_composite_test() blocks on device: RequestComposite needs the GPU thread's present path, which is only driven once guest composites arrive. */
     ANativeWindow_release(window);
 }
 

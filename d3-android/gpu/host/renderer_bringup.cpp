@@ -17,6 +17,9 @@
 #include "video_core/control/channel_state.h"
 #include "video_core/dma_pusher.h"
 #include "video_core/memory_manager.h"
+#include "video_core/framebuffer_config.h"
+#include "core/hle/service/nvnflinger/pixel_format.h"
+#include "core/hle/service/nvnflinger/buffer_transform_flags.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
 namespace {
@@ -144,5 +147,60 @@ extern "C" int d3_gpu_bridge_memtest(void) {
     } catch (const std::exception& exception) {
         RendererReport("memtest: failed: %s", exception.what());
         return -3;
+    }
+}
+// Draws a gradient into GPU-visible memory and hands it to Eden's present path.
+// This is the "first frame" plumbing without guest commands: if the SurfaceView
+// shows the gradient, Composite -> BlitScreen -> swapchain works end to end.
+extern "C" int d3_gpu_bridge_composite_test(void) {
+    if (!g_system) {
+        RendererReport("composite: bridge not started");
+        return -1;
+    }
+    constexpr u64 kGpuFramebuffer = 0x200000;
+    constexpr u64 kBackingOffset = 512ULL << 20;
+    constexpr u32 kWidth = 640;
+    constexpr u32 kHeight = 360;
+    constexpr u32 kStride = kWidth * 4;
+    static bool mapped = false;
+    try {
+        u8* pixels = g_system->DeviceMemory().buffer.BackingBasePointer() + kBackingOffset;
+        if (!mapped) {
+            auto& memory = g_system->ApplicationMemory();
+            auto& gmmu = g_system->Host1x().memory_manager;
+            const Core::Asid asid = gmmu.RegisterProcess(&memory);
+            gmmu.Map(kGpuFramebuffer, reinterpret_cast<VAddr>(pixels), kStride * kHeight, asid);
+            mapped = true;
+        }
+        for (u32 y = 0; y < kHeight; ++y) {
+            for (u32 x = 0; x < kWidth; ++x) {
+                u8* pixel = pixels + y * kStride + x * 4;
+                pixel[0] = static_cast<u8>(x * 255 / kWidth);        // R
+                pixel[1] = static_cast<u8>(y * 255 / kHeight);       // G
+                pixel[2] = static_cast<u8>((x ^ y) & 0xff);          // B
+                pixel[3] = 0xff;                                     // A
+            }
+        }
+
+        Tegra::FramebufferConfig framebuffer{};
+        framebuffer.address = kGpuFramebuffer;
+        framebuffer.width = kWidth;
+        framebuffer.height = kHeight;
+        framebuffer.stride = kStride;
+        framebuffer.pixel_format = Service::android::PixelFormat::Rgba8888;
+        framebuffer.transform_flags = Service::android::BufferTransformFlags::Unset;
+        framebuffer.crop_rect = Common::Rectangle<int>{0, 0, static_cast<int>(kWidth),
+                                                       static_cast<int>(kHeight)};
+        framebuffer.blending = Tegra::BlendMode::Opaque;
+
+        std::vector<Tegra::FramebufferConfig> layers;
+        layers.push_back(framebuffer);
+        g_system->GPU().RequestComposite(std::move(layers), {});
+        RendererReport("composite: %ux%u framebuffer submitted (gpu=%#llx)", kWidth, kHeight,
+                       (unsigned long long)kGpuFramebuffer);
+        return 0;
+    } catch (const std::exception& exception) {
+        RendererReport("composite: failed: %s", exception.what());
+        return -2;
     }
 }
