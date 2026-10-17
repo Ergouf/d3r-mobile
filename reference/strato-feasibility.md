@@ -1196,3 +1196,40 @@ svc ICommonStateGetter::ReceiveMessage -> 15 (FocusStateChanged)
 结论：SIGSEGV 根本没有交付到我们的用户态处理器（可能被 ART 的 late init 覆盖、
 或在信号返回路径上二次 fault）。下一步应确认进程最终的 `sigaction(SIGSEGV)`
 来自谁（用 `raw_sigaction(...,0,...)` 读取 kernel 侧处理函数指针）。
+
+## 64. 关键突破：kernel 级 SIGSEGV 槽位被 libsigchain 占用，已强制改为我们的处理器
+
+安装日志显示（修改前）：
+
+```
+sig 11 user=0x6e1b0c0b6c ours=1 kernel=71ad472b18 chained=1
+```
+
+`sigaction()` 显示是我们，但 **kernel 槽位是 ART 的 libsigchain 跳板**（0x71ad472b18），
+所以致命 fault 永远到不了 `crash_handler`。
+
+修复：对 `SIGSEGV/SIGBUS/SIGABRT` 追加一次 **raw `rt_sigaction`**（绕过 libsigchain）
+强制把 kernel 槽位指向 `crash_handler`。真机验证：
+
+```
+sig 11 forced kernel=6e1ad4fc30 ours=1
+sig 11 user=0x6e1ad4fc30 ours=1 kernel=6e1ad4fc30 chained=0
+```
+
+随后确实拿到内核级报告：
+
+```
+F libc: Fatal signal 11 (SIGSEGV), code 2 (SEGV_ACCERR),
+        fault addr 0x6e26fb5210 in tid 22452 (d3-guest)
+```
+
+fault 地址在 guest 映射区内，错误码 `SEGV_ACCERR`（权限不允许）——不是空指针。
+还没有 `Caught SIGSEGV`，说明 `crash_handler` 在执行自己的 dump 时又触发了一次 fault
+（`in_handler` 保护后按默认动作终止）。
+
+## 65. 下一步
+
+1. 把 `crash_handler` 的首段改成**只记录 pc/lr/fault 再 _exit**，不做 maps/内存 dump，
+   确认处理器能跑完并输出
+2. 再逐步加回 dump 内容，找出具体是哪一步二次 fault
+3. 同时 fault addr 0x6e26fb5210 + SEGV_ACCERR 值得单独查：可能是 guest 写只读段

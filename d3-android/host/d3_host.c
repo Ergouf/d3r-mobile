@@ -671,6 +671,20 @@ static void install_signal_actions(void) {
         if (sigaction(sig, 0, &current) != 0)
             fail("sigaction verify %d errno %d", sig, errno);
         raw_sigaction(sig, 0, &kernel);
+        if (sig == SIGSEGV || sig == SIGBUS || sig == SIGABRT) {
+            /* ART installs libsigchain, so the kernel slot points at its
+               trampoline even though sigaction() reports our handler; a fatal
+               fault then never reaches crash_handler.  Force the kernel slot. */
+            D3SigAction forced = {0};
+            forced.handler = (uint64_t)(uintptr_t)crash_handler;
+            forced.flags = SA_SIGINFO | SA_RESTART;
+            forced.restorer = kernel.restorer;
+            forced.mask = kernel.mask;
+            raw_sigaction(sig, &forced, 0);
+            raw_sigaction(sig, 0, &kernel);
+            info("sig %d forced kernel=%" PRIx64 " ours=%d", sig, kernel.handler,
+                 kernel.handler == (uint64_t)(uintptr_t)crash_handler);
+        }
         info("sig %d user=%p ours=%d kernel=%" PRIx64 " chained=%d", sig,
              (void *)(uintptr_t)current.sa_sigaction, current.sa_sigaction == crash_handler,
              kernel.handler, kernel.handler != (uint64_t)(uintptr_t)crash_handler);
