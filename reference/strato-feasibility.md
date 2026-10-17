@@ -515,3 +515,24 @@ I d3gpu: vk-clear: presented image 0 result=0
    `SurfaceView` 的 `ANativeWindow` 变成真正的 `render_surface`
 2. `nvdrv` 的 `/dev/nvhost-gpu` ioctl → `GPU::PushGPUEntries` 打通
 3. 把 guest 的 framebuffer 清除/呈现命令翻译成第一次真实绘制
+
+## 10. Eden 渲染器真机初始化成功（M2 起点）
+
+`gpu/host/emu_window_d3.{h,cpp}` + `gpu/host/renderer_bringup.cpp`：
+用 `D3::EmuWindowD3`（`window_info.type = Android`、`render_surface = ANativeWindow`）
+与 `GraphicsContextD3`（返回同一份 libvulkan）实例化 Eden 的
+`Vulkan::RendererVulkan`，再 `gpu.BindRenderer(...)`。真机日志：
+
+```
+I d3gpu: renderer: Vulkan::RendererVulkan ready (vendor=Qualcomm)
+```
+
+`libd3host.so` 现在 15.3 MB（VMA / present manager / scheduler / state tracker
+全部在内），进程存活、SurfaceView 仍显示清屏色。
+
+## 11. M2 待办
+
+1. 用真实 `FramebufferConfig` 调 `GPU::RequestComposite`，让 present manager 接管呈现
+2. `nvdrv` ioctl（`/dev/nvhost-gpu` NvGpuAS / NvGpuChannel）→ `GPU::AllocateChannel` /
+   `InitChannel` / `PushGPUEntries`
+3. guest 的 Maxwell 命令流进入 `Tegra::GPU`，M3 出第一帧

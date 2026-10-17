@@ -10,10 +10,12 @@
 #ifdef D3_WITH_GPU
 extern void d3_gpu_probe_init(void);
 extern int d3_vk_clear(void *native_window);
+extern int d3_gpu_renderer_init(void *native_window);
 #define D3_GPU_CALL(fn, ...) fn(__VA_ARGS__)
 #else
 extern void d3_gpu_probe_init(void) __attribute__((weak));
 extern int d3_vk_clear(void *native_window) __attribute__((weak));
+extern int d3_gpu_renderer_init(void *native_window) __attribute__((weak));
 #define D3_GPU_CALL(fn, ...)                                                   \
     do {                                                                       \
         if (fn != NULL) {                                                      \
@@ -31,6 +33,9 @@ Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
         return;
     }
     D3_GPU_CALL(d3_vk_clear, window);
+    /* Bring Eden's real renderer up on the same surface; the clear above stays
+     * as the visual fallback until composites are driven by the guest. */
+    D3_GPU_CALL(d3_gpu_renderer_init, window);
     ANativeWindow_release(window);
 }
 
