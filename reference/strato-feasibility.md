@@ -1450,3 +1450,27 @@ if (x[0]) *(int32_t*)x[0] = 0;  /* x0 = s32* out_index */
    （`x[3]` 是 `wait_all` 布尔值，不能当超时用——现在日志里 `timeout=-1` 就是误读 x[3]）
 2. 成功写真实 index；失败写 `-1` 并返回 `0xEA01`
 3. 复跑并观察 `w24` 越界是否消失
+
+## 81. 真实等待已落地，但崩溃点未变
+
+`case 0x18` 的 N 形式现在会真正等待 `handles[0]`（thread/event 分别走 `thread_wait` / `event_wait`，
+`x[4]` 为超时，无限超时按 2 ms 处理），失败写 `index=-1` 并返回错误码。
+
+真机结果：`libd3host.so` 体积从 15,363,032 → 15,363,736（补丁已生效），
+但崩溃点仍是：
+
+```
+pc_off=0x345d78   fault=0x6ec445e210
+```
+
+与上一轮完全相同。因此 `w24` 的越界索引**不是**来自 `WaitSynchronizationN` 的返回值，
+更可能来自 `MultiWaitImpl` 自己的 holder 数量/数组状态（guest 内部簿记），
+需要看 `0x536940`（加锁）之后 `w24` 的来源，或检查 holder 数组的容量字段是否被我们
+返回的 IPC 结果写坏。
+
+## 82. 下一步
+
+1. 反汇编 `sdk+0x335c00..0x335d90` 找 `w24` 的赋值来源（可能是 holder 计数循环）
+2. 对照 `nn::os::detail::MultiWaitImpl` 的 `WaitAnyImpl`：holder 数量字段若异常，
+   会在索引数组时越界
+3. 检查我们返回的 event 句柄数量/类型是否让 guest 多登记了 holder

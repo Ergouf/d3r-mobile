@@ -2886,11 +2886,34 @@ static void svc_call(d3_saved *saved, uint32_t id) {
         }
         if (x[0])
             *(int32_t *)(uintptr_t)x[0] = 0;
+        /* Wait for real: nn::os builds its MultiWait bookkeeping from this
+           result.  x3 is wait_all (bool); the timeout is x4.  An infinite
+           timeout is capped so a missing signal stalls briefly instead of
+           hanging the app. */
+        if (first != 0xFFFFFFFFu && (d3_handle_kind(first) == D3_OBJ_THREAD ||
+                                     d3_handle_kind(first) == D3_OBJ_EVENT)) {
+            int64_t wait_timeout = (int64_t)x[4];
+            if (wait_timeout < 0)
+                wait_timeout = 2000000;
+            uint32_t wait_result;
+            if (d3_handle_kind(first) == D3_OBJ_THREAD) {
+                wait_result = thread_wait(
+                    (ThreadStart *)(uintptr_t)d3_handle_arg(first), wait_timeout);
+            } else {
+                wait_result = event_wait(first, wait_timeout);
+            }
+            if (wait_result != 0) {
+                if (x[0])
+                    *(int32_t *)(uintptr_t)x[0] = -1;
+                set_saved(saved, 0, wait_result);
+                return;
+            }
+        }
         set_saved(saved, 0, 0);
         if (g_batch_logs < 32) {
             g_batch_logs++;
             info("WaitSynchronizationN count=%d handle=%#x name=%s timeout=%" PRId64 " -> index 0",
-                 count, first, d3_handle_name(first), (int64_t)x[3]);
+                 count, first, d3_handle_name(first), (int64_t)x[4]);
         }
         return;
     }
