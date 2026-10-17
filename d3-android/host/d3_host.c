@@ -486,7 +486,10 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
        their own TLS while the preceding signal action runs. */
     const ucontext_t *uc = context;
     const mcontext_t *mc = &uc->uc_mcontext;
-    static __thread int in_handler;
+    /* Not __thread: a fault can arrive while TPIDR_EL0 still points at the guest
+       TLS, and touching a thread-local then faults again, which the kernel turns
+       into a silent default-action kill. */
+    static volatile sig_atomic_t in_handler;
     if (in_handler) {
         /* A fault while dumping can never be reported; let the default action run. */
         default_signal(sig);
@@ -656,7 +659,11 @@ static void install_signal_actions(void) {
         memset(&action, 0, sizeof action);
         action.sa_sigaction = crash_handler;
         action.sa_mask = g_previous_signals[sig].sa_mask;
-        action.sa_flags = SA_SIGINFO | SA_ONSTACK |
+        /* SA_ONSTACK made the handler unrunnable on threads that never installed
+           an alternate stack (ART helpers, host event threads), so their faults
+           killed the process silently with no dump.  Roomy guest stacks make the
+           guard-page case unlikely. */
+        action.sa_flags = SA_SIGINFO |
                           (g_previous_signals[sig].sa_flags & (SA_RESTART | SA_NODEFER));
         /* libc keeps ART's special handlers ahead of this user action. */
         if (sigaction(sig, &action, 0) != 0)

@@ -1181,3 +1181,18 @@ svc ICommonStateGetter::ReceiveMessage -> 15 (FocusStateChanged)
 综上，当前 guest 的死亡在 `appletOE` 初始化循环里随机出现，下一步需要：
 1. 用 `pprof`/信号采样定位真正的 fault pc（tombstone 里的 pc 更可靠）
 2. 或者把 applet 事件/消息循环按 guest 期望的速度和语义实现，减少竞态
+
+## 63. 崩溃处理器仍不执行（SA_ONSTACK 与 __thread 都不是原因）
+
+两处改动后复跑：
+
+1. 去掉 `SA_ONSTACK`（避免没有 altstack 的线程无法执行处理器）
+2. 把 `in_handler` 从 `__thread` 改成普通 `sig_atomic_t`（避免在 guest TLS 下访问线程局部变量再次 fault）
+
+结果：guest 仍然 `signal 11` 退出，**没有** `Caught SIGSEGV`、没有 `d3-crash.txt`。
+崩溃前重复出现的是 `bt appletOE pc=...`（`d3_trace_guest` 的诊断输出，共 15 次），
+说明 guest 在 appletOE 循环里反复调用，然后在某次调用后死亡。
+
+结论：SIGSEGV 根本没有交付到我们的用户态处理器（可能被 ART 的 late init 覆盖、
+或在信号返回路径上二次 fault）。下一步应确认进程最终的 `sigaction(SIGSEGV)`
+来自谁（用 `raw_sigaction(...,0,...)` 读取 kernel 侧处理函数指针）。
