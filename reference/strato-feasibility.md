@@ -536,3 +536,26 @@ I d3gpu: renderer: Vulkan::RendererVulkan ready (vendor=Qualcomm)
 2. `nvdrv` ioctl（`/dev/nvhost-gpu` NvGpuAS / NvGpuChannel）→ `GPU::AllocateChannel` /
    `InitChannel` / `PushGPUEntries`
 3. guest 的 Maxwell 命令流进入 `Tegra::GPU`，M3 出第一帧
+
+## 12. M2 探查：`InitChannel` 需要先建地址空间（未完成）
+
+`d3_gpu_channel_test()` 尝试 `AllocateChannel → InitChannel`，真机崩溃点：
+
+```
+#00 Tegra::MemoryManager::BindRasterizer(RasterizerInterface*)+0
+#01 Tegra::Control::ChannelState::BindRasterizer(RasterizerInterface*)+48
+#02 Tegra::GPU::InitChannel(ChannelState&, u64)+72
+```
+
+即通道初始化会把 rasterizer 绑到该通道的 `Tegra::MemoryManager`，而这个内存管理器
+必须先由 nvdrv 的 NvGpuAS 分配路径初始化（`GPU::InitAddressSpace` 只是其中一步，
+之后还需要 `MemoryManager::Init` 建立页表）。
+
+补上 `InitAddressSpace(host1x.gmmu_manager)` 后仍崩溃，说明还缺页表初始化；当前
+设备包已回退到不含该调用的稳定版本（进程存活、渲染器就绪、清屏色在屏）。
+
+下一轮 M2 的正确顺序：
+1. 在 host 侧建模 nvdrv 的 `NvGpuAS`：分配时调用 `MemoryManager::Init(page_bits, as_bits)`，
+   建立页表并 `BindRasterizer`
+2. 再 `GPU::AllocateChannel` / `InitChannel` / `BindChannel`
+3. 最后把 `/dev/nvhost-gpu` 的 pushbuffer ioctl 喂给 `GPU::PushGPUEntries`

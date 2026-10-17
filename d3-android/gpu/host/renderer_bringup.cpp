@@ -29,6 +29,33 @@ std::unique_ptr<D3::EmuWindowD3> g_window;
 
 } // namespace
 
+// Exercises the GPU command pipeline without a guest: allocate a channel and
+// initialise it.  Proves the GPU thread, engines and rasterizer binding are
+// live after RendererVulkan is attached.
+extern "C" __attribute__((visibility("default"))) int d3_gpu_channel_test(void) {
+    if (!g_system) {
+        RendererReport("channel: renderer not initialised");
+        return -1;
+    }
+    try {
+        // A channel binds a rasterizer into its memory manager, which only works
+        // after the GPU address space has been created (nvdrv does this on
+        // NvGpuAS allocation).
+        g_system->GPU().InitAddressSpace(g_system->Host1x().gmmu_manager);
+        auto channel = g_system->GPU().AllocateChannel();
+        if (!channel) {
+            RendererReport("channel: AllocateChannel returned null");
+            return -2;
+        }
+        g_system->GPU().InitChannel(*channel, 0);
+        RendererReport("channel: allocated and initialised (%p)", static_cast<void*>(channel.get()));
+        return 0;
+    } catch (const std::exception& exception) {
+        RendererReport("channel: failed: %s", exception.what());
+        return -3;
+    }
+}
+
 extern "C" __attribute__((visibility("default"))) int d3_gpu_renderer_init(void* native_window) {
     if (!native_window) {
         RendererReport("renderer: no window");

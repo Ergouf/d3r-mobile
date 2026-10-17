@@ -11,11 +11,13 @@
 extern void d3_gpu_probe_init(void);
 extern int d3_vk_clear(void *native_window);
 extern int d3_gpu_renderer_init(void *native_window);
+extern int d3_gpu_channel_test(void);
 #define D3_GPU_CALL(fn, ...) fn(__VA_ARGS__)
 #else
 extern void d3_gpu_probe_init(void) __attribute__((weak));
 extern int d3_vk_clear(void *native_window) __attribute__((weak));
 extern int d3_gpu_renderer_init(void *native_window) __attribute__((weak));
+extern int d3_gpu_channel_test(void) __attribute__((weak));
 #define D3_GPU_CALL(fn, ...)                                                   \
     do {                                                                       \
         if (fn != NULL) {                                                      \
