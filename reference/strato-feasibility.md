@@ -1632,3 +1632,19 @@ g_obj[index].arg = 0; ...
 - `event_signal` 也校验 kind/initialized
 
 之后再统一 `WaitSynchronizationN` 的返回值契约，复跑观察 `w24` 越界。
+
+## 97. 事件关闭清理已实现（崩溃点未变）
+
+- `d3_host.c` 新增 `d3_event_on_close(handle)`：把该槽位置为 `initialized=0`、
+  `signaled=0` 并 `pthread_cond_broadcast` 唤醒等待者
+- `d3_service.c` 的 `d3_handle_close()` 在 `D3_OBJ_EVENT` 时调用它
+
+真机复跑：崩溃点仍是 `pc_off=0x345d78`（guest `w24` 越界），host 侧无崩溃。
+说明事件生命周期清理是必要的正确性修复，但**不是这条崩溃的原因**。
+
+## 98. 当前唯一崩溃的下一步
+
+`sdk+0x335d00: bl #0x537490` → `cmn w0,#1` → `mov w24,w0` → 按 w24 索引栈数组。
+现在需要精确确认 `0x537490` 是哪个 SDK 内核封装（很可能是
+`nn::os::detail::MultiWaitImplByHorizon::` 内部对 `svcWaitSynchronizationN` 的调用），
+以及它在 `count` 与实际登记 holder 数不一致时会做什么。

@@ -190,6 +190,10 @@ int d3_handle_close(uint32_t handle) {
         return 1;
     if (g_obj[index].kind == D3_OBJ_SESSION)
         domain_close_session(handle);
+    if (g_obj[index].kind == D3_OBJ_EVENT) {
+        extern void d3_event_on_close(uint32_t handle);
+        d3_event_on_close(handle);
+    }
     g_obj[index].kind = D3_OBJ_NONE;
     g_obj[index].arg = 0;
     g_obj[index].domain_key = 0;

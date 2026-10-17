@@ -2601,6 +2601,19 @@ static void event_signal(uint32_t handle, int signaled) {
 }
 
 /* Returns 0 on success and 0xEA01 (timed out) when the deadline passes. */
+/* Called when a guest closes an EVENT handle: wake waiters and mark the slot
+   unusable so a reused handle slot cannot be driven by stale wait/signal paths. */
+void d3_event_on_close(uint32_t handle) {
+    HostEvent *event = event_of(handle);
+    if (event == 0)
+        return;
+    pthread_mutex_lock(&event->mutex);
+    event->initialized = 0;
+    event->signaled = 0;
+    pthread_cond_broadcast(&event->cond);
+    pthread_mutex_unlock(&event->mutex);
+}
+
 static uint32_t event_wait(uint32_t handle, int64_t timeout_ns) {
     HostEvent *event = event_of(handle);
     if (event == 0)
