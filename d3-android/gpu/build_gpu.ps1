@@ -56,14 +56,26 @@ $files += @(
     (Join-Path $EdenSrc 'common\multi_level_page_table.cpp'),
     (Join-Path $EdenSrc 'common\fs\file.cpp'),
     (Join-Path $EdenSrc 'common\fs\fs_util.cpp'),
+    (Join-Path $EdenSrc 'common\fs\fs.cpp'),
     (Join-Path $EdenSrc 'common\host_memory.cpp'),
     (Join-Path $EdenSrc 'common\settings.cpp'),
     (Join-Path $EdenSrc 'common\settings_common.cpp'),
     (Join-Path $EdenSrc 'common\thread.cpp'),
+    (Join-Path $EdenSrc 'common\adpf.cpp'),
+    (Join-Path $EdenSrc 'common\error.cpp'),
+    (Join-Path $EdenSrc 'common\logging.cpp'),
+    (Join-Path $EdenSrc 'common\time_zone.cpp'),
     (Join-Path $EdenSrc 'core\frontend\emu_window.cpp'),
+    (Join-Path $EdenSrc 'core\frontend\framebuffer_layout.cpp'),
     (Join-Path $Eden 'externals\bc_decoder\bc_decoder.cpp'),
     (Join-Path $Eden 'externals\stb\stb_dxt.cpp')
 )
+$files += Get-ChildItem -Path (Join-Path $EdenSrc 'shader_recompiler') -Recurse -Filter *.cpp -File |
+          ForEach-Object { $_.FullName }
+# SPIR-V builder used by shader_recompiler's backend.
+$files += Get-ChildItem -Path (Join-Path $Third 'sirit\src') -Recurse -Filter *.cpp -File |
+          ForEach-Object { $_.FullName }
+$files += (Join-Path $EdenSrc 'common\fs\fs_android.cpp')
 $files += Get-ChildItem -Path (Join-Path $Root 'd3-android\gpu\host') -Filter *.cpp -File |
           ForEach-Object { $_.FullName }
 
@@ -77,6 +89,10 @@ $common = @(
     '-I', $Gen,
     '-I', (Join-Path $Third 'fmt\include'),
     '-I', (Join-Path $Third 'boost\boost_1_86_0'),
+    '-I', (Join-Path $Third 'sirit\include'),
+    '-I', (Join-Path $Third 'sirit\src'),
+    '-I', (Join-Path $Third 'sirit\src\instructions'),
+    '-I', (Join-Path $Third 'SPIRV-Headers\include'),
     '-I', (Join-Path $Eden 'externals\stb'),
     '-I', (Join-Path $Eden 'externals\bc_decoder'),
     '-I', $EdenSrc,
@@ -111,7 +127,12 @@ if ($failed.Count) {
 }
 
 $objs = $built | ForEach-Object { $_.Obj }
-& $Ar rcs $Lib @objs
+# 300+ object paths overflow the Windows command line, so hand llvm-ar a
+# response file instead.
+$rsp = Join-Path $ObjRoot 'archive.rsp'
+Remove-Item -Force $Lib -ErrorAction SilentlyContinue
+Set-Content -Path $rsp -Value ($objs | ForEach-Object { '"' + $_ + '"' }) -Encoding ASCII
+& $Ar rcs $Lib "@$rsp"
 if ($LASTEXITCODE -ne 0) { throw "llvm-ar failed" }
 
 Write-Host ""

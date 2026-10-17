@@ -233,54 +233,8 @@ void FreeMemoryPages(void* ptr, std::size_t size) noexcept {
     }
 }
 
-namespace Log {
-
-void FmtLogMessageImpl(Class log_class, Level log_level, const char* filename,
-                       unsigned int line_num, const char* function,
-                       fmt::string_view format, const fmt::format_args& args) {
-    static constexpr int kPriority[] = {
-        ANDROID_LOG_VERBOSE, ANDROID_LOG_DEBUG, ANDROID_LOG_INFO,
-        ANDROID_LOG_WARN, ANDROID_LOG_ERROR, ANDROID_LOG_FATAL,
-    };
-    const int priority = kPriority[static_cast<int>(log_level)];
-    const std::string message = fmt::vformat(format, args);
-    __android_log_print(priority, "d3gpu", "%s:%u %s: %s", filename, line_num, function,
-                        message.c_str());
-}
-
-} // namespace Log
 
 namespace FS {
-
-bool Exists(const std::filesystem::path& path) {
-    std::error_code ec;
-    return std::filesystem::exists(path, ec);
-}
-
-bool CreateDir(const std::filesystem::path& path) {
-    std::error_code ec;
-    std::filesystem::create_directory(path, ec);
-    return !ec;
-}
-
-bool CreateDirs(const std::filesystem::path& path) {
-    std::error_code ec;
-    std::filesystem::create_directories(path, ec);
-    return !ec;
-}
-
-bool RemoveFile(const std::filesystem::path& path) {
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-    return !ec;
-}
-
-bool RenameFile(const std::filesystem::path& old_path, const std::filesystem::path& new_path) {
-    std::error_code ec;
-    std::filesystem::rename(old_path, new_path, ec);
-    return !ec;
-}
-
 
 const std::filesystem::path& GetEdenPath(EdenPath eden_path) {
     static std::filesystem::path root = [] {
