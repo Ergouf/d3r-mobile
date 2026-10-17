@@ -1142,3 +1142,30 @@ cmd=1, cmd=3, cmd=4, cmd=1000, cmd=91, cmd=130, cmd=0, cmd=1(0x1007)
 
 下一步：保留错误返回策略，逐条实现这几条命令（尤其 cmd=1/3/4 与 cmd=91/130），
 并给返回的句柄正确的可等待语义。
+
+## 60. 崩溃前最后一步：`ICommonStateGetter::ReceiveMessage` 返回 FocusStateChanged
+
+完整日志尾部（按顺序）：
+
+```
+svc domain appletOE object 5 iface 12 cmd 0
+svc ICommonStateGetter::GetEventHandle -> handle 0x1007
+WaitSynchronizationN count=1 handle=0x6 -> index 0
+svc domain appletOE object 5 iface 12 cmd 1
+svc ICommonStateGetter::ReceiveMessage -> 15 (FocusStateChanged)
+<signal 11>
+```
+
+即 guest 已经拿到 CommonStateGetter 的事件、等待成功、收到一条
+`FocusStateChanged` 消息，**随后立刻崩溃**。
+
+最可能的原因：`ReceiveMessage` 的返回结构不是"一个整数 15"，而是一个带
+`AppletMessage` 头部/体积的消息结构；host 只写了 15，guest 之后按结构体读取
+就踩到无效内存。
+
+## 61. 下一步
+
+1. 对照 Eden 的 `common_state_getter.cpp`，把 `ReceiveMessage` 的返回结构补成
+   guest 期望的布局（消息类型 + 必要字段/大小）
+2. 若 FocusStateChanged 不需要负载，也要把 `AppletMessageHolder` 的 size 字段写对
+3. 复跑观察是否越过这条消息
