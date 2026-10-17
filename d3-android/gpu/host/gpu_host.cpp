@@ -52,24 +52,47 @@ u8* g_guest_base = nullptr;
 std::size_t g_guest_size = 0;
 bool g_powered_on = true;
 
-constexpr std::size_t kDeviceBackingSize = 4ULL << 30; // physical DRAM window
-constexpr std::size_t kDeviceVirtualSize = 8ULL << 30; // sparse reserve
+constexpr std::size_t kDefaultBackingSize = 4ULL << 30; // physical DRAM window
+constexpr std::size_t kDefaultVirtualSize = 8ULL << 30; // sparse reserve
+
+std::size_t EnvSize(const char* name, std::size_t default_bytes) {
+    const char* value = std::getenv(name);
+    if (!value || !*value) {
+        return default_bytes;
+    }
+    const unsigned long long mib = std::strtoull(value, nullptr, 10);
+    return mib ? static_cast<std::size_t>(mib) << 20 : default_bytes;
+}
 
 } // namespace
 
-extern "C" void d3_gpu_set_guest_memory(void* base, std::size_t size) {
+extern "C" __attribute__((visibility("default"))) void d3_gpu_set_guest_memory(void* base, std::size_t size) {
     g_guest_base = static_cast<u8*>(base);
     g_guest_size = size;
 }
 
-extern "C" void d3_gpu_set_powered_on(bool on) {
+extern "C" __attribute__((visibility("default"))) void d3_gpu_set_powered_on(bool on) {
     g_powered_on = on;
+}
+
+// Bring-up probe: constructs the GPU host state (which allocates the sparse
+// device memory backing) and reports it in logcat.  d3_jni.c calls this before
+// the guest starts so a device log proves the C++ runtime and the archive are
+// live inside libd3host.so.
+extern "C" __attribute__((visibility("default"))) void d3_gpu_probe_init(void) {
+    static Core::System system;
+    auto& memory = system.DeviceMemory();
+    __android_log_print(ANDROID_LOG_INFO, "d3gpu",
+                        "probe: device memory backing=%p virtual=%p", (void*)memory.buffer.BackingBasePointer(),
+                        (void*)memory.buffer.VirtualBasePointer());
 }
 
 namespace Core {
 
 // ---------------------------------------------------------------- DeviceMemory
-DeviceMemory::DeviceMemory() : buffer{kDeviceBackingSize, kDeviceVirtualSize} {}
+DeviceMemory::DeviceMemory()
+    : buffer{EnvSize("D3_GPU_BACKING_MB", kDefaultBackingSize),
+             EnvSize("D3_GPU_VIRTUAL_MB", kDefaultVirtualSize)} {}
 DeviceMemory::~DeviceMemory() = default;
 
 // --------------------------------------------------------------- CoreTiming

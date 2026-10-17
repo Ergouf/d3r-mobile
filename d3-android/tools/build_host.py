@@ -15,6 +15,7 @@ HOST_SRC = [
     os.path.join(ROOT, "host", "d3_sync.c"),
     os.path.join(ROOT, "host", "d3_jni.c"),
 ]
+GPU_LIB = os.path.join(ROOT, "build", "libeden_gpu.a")
 PROBE_SRC = os.path.join(ROOT, "tools", "d3_probe.c")
 
 # Native tests. Each test #includes the .c it exercises, so the exercised unit
@@ -104,6 +105,56 @@ def compile_one(cmd, out_path: str) -> None:
     print("wrote %s (%d bytes)" % (out_path, os.path.getsize(out_path)))
 
 
+# Flags that make sense while compiling a translation unit (no link phase).
+COMPILE_ONLY_FLAGS = [flag for flag in HOST_FLAGS
+                      if flag != "-shared" and not flag.startswith("-Wl,")]
+
+
+def build_host_with_gpu(clang: str, defines, out_dir: str, host_out: str) -> None:
+    """Link the C host against the Eden GPU archive.
+
+    The GPU archive is C++, so the C sources are compiled to objects first and
+    linked with clang++ (static libc++ keeps the APK to a single shared object).
+    """
+    if not os.path.isfile(GPU_LIB):
+        sys.exit("missing %s -- run d3-android/gpu/build_gpu.ps1 first" % GPU_LIB)
+
+    clangxx = os.path.join(os.path.dirname(clang), "clang++.exe")
+    obj_dir = os.path.join(out_dir, "host-obj")
+    os.makedirs(obj_dir, exist_ok=True)
+    defines = [*defines, "-DD3_WITH_GPU=1"]
+
+    objects = []
+    for src in HOST_SRC:
+        obj = os.path.join(obj_dir, os.path.splitext(os.path.basename(src))[0] + ".o")
+        compile_one([clang, *COMPILE_ONLY_FLAGS, *defines, "-c", src, "-o", obj], obj)
+        objects.append(obj)
+
+    link = [
+        clangxx,
+        "--target=aarch64-linux-android34",
+        "-shared",
+        "-fPIC",
+        "-fvisibility=hidden",
+        "-O2",
+        "-g",
+        "-Wl,-z,max-page-size=16384",
+        "-Wl,--no-undefined",
+        "-Wl,--exclude-libs,ALL",
+        "-static-libstdc++",
+        *defines,
+        *objects,
+        GPU_LIB,
+        "-llog",
+        "-ldl",
+        "-landroid",
+        "-ljnigraphics",
+        "-o",
+        host_out,
+    ]
+    compile_one(link, host_out)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compile the D3 host shared library (and optionally the probe)."
@@ -125,8 +176,15 @@ def main() -> None:
         help="Absolute Android path; sets -DD3_DATA_ROOT/-DD3_PRIVATE_ROOT "
         "(default: installed app paths from the headers)",
     )
+    parser.add_argument(
+        "--with-gpu",
+        action="store_true",
+        help="Link build/libeden_gpu.a (Eden Vulkan stack) into libd3host.so",
+    )
     parser.add_argument("--data-root", help="Absolute Android runtime data directory")
-    parser.add_argument("--private-root", help="Absolute Android application data directory")
+    parser.add_argument(
+        "--private-root", help="Absolute Android application data directory"
+    )
     parser.add_argument(
         "--build-probe",
         action="store_true",
@@ -161,10 +219,13 @@ def main() -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     host_out = os.path.join(out_dir, "libd3host.so")
-    compile_one(
-        [clang, *HOST_FLAGS, *defines, *HOST_SRC, "-llog", "-ldl", "-o", host_out],
-        host_out,
-    )
+    if args.with_gpu:
+        build_host_with_gpu(clang, defines, out_dir, host_out)
+    else:
+        compile_one(
+            [clang, *HOST_FLAGS, *defines, *HOST_SRC, "-llog", "-ldl", "-o", host_out],
+            host_out,
+        )
 
     if args.build_probe:
         probe_out = os.path.join(out_dir, "d3_probe")

@@ -433,8 +433,31 @@ JNI 相关的 `InitJNI/NetworkShutdown/InitFFmpegOnLoad` 同样为零实现。
 
 ## 5. 下一步
 
-1. 把 `libeden_gpu.a` 链进 `libd3host.so`（静态 libc++，`-llog -landroid -ljnigraphics`），
-   host 侧 `d3_gpu_set_guest_memory()` 绑定 guest RAM
+1. ~~把 `libeden_gpu.a` 链进 `libd3host.so`~~ **已完成**（见下）
 2. M1：真实 `ANativeWindow` + 一条清屏命令流（`GPU::PushGPUEntries` +
    `RequestComposite`）在真机出纯色
 3. M2：`nvdrv` ioctl → `PushGPUEntries` 打通；M3：着色器/纹理路径出第一帧
+
+## 6. 已链进 libd3host.so（真机验证）
+
+`tools/build_host.py --with-gpu` 先用 clang 把 4 个 C 源编成 .o，再用 clang++
+静态 libc++ 链上 `build/libeden_gpu.a`：
+
+```
+libd3host.so   9.42 MB   -Wl,--no-undefined 通过
+```
+
+`d3_jni.c` 在 `nativeStart` 里调用 GPU 侧的 `d3_gpu_probe_init()`
+（`--with-gpu` 时是强引用，否则 weak），真机 `R52T90127WT` 日志：
+
+```
+I d3gpu: probe: device memory backing=0x6c80000000 virtual=0x6a7fe00000
+```
+
+即 C++ runtime、Eden 的 `Common::HostMemory`（4 GB 稀疏 backing + 8 GB 虚拟保留）
+和 `Core::System`/`DeviceMemory` 都已在 APK 内正常工作，且 guest 启动流程无回归
+（同一份日志里 D3Host 的 SVC/线程日志继续输出）。
+
+注意：`-fvisibility=hidden` + `--exclude-libs,ALL` 让 C++ 符号保持库内私有，
+只有 `d3_gpu_*` 入口是 default 可见性；weak 引用不会从静态库里拉成员，
+所以 `--with-gpu` 必须走强引用宏 `D3_WITH_GPU`。
