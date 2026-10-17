@@ -1604,3 +1604,31 @@ pc_off=0x345d78      (已知的 w24 越界)
 `sdk+0x345d78`（`mov w24, w0` 后按 w0 索引栈数组）。第 86 节已确认 SDK 只把
 `-1` 当超时、其它值当就绪下标。现在事件真实可等待后，host 返回的 index 必须是
 **真实下标**（0..count-1），超时才是 `-1`。下一轮把这个契约在两个分支里统一。
+
+## 95. 句柄关闭路径缺少事件清理（下一步要修的点）
+
+`d3_handle_close()` 只把槽位清空：
+
+```c
+if (g_obj[index].kind == D3_OBJ_SESSION)
+    domain_close_session(handle);
+g_obj[index].kind = D3_OBJ_NONE;
+g_obj[index].arg = 0; ...
+```
+
+而 `g_events[]` **按句柄下标**索引（`event_of(handle)`），所以：
+
+1. 一个被关闭的 EVENT 句柄，其 `HostEvent` 仍保持 `initialized=1` 与旧的 mutex/cond 状态
+2. 同一槽位被复用为 THREAD/其他类型后，任何仍按"旧 event 句柄"访问的路径
+   （如 `event_signal` 未校验 kind）都会落到这个槽位上
+3. 于是 `pthread` 原语作用在语义错位的对象上 —— 与 `fault=0x300` 的形态吻合
+
+## 96. 下一轮改法
+
+在 `d3_handle_close` 里对 `D3_OBJ_EVENT`：
+
+- 加锁 → 置 `signaled`、`initialized=0`、`closing=1` → `pthread_cond_broadcast` → 解锁
+- `event_wait` 进入时校验 `initialized && !closing`
+- `event_signal` 也校验 kind/initialized
+
+之后再统一 `WaitSynchronizationN` 的返回值契约，复跑观察 `w24` 越界。
