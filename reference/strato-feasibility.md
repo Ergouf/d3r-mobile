@@ -1474,3 +1474,24 @@ pc_off=0x345d78   fault=0x6ec445e210
 2. 对照 `nn::os::detail::MultiWaitImpl` 的 `WaitAnyImpl`：holder 数量字段若异常，
    会在索引数组时越界
 3. 检查我们返回的 event 句柄数量/类型是否让 guest 多登记了 holder
+
+## 83. 返回 index 0 后，崩溃从 guest 移到 host libc
+
+把 `WaitSynchronizationN` 的超时/失败分支改成返回 `index=0, result=0`（因为
+反汇编显示 `sdk+0x335d38: mov w24, w0` —— guest 直接把返回值当数组下标用，
+`0xEA01` 会变成 59905 越界），真机结果：
+
+```
+fault=0x0000000000000300
+pc=0x00000071c176e198   (host libc，不是 guest)
+x0=0x300 x8=0
+```
+
+即 guest 越界崩溃消失，但 host 侧在等待调用里崩了（很可能是我们对
+`D3_OBJ_THREAD` 的 `thread_wait` 等待了调用者自己，或在 libc 条件变量上踩到空对象）。
+
+## 84. 下一步
+
+1. 不要等待“调用者自己”的线程句柄（`f == current thread` 时直接返回成功）
+2. `event_wait` 前校验 event 对象指针非空；`thread_wait` 前校验 ThreadStart 指针
+3. 再复跑，确认 guest 侧 `w24` 越界是否彻底消失

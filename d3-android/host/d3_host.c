@@ -2903,9 +2903,14 @@ static void svc_call(d3_saved *saved, uint32_t id) {
                 wait_result = event_wait(first, wait_timeout);
             }
             if (wait_result != 0) {
+                /* The SDK indexes its holder array with the value returned in
+                   w0 (disassembly at sdk+0x335d38: mov w24, w0).  Handing back
+                   0xEA01 makes that index 59905 and walks off the stack, so a
+                   timeout is reported as "the first object was ready" until the
+                   holder bookkeeping itself is modelled. */
                 if (x[0])
-                    *(int32_t *)(uintptr_t)x[0] = -1;
-                set_saved(saved, 0, wait_result);
+                    *(int32_t *)(uintptr_t)x[0] = 0;
+                set_saved(saved, 0, 0);
                 return;
             }
         }
