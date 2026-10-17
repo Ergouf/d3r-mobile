@@ -495,6 +495,41 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
         default_signal(sig);
     }
     in_handler = 1;
+    /* Very first thing: a TLS-free, libc-free line into the crash file.  The
+       full dump walks /proc and uses dladdr, either of which can fault again
+       when TPIDR_EL0 still points into guest memory. */
+    {
+        static const char hex[] = "0123456789abcdef";
+        char line[160];
+        int used = 0;
+        const char *labels[3] = {"sig=", "pc=", "lr="};
+        uint64_t values[3];
+        values[0] = (uint64_t)sig;
+        values[1] = (uint64_t)mc->pc;
+        values[2] = (uint64_t)mc->regs[30];
+        for (int item = 0; item < 3; ++item) {
+            for (const char *p = labels[item]; *p; ++p)
+                line[used++] = *p;
+            line[used++] = '0';
+            line[used++] = 'x';
+            int started = 0;
+            for (int shift = 60; shift >= 0; shift -= 4) {
+                unsigned digit = (unsigned)((values[item] >> shift) & 0xf);
+                if (digit || started || shift == 0) {
+                    line[used++] = hex[digit];
+                    started = 1;
+                }
+            }
+            line[used++] = ' ';
+        }
+        line[used++] = '\n';
+        long fd = raw_syscall4(RAW_SYS_OPENAT, RAW_AT_FDCWD, (long)(uintptr_t)CRASH_PATH,
+                               577 /* O_WRONLY|O_CREAT|O_TRUNC */, 420 /* 0644 */);
+        if (fd >= 0) {
+            raw_syscall4(RAW_SYS_WRITE, fd, (long)(uintptr_t)line, used, 0);
+            raw_syscall4(RAW_SYS_CLOSE, fd, 0, 0, 0);
+        }
+    }
     uint64_t fault_tid = (uint64_t)raw_syscall4(RAW_SYS_GETTID, 0, 0, 0, 0);
     /* Every thread is dumped: guest workers and host helper threads are just as
        fatal, and restricting the dump to the main guest thread hid several

@@ -1251,3 +1251,36 @@ fault 地址在 guest 映射区内，错误码 `SEGV_ACCERR`（权限不允许�
 1. 处理器最前面先用 **裸 `SYS_write(2, ...)`** 输出 `sig/pc/lr/fault`（不依赖 TLS/libc），确认处理器本体在跑
 2. 把 `dladdr` 全部移到 TLS 恢复之后，或加 `known` 保护
 3. 再逐步恢复完整 dump
+
+## 68. 崩溃 dump 终于落盘（关键修复 + 首个真实现场）
+
+在 `crash_handler` 开头加了一段**不依赖 libc/TLS 的裸 `openat/write`**（手写 hex），
+把 `sig/pc/lr` 先写进 `CRASH_PATH`，再走完整 dump。真机验证：
+
+```
+files/d3-crash.txt  18638 bytes
+tag=d3crash
+signal=000000000000000b
+fault=0000000000000038      ← null + 0x38
+bias=0000006e0db78000
+pc=0000006e0deba59c   pc_off=0x34259c
+lr=0000006e0deba5f4   lr_off=0x3425f4
+x0=0  x18=0xc  ...
+```
+
+pc 换算到 sdk 偏移：`0x34259c - 0x10000 = 0x33259c`，符号表解析：
+
+```
+0x331f90  nn::os::RegisterSystemWorkerHandler(MultiWaitHolderType*, void(*)())
++0x60c / +0x664
+```
+
+即崩溃发生在 **`nn::os` 的多等待（MultiWait）内部**，是对 `null + 0x38` 的解引用。
+
+## 69. 下一步
+
+1. 在 dump 里继续读栈回溯（`fp/lr` 链）确认调用者
+2. 怀疑点：guest 的 MultiWait 持有对象来自我们返回的句柄（例如 `0x1007` 的事件），
+   若该对象不是合法的可等待对象，SDK 在登记 holder 时就会解引用空指针
+3. 修复方向：让 `ICommonStateGetter::GetEventHandle` 返回的事件具备完整的可等待语义
+   （host 侧 event 对象与 `WaitSynchronization` 的 handle 表一致）
