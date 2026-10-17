@@ -1,4 +1,8 @@
 #include <jni.h>
+#include <signal.h>
+#include <string.h>
+#include <ucontext.h>
+#include <unistd.h>
 #include <android/log.h>
 #include <android/native_window_jni.h>
 
@@ -57,6 +61,39 @@ Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
     ANativeWindow_release(window);
 }
 
+/* Diagnostic fault logger: the guest crash currently leaves no tombstone we can
+ * read (non-root /data/tombstones), so print pc/lr/fault and then restore the
+ * default action to keep crash semantics unchanged. */
+static void d3_fault_logger(int sig, siginfo_t *info, void *ctx) {
+    ucontext_t *uc = (ucontext_t *)ctx;
+    unsigned long pc = 0, lr = 0, sp = 0;
+#if defined(__aarch64__)
+    pc = (unsigned long)uc->uc_mcontext.pc;
+    lr = (unsigned long)uc->uc_mcontext.regs[30];
+    sp = (unsigned long)uc->uc_mcontext.sp;
+#endif
+    __android_log_print(ANDROID_LOG_INFO, "d3fault", "sig=%d pc=%#lx lr=%#lx sp=%#lx fault=%p",
+                        sig, pc, lr, sp, info ? info->si_addr : 0);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void d3_install_fault_logger(void) {
+    static int installed = 0;
+    if (installed) {
+        return;
+    }
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = d3_fault_logger;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    installed = 1;
+}
+
 JNIEXPORT void JNICALL
 Java_com_d3mobile_host_MainActivity_nativeStart(JNIEnv *env, jobject activity,
                                                  jstring guest_path) {
@@ -78,6 +115,7 @@ Java_com_d3mobile_host_MainActivity_nativeStart(JNIEnv *env, jobject activity,
         }
     }
 
+    d3_install_fault_logger();
     (void)d3_host_start(path);
 
     if (guest_path != NULL) {

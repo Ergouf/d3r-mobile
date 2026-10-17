@@ -826,3 +826,17 @@ t16433: thread: start ... WaitSynchronizationN count=0 -> timed out
 1. 先把 guest 退出问题查清（用现有 `d3-crash.txt` / tombstone / logcat 的退出原因）
 2. 再实现 nvdrv 的 Open/Ioctl 子集（NvGpuAS / NvGpuChannel 的 Alloc/Map/Submit）
 3. 最后把 pushbuffer 接到已经跑通的 `PushGPUEntries`
+
+## 33. 退出原因：不是信号（也没有 tombstone 可读）
+
+- `/data/tombstones` 需要 root 读；`d3-crash.txt` 与 `files/runtime/logs` 都是空的
+- 加了诊断用 fault logger（`SIGSEGV/SIGBUS/SIGILL/SIGABRT` → 打 `pc/lr/sp/fault` 后恢复默认），
+  用 autostart 跑完整启动：**没有触发任何 fault 日志**，进程仍在一个 SVC 序列后消失
+- 因此 guest 更可能是走了 **自愿退出路径**（`ExitProcess` 类 SVC 或 host 侧 `_exit()`），
+  而不是崩溃信号
+
+## 34. 下一步
+
+1. 在 host 的 SVC 分发里给"退出类"系统调用加日志（找到是哪条 SVC / 哪个返回码让流程终止）
+2. 确认退出是否由 guest 主动调用（`svcExitProcess` / `svcExitThread`）触发
+3. 若是主动退出，回溯调用点（符号级）定位 guest 为什么会走到那里
