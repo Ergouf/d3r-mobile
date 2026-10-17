@@ -1105,3 +1105,22 @@ SDK 的断言/异常统一端点"的判断，而不是业务代码里的 assert 
 1. 反复运行直到 Break 命中，读 `brk frame` 链
 2. 若命中仍无帧链（x29 被破坏），改用 host 保存的完整寄存器快照 + `/proc/self/maps` 做离线展开
 3. 同时对比 SIGSEGV 形态的 tombstone，判断两种死亡是否同一根因
+
+## 58. 新边界：`appletOE cmd=1` 之后立刻 SIGSEGV
+
+连续三次运行都不再出现 Break(0)，全部是 `signal 11`，且最后一条 IPC 变成了：
+
+```
+svc cmif port=appletOE cmd=1 tag=6 words=... 0x1007 0x100001 0x5 ... flags=0x1
+svc cmif-in +0x20: SFCI 01 00 00 00 01 00 00 00 ...
+t...: WaitSynchronizationN count=1 handle=0x6 -> index 0
+<signal 11>
+```
+
+即 guest 拿到了新句柄 `0x1007`（appletOE cmd=1 的返回对象），在随后的
+`WaitSynchronizationN` 返回后立刻崩溃。
+
+这比之前"GetGpuErrorDetectedSystemEvent 之后崩溃"又前进了一步，说明 guest 已经
+在跑 applet 初始化流程。下一步应比对 Eden 的 `appletOE` 命令表，确认 cmd=1 是什么
+（很可能是 `OpenDisplay` / `GetDisplayService` 类），并让 host 的返回句柄/对象
+具备正确的可等待语义（`0x1007` 目前只是分配了一个 handle，但对应对象不可等待）。
