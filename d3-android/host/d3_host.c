@@ -2910,7 +2910,7 @@ static void svc_call(d3_saved *saved, uint32_t id) {
                    holder bookkeeping itself is modelled. */
                 if (x[0])
                     *(int32_t *)(uintptr_t)x[0] = 0;
-                set_saved(saved, 0, (uint64_t)-1);
+                set_saved(saved, 0, 0);
                 return;
             }
         }

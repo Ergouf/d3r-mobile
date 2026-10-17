@@ -1563,10 +1563,3 @@ if (d3_handle_kind(first) == D3_OBJ_THREAD && d3_handle_arg(first) != 0) {
 当就绪下标。因此 host 必须在**所有**失败路径返回 `-1`，而当前只有
 `count <= 0` 分支改了；`wait_result != 0` 分支仍返回 `index 0 / success`。
 下一步：统一该分支也返回 `-1`，并对事件等待的超时使用真实 `x[4]`。
-
-## 90. 等待失败路径统一返回 -1
-
-按第 86 节结论，把 `wait_result != 0` 分支也改为 `set_saved(saved, 0, (uint64_t)-1)`
-（SDK 只把 -1 当超时，其余值都当就绪下标）。
-
-本轮回读设备时未取到新的 dump（进程/日志为空），效果需下一轮重新跑一次确认。
