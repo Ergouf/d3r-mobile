@@ -1384,3 +1384,46 @@ return;                             /* ← 从不阻塞 */
 "guest 期望的 MultiWait holder 初始化顺序"。
 
 设备包保持可运行（崩溃仍在，但有 dump）。
+
+## 77. 新崩溃指令 + ABI 怀疑（关键）
+
+新 pc `sdk+0x335d78` 反汇编：
+
+```
+0x335d70: bl  #0x536940          ; 取锁
+0x335d74: mov x8, sp
+0x335d78: ldr x23, [x8, w24, sxtw #3]   ; ← 用 w24 作有符号索引读栈数组
+```
+
+w24 若为负数/巨大，就会读到映射区外（fault 0x6ebc712210 正是这种形态）。
+这个索引来自 `WaitSynchronizationN` 的**输出 index**。
+
+而我们 host 的 case 0x18 参数假设很可疑：
+
+```c
+list = x[0];      /* 当作句柄数组指针 */
+memcpy(&first, (const void*)list, 4);
+count = x[1];
+timeout = x[3];
+if (x[0]) *(int32_t*)x[0] = 0;   /* 又把 x[0] 当输出 index 指针写 */
+```
+
+Horizon 的 `svcWaitSynchronizationN` ABI 是：
+
+```
+x0 = int* out_index
+x1 = Handle* handles
+x2 = int num
+x3 = bool wait_all
+x4 = int64 timeout
+```
+
+也就是 **x[0] 是输出指针、句柄数组在 x[1]**；host 现在把两者混用了——既从 x[0]
+（输出指针所在栈槽）读"句柄"，又把 x[0] 当索引指针写。这能解释：
+句柄日志总是 `handle=0x6`（其实读到的是栈上的无关值）、guest 的 index 变量被写坏、
+以及按 index 读栈数组越界。
+
+## 78. 下一步
+
+按正确 ABI 重写 case 0x18：解析 x0..x4，校验 handle 数组，事件真正等待，
+成功写真实 index、失败写 -1 并返回 `0xEA01`。这是下一轮的首要工作。
