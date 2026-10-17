@@ -2896,7 +2896,7 @@ static void svc_call(d3_saved *saved, uint32_t id) {
             if (wait_timeout < 0)
                 wait_timeout = 2000000;
             uint32_t wait_result;
-            if (d3_handle_kind(first) == D3_OBJ_THREAD) {
+            if (d3_handle_kind(first) == D3_OBJ_THREAD && d3_handle_arg(first) != 0) {
                 wait_result = thread_wait(
                     (ThreadStart *)(uintptr_t)d3_handle_arg(first), wait_timeout);
             } else {

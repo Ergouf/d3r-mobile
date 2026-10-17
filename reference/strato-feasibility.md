@@ -1537,3 +1537,29 @@ host libc 崩溃消失，但 guest 的 `w24` 越界崩溃**又回来了**。
 1. 让所有"失败/超时"返回 **-1** 而不是 `0xEA01`（SDK 只认 -1）
 2. host libc 崩溃（fault 0x300）单独定位：dump 里的 `x0=0x300` 是空对象 + 偏移，
    很可能是 event 对象指针为空时调用了 `pthread_cond_wait`
+
+## 88. host 空对象等待崩溃已修
+
+`WaitSynchronizationN` 的 N 形式里，线程等待分支原来是：
+
+```c
+if (d3_handle_kind(first) == D3_OBJ_THREAD) {
+    wait_result = thread_wait((ThreadStart *)d3_handle_arg(first), wait_timeout);
+```
+
+当 `d3_handle_arg(first)` 为空时，`thread_wait` 里对空对象调用 libc 等待原语，
+产生 `fault=0x300`、`pc` 在 libc 的崩溃。改为：
+
+```c
+if (d3_handle_kind(first) == D3_OBJ_THREAD && d3_handle_arg(first) != 0) {
+```
+
+真机复跑：host libc 崩溃消失，回到已知的 guest 侧 `w24` 越界（`pc_off=0x345d78`）。
+
+## 89. 剩余唯一 guest 崩溃
+
+`sdk+0x345d78` 处的 `w24` 越界仍未解决。根据第 86 节的反汇编：
+`bl #0x537490` 返回 `w0`，SDK 用 `cmn w0,#1` 判断 -1（超时），否则把 `w0`
+当就绪下标。因此 host 必须在**所有**失败路径返回 `-1`，而当前只有
+`count <= 0` 分支改了；`wait_result != 0` 分支仍返回 `index 0 / success`。
+下一步：统一该分支也返回 `-1`，并对事件等待的超时使用真实 `x[4]`。
