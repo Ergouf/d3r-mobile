@@ -559,3 +559,30 @@ I d3gpu: renderer: Vulkan::RendererVulkan ready (vendor=Qualcomm)
    建立页表并 `BindRasterizer`
 2. 再 `GPU::AllocateChannel` / `InitChannel` / `BindChannel`
 3. 最后把 `/dev/nvhost-gpu` 的 pushbuffer ioctl 喂给 `GPU::PushGPUEntries`
+
+## 13. M2 进展：通道生命周期真机打通
+
+按 nvdrv 的真实顺序补齐后，`d3_gpu_channel_test()` 在真机通过：
+
+```cpp
+g_address_space = std::make_unique<Tegra::MemoryManager>(*g_system);   // 40 bit AS
+g_system->GPU().InitAddressSpace(*g_address_space);
+auto channel = g_system->GPU().AllocateChannel();
+channel->memory_manager = g_address_space.get();   // nvhost_as_gpu::BindChannel
+g_system->GPU().InitChannel(*channel, 0);
+```
+
+```
+I d3gpu: renderer: Vulkan::RendererVulkan ready (vendor=Qualcomm)
+I d3gpu: channel: allocated and initialised (0xb4...)
+```
+
+之前的崩溃就是 `ChannelState::memory_manager` 为空指针（`BindRasterizer+0`）。
+
+## 14. M2 剩余
+
+1. `GPU::PushGPUEntries(channel_id, CommandList&&)`：需要一个真实的
+   `Tegra::CommandList`（Maxwell 命令头），先把空/最小命令流送进去
+2. 把 host 现有 `nvdrv` ioctl 处理接到这套对象上（`/dev/nvhost-gpu` 的
+   NvGpuChannel / NvGpuAS fd 与 `channel->bind_id` 对应）
+3. 再谈 `RequestComposite` 真实 framebuffer（需要 GMMU Map + guest RAM）

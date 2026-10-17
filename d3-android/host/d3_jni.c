@@ -38,6 +38,7 @@ Java_com_d3mobile_host_MainActivity_nativePresent(JNIEnv *env, jobject activity,
     /* Bring Eden's real renderer up on the same surface; the clear above stays
      * as the visual fallback until composites are driven by the guest. */
     D3_GPU_CALL(d3_gpu_renderer_init, window);
+    D3_GPU_CALL(d3_gpu_channel_test);
     ANativeWindow_release(window);
 }
 

@@ -13,6 +13,8 @@
 #include "emu_window_d3.h"
 #include "video_core/gpu.h"
 #include "video_core/host1x/host1x.h"
+#include "video_core/control/channel_state.h"
+#include "video_core/memory_manager.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
 namespace {
@@ -26,6 +28,7 @@ void RendererReport(const char* format, ...) {
 
 std::unique_ptr<Core::System> g_system;
 std::unique_ptr<D3::EmuWindowD3> g_window;
+std::unique_ptr<Tegra::MemoryManager> g_address_space;
 
 } // namespace
 
@@ -38,15 +41,18 @@ extern "C" __attribute__((visibility("default"))) int d3_gpu_channel_test(void) 
         return -1;
     }
     try {
-        // A channel binds a rasterizer into its memory manager, which only works
-        // after the GPU address space has been created (nvdrv does this on
-        // NvGpuAS allocation).
-        g_system->GPU().InitAddressSpace(g_system->Host1x().gmmu_manager);
+        // nvhost_as_gpu::BindChannel wires the channel to the address space the
+        // guest allocated; a channel cannot be initialised without it.
+        if (!g_address_space) {
+            g_address_space = std::make_unique<Tegra::MemoryManager>(*g_system);
+            g_system->GPU().InitAddressSpace(*g_address_space);
+        }
         auto channel = g_system->GPU().AllocateChannel();
         if (!channel) {
             RendererReport("channel: AllocateChannel returned null");
             return -2;
         }
+        channel->memory_manager = g_address_space.get();
         g_system->GPU().InitChannel(*channel, 0);
         RendererReport("channel: allocated and initialised (%p)", static_cast<void*>(channel.get()));
         return 0;
