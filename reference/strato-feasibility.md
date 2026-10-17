@@ -745,3 +745,36 @@ memtest: gpu=0x100000 translated=0x6c90000000 ok=1
 composite: 640x360 framebuffer submitted (gpu=0x200000)
 截屏中心 (40,88,209)
 ```
+
+## 27. 根因（第二个）：`GPU::Start()` 从未被调用
+
+临时给 Eden 打日志后（已回滚，`reference/eden` 是只读克隆）发现：
+`RendererVulkan::Composite` **根本没执行**。原因：
+
+```cpp
+void GPU::Start() {
+    Settings::UpdateGPUAccuracy();
+    gpu_thread.StartThread(*renderer, renderer->Context(), scheduler);
+}
+```
+
+`BindRenderer` 只做绑定，GPU 命令线程由 `GPU::Start()` 显式启动。我们之前只调了
+`BindRenderer`，所以 `SubmitList` / `RequestComposite` 全部进了队列却没人消费
+（同步模式下表现为"卡住"）。
+
+补上 `gpu.Start()` 后真机日志：
+
+```
+I d3render: Composite: got frame, drawing
+I d3present: Present(frame=0xb4...) thread_mode=1
+```
+
+即 composite 已经跑到 `Present()`，但 `PresentThread` 的 `CopyToSwapchain`
+仍未执行（`thread_mode=1` 时 frame 通过 `scheduler.Record` 入队，依赖
+scheduler worker 实际执行回调）。下一个待查点就是这条队列回调何时被 flush。
+
+## 28. 当前状态
+
+- `gpu.Start()` 已加入 host 适配层并真机验证（进程存活、各步骤日志齐全）
+- Eden 侧的临时日志已全部回滚（`git -C reference/eden checkout -- ...`）
+- 画面仍是 M1 清屏色；present 线程未消费帧

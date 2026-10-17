@@ -93,6 +93,9 @@ extern "C" __attribute__((visibility("default"))) int d3_gpu_renderer_init(void*
                                                                  gpu, g_window->CreateSharedContext());
         const std::string vendor = renderer->GetDeviceVendor();
         gpu.BindRenderer(std::move(renderer));
+        // BindRenderer only wires the renderer in; the GPU command thread is
+        // started by GPU::Start(), otherwise submits queue up forever.
+        gpu.Start();
         RendererReport("renderer: Vulkan::RendererVulkan ready (vendor=%s)", vendor.c_str());
         return 0;
     } catch (const std::exception& exception) {
