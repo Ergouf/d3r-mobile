@@ -1012,3 +1012,30 @@ backtrace:
 2. 对照 `d3-service.log` 最后几条 IPC（`GetGpuErrorDetectedSystemEvent` 之后），
    确认是哪个服务返回错误触发了断言
 3. 补齐对应 HLE（最可能仍是 GPU/nvdrv 初始化相关）
+
+## 48. 断言地址的符号可疑：落在 `nn::ec` 商店代码里
+
+把 `sdk+0x193ad8` 映射回 guest vaddr（`0x10000 + 0x193ad8 = 0x1a3ad8`）后：
+
+- `libd3guest.so` 已被剥离到只剩 `.dynstr/.dynsym/.rela.dyn`，**没有可反汇编的 section**
+- `reference/extract/exefs_update/sdk.nso0` 用 `parsenso.py` 的 `to_file()` 可以定位字节，
+  但本机没有 `capstone` 也没有 `llvm-mc`，`llvm-objdump` 不能直接反汇编裸二进制
+- 用 `sdk.symbols.json` 看该偏移附近，**全是 `nn::ec` 商店（ShowShopPage / ShopServiceAccessServer）代码**：
+
+```
+0x193980  nn::ec::detail::ShowShopPageArg::SetUid
+0x193a10  nn::ec::detail::ShowShopPageArg::SetCallbackUrl
+0x193b00  nn::ec::detail::ShowShopPageArg::SetCallbackableUrl
+```
+
+暗黑3 启动时不会去调 eShop，所以更可能的解释是：**`sdk+offset` 的基准不对**
+（host 的 `module_of()` 用的 sdk base 与 README 里 "sdk 位于 vaddr 0x10000" 的假设不一致），
+或者 lr 落在内联断言里、符号表缺失该内部函数。
+
+## 49. 下一轮
+
+1. 用 host 日志里的 `bias` 与 `module_of()` 输出，反推 sdk base 是否等于 `0x10000`
+   （打印 `module_of` 用的基表）
+2. 装 `capstone`（pip）或用 `llvm-objdump` + 手写 ELF 包装，反汇编
+   `sdk.nso0` 在目标偏移附近，直接看 `brk #0` 前的字符串/条件
+3. 若基准确实偏移，修正后重新换算断言位置
