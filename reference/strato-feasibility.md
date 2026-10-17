@@ -1124,3 +1124,21 @@ t...: WaitSynchronizationN count=1 handle=0x6 -> index 0
 在跑 applet 初始化流程。下一步应比对 Eden 的 `appletOE` 命令表，确认 cmd=1 是什么
 （很可能是 `OpenDisplay` / `GetDisplayService` 类），并让 host 的返回句柄/对象
 具备正确的可等待语义（`0x1007` 目前只是分配了一个 handle，但对应对象不可等待）。
+
+## 59. 未实现命令改为返回 Result 后，guest 走得更远
+
+把 `applet_oe_command` 的 default 分支从"返回假对象"改成返回
+`Result = D3_RESULT(120,1)`（CMIF unsupported）后，guest 不再立刻解引用空对象，
+而是继续发起了一整串 appletOE 请求：
+
+```
+cmd=1, cmd=3, cmd=4, cmd=1000, cmd=91, cmd=130, cmd=0, cmd=1(0x1007)
+```
+
+随后仍在 `signal 11` 结束。说明：
+
+1. "假对象"确实是之前崩得更早的原因之一，错误返回让 guest 能继续探测接口
+2. 崩溃点移到了 appletOE 的后续调用（新的 `0x1007` 句柄出现后）
+
+下一步：保留错误返回策略，逐条实现这几条命令（尤其 cmd=1/3/4 与 cmd=91/130），
+并给返回的句柄正确的可等待语义。
