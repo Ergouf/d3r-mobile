@@ -801,3 +801,28 @@ scheduler worker 实际执行回调）。下一个待查点就是这条队列回
 1. 把两次提交的 hack 换成正确时机：guest 每帧都会 flush，天然满足"下一次 flush"
 2. pushbuffer → `PushGPUEntries` 接入（GPU 线程已启动）
 3. nvdrv ioctl ↔ 通道 fd 映射
+
+## 31. 真机现状：guest 在到达 nvdrv 之前就退出
+
+用 `--ez autostart true` 跑完整启动，约 1 秒后进程消亡
+（`ActivityManager: handleAppDied`），日志停在：
+
+```
+t16430: StartThread spawned
+t16433: thread: start ... WaitSynchronizationN count=0 -> timed out
+（随后进程退出，无 nvdrv:: 日志）
+```
+
+也就是说 **Eden 渲染管线（M0–M3 渲染侧）已经可用，但 guest 还没走到 GPU 初始化**
+就退出了；上一轮之前文档记录过这个"非 guest 线程上退出"的老问题。
+
+因此 M3 的"guest 驱动的第一帧"当前被两件事阻塞：
+
+1. guest 提前退出（需要重新定位退出原因：信号链 / 线程握手 / 服务缺失）
+2. nvdrv ioctl 实现（目前是 stub，只记 fd/cmd）
+
+## 32. 建议顺序
+
+1. 先把 guest 退出问题查清（用现有 `d3-crash.txt` / tombstone / logcat 的退出原因）
+2. 再实现 nvdrv 的 Open/Ioctl 子集（NvGpuAS / NvGpuChannel 的 Alloc/Map/Submit）
+3. 最后把 pushbuffer 接到已经跑通的 `PushGPUEntries`
