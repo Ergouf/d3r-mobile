@@ -1060,3 +1060,31 @@ backtrace:
 2. 或者 hook `nn::diag::Abort` / `nn::diag::detail::Assert`，拿到 result 与 file/line
 3. 结合 `d3-service.log` 最后一条 IPC（`GetGpuErrorDetectedSystemEvent`），
    判断是哪个初始化步骤失败后抛出
+
+## 52. 异常/断言 hook 已装（部分未触发）
+
+在 `g_hooks` 里新增了四类诊断 hook（都只记录后 abort，属临时诊断）：
+
+| hook | guest vaddr | 结果 |
+|---|---|---|
+| `__cxa_throw` | 0x4d9ea0 | 未触发 |
+| `std::terminate` | 0x4d72d8 | 未触发 |
+| `_Unwind_RaiseException` | 0x532730 | 未触发 |
+| `nn::diag::detail::AbortImpl`（3 个重载） | 0x1924a0 / 0x192500 / 0x1925e0 | 本轮未触发（这次 guest 停在 `WaitSynchronizationN` 没走到崩溃） |
+
+因此之前"未捕获 C++ 异常"的推断**尚未被证实**，也未被否定：这几次运行里异常路径
+根本没走到。
+
+## 53. 新证据：Break payload 变成 `01 fa 00 00`
+
+同一次崩溃的 Break 参数从全零变成 `01 fa 00 00`（= 0x0000FA01），说明 guest
+在 `brk #0` 时通过 x1 传了一个**小整数结果码**，而不是字符串。这也支持"这是
+SDK 的断言/异常统一端点"的判断，而不是业务代码里的 assert 文本。
+
+## 54. 下一步
+
+1. 多跑几次（guest 有时停在 WaitSynchronizationN，不总是崩）
+2. 增加 `nn::diag::detail::OnAssertionFailure`（0x192600 / 0x192750）hook，它比
+   AbortImpl 更早，能拿到 assertion type/file/line
+3. 若仍不命中，说明 Break(0) 来自 `os::UserExceptionInfo` 路径（未处理异常处理器），
+   下一步 hook `nn::os::detail::...ExceptionHandler`

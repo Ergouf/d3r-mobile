@@ -1600,7 +1600,73 @@ static uint64_t hook_vi_get_native_window(uint64_t out, uint64_t layer) {
     return 0;
 }
 
+/* Diagnostic: the guest currently dies through std::terminate.  __cxa_throw is
+   called with (object, std::type_info*, destructor) and its guest return
+   address is the throw site, which is exactly what is missing from the crash
+   reports.  The hook logs and stops, because a throw must not return. */
+static uint64_t hook_cxa_throw(uint64_t object, uint64_t type_info, uint64_t destructor) {
+    uint64_t site = (uint64_t)__builtin_return_address(0);
+    const char *name = "?";
+    if (type_info) {
+        uint64_t name_ptr = *(const uint64_t *)(uintptr_t)(type_info + 8);
+        if (name_ptr)
+            name = (const char *)(uintptr_t)name_ptr;
+    }
+    info("__cxa_throw type=%s thrower=%#" PRIx64 " (%s+%#" PRIx64 ") obj=%#" PRIx64
+         " dtor=%#" PRIx64,
+         name, site, module_of(site), site >= g_bias ? site - g_bias : 0, object, destructor);
+    abort();
+    return 0;
+}
+
+static uint64_t hook_terminate(void) {
+    uint64_t site = (uint64_t)__builtin_return_address(0);
+    info("std::terminate caller=%#" PRIx64 " (%s+%#" PRIx64 ")", site, module_of(site),
+         site >= g_bias ? site - g_bias : 0);
+    abort();
+    return 0;
+}
+
+static uint64_t hook_raise_exception(uint64_t exception) {
+    uint64_t site = (uint64_t)__builtin_return_address(0);
+    info("_Unwind_RaiseException exception=%#" PRIx64 " caller=%#" PRIx64 " (%s+%#" PRIx64 ")",
+         exception, site, module_of(site), site >= g_bias ? site - g_bias : 0);
+    abort();
+    return 0;
+}
+
+static void log_cstr(const char *label, uint64_t ptr) {
+    if (!ptr) {
+        info("%s=(null)", label);
+        return;
+    }
+    const char *s = (const char *)(uintptr_t)ptr;
+    char text[160] = {0};
+    for (int i = 0; i < 120; ++i) {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 32 || c >= 127)
+            break;
+        text[i] = (char)c;
+    }
+    info("%s=[%s]", label, text);
+}
+
+static uint64_t hook_abort_impl(uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+    log_cstr("abort arg0", a);
+    log_cstr("abort arg1", b);
+    log_cstr("abort arg2", c);
+    log_cstr("abort arg3", d);
+    abort();
+    return 0;
+}
+
 static const GuestHook g_hooks[] = {
+    {0x1925e0, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,i)"},
+    {0x192500, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,r,f)"},
+    {0x1924a0, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,i,r,exc,v)"},
+    {0x4d9ea0, (void *)hook_cxa_throw, "__cxa_throw"},
+    {0x4d72d8, (void *)hook_terminate, "std::terminate"},
+    {0x532730, (void *)hook_raise_exception, "_Unwind_RaiseException"},
     {0x39e2d0, (void *)hook_time_initialize, "_ZN2nn4time10InitializeEv"},
     {0x39e5e0, (void *)hook_time_is_initialized, "_ZN2nn4time13IsInitializedEv"},
     {0x3a14a0, (void *)hook_time_get_current_time, "StandardUserSystemClock::GetCurrentTime"},
