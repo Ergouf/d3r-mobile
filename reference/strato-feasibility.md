@@ -1233,3 +1233,21 @@ fault 地址在 guest 映射区内，错误码 `SEGV_ACCERR`（权限不允许�
    确认处理器能跑完并输出
 2. 再逐步加回 dump 内容，找出具体是哪一步二次 fault
 3. 同时 fault addr 0x6e26fb5210 + SEGV_ACCERR 值得单独查：可能是 guest 写只读段
+
+## 66. crash_handler 仍未输出：怀疑 dump 路径二次 fault
+
+代码走查（`d3_host.c`）：
+
+- 处理器开头用 `raw_syscall(getpid/gettid)`、`mrs tpidr_el0`、全局数组查表，**不碰 libc/TLS**
+- 只有在找到已登记线程（`known`）时才恢复 host TLS
+- 之后立刻 `dump_text/dump_field`（写全局缓冲，安全），但很快就调用 `dladdr()`（**需要 libc/TLS**）
+- 若线程不在 `g_fault_threads` 里（例如 ART/host 线程），TLS 仍是 guest 的，`dladdr` 会二次 fault，
+  `in_handler` 保护后按默认动作终止 —— 与"只有 `F libc: Fatal signal 11`、没有我们的 dump"吻合
+
+注意：`d3_handle_dump()`（`d3_service.c`）只是打印 handle 表，与崩溃 dump 无关。
+
+## 67. 下一步（明确）
+
+1. 处理器最前面先用 **裸 `SYS_write(2, ...)`** 输出 `sig/pc/lr/fault`（不依赖 TLS/libc），确认处理器本体在跑
+2. 把 `dladdr` 全部移到 TLS 恢复之后，或加 `known` 保护
+3. 再逐步恢复完整 dump
