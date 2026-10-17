@@ -196,8 +196,9 @@ extern "C" int d3_gpu_bridge_composite_test(void) {
         std::vector<Tegra::FramebufferConfig> layers;
         layers.push_back(framebuffer);
         g_system->GPU().RequestComposite(std::move(layers), {});
-        RendererReport("composite: %ux%u framebuffer submitted (gpu=%#llx)", kWidth, kHeight,
-                       (unsigned long long)kGpuFramebuffer);
+        const auto& layout = g_window->GetFramebufferLayout();
+        RendererReport("composite: %ux%u framebuffer submitted (gpu=%#llx) layout=%ux%u", kWidth, kHeight,
+                       (unsigned long long)kGpuFramebuffer, layout.width, layout.height);
         return 0;
     } catch (const std::exception& exception) {
         RendererReport("composite: failed: %s", exception.what());

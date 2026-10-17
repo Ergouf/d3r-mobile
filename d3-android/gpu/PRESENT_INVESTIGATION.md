@@ -46,3 +46,15 @@ GPU::RequestComposite            video_core/gpu.cpp
 - `d3-android/gpu/host/renderer_bringup.cpp` —— 渲染器/composite 测试
 - `reference/eden/src/video_core/renderer_vulkan/vk_present_manager.cpp`
 - `reference/eden/src/video_core/renderer_vulkan/vk_blit_screen.cpp`
+
+## 2026-10-18 追加：layout 尺寸已排除
+
+`composite: 640x360 ... layout=2484x475` —— EmuWindow 的 framebuffer layout 与
+surface/swapchain 尺寸一致（2484x475），三个采样点仍是清屏色 `(40,88,209)`。
+
+所以嫌疑点 2（layout/extent 不匹配）基本排除，剩下：
+
+1. `present_manager.GetRenderFrame()` 阻塞 → `DrawToFrame`/`Present` 从未执行
+2. `PresentThread` 调 `swapchain.Present` 失败（返回值被忽略）
+
+下一步就是给 `vk_present_manager.cpp` 打临时日志（本地，不提交）。
