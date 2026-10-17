@@ -1039,3 +1039,24 @@ backtrace:
 2. 装 `capstone`（pip）或用 `llvm-objdump` + 手写 ELF 包装，反汇编
    `sdk.nso0` 在目标偏移附近，直接看 `brk #0` 前的字符串/条件
 3. 若基准确实偏移，修正后重新换算断言位置
+
+## 50. 反汇编结论：断言点其实在 libunwind 里（未捕获 C++ 异常）
+
+装上 capstone 后反汇编 `sdk.nso0` 在 `0x193a40..0x193b20`：
+
+- `0x193ad4..0x193aec` 是 `SetCallbackUrl` 式函数的尾巴（`ldp` 恢复寄存器 + 尾调用）
+- **该地址范围没有 `brk` 指令**；`lr=0x193ad8` 是 `bl #0x522720` 之后的返回地址
+- `0x5226c0 / 0x522720 / 0x522790` 用符号表解析都是 `unw_getcontext +0x7xx`，
+  也就是 **libunwind（异常展开）代码段**
+
+所以 guest 不是"在某业务函数里断言"，而是**抛出了一个 C++ 异常并走到
+`std::terminate` 路径**（`_Unwind_Resume` 之后调用 abort/brk）。这解释了
+`Break(0)` 参数是 4 字节全零（不是断言字符串）。
+
+## 51. 下一步
+
+1. 在 host 里 hook `__cxa_throw` / `_Unwind_RaiseException`（guest 使用同一套
+   libc++abi）记录异常类型与 `nn::Result` 值
+2. 或者 hook `nn::diag::Abort` / `nn::diag::detail::Assert`，拿到 result 与 file/line
+3. 结合 `d3-service.log` 最后一条 IPC（`GetGpuErrorDetectedSystemEvent`），
+   判断是哪个初始化步骤失败后抛出

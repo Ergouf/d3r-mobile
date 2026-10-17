@@ -2819,14 +2819,32 @@ static void svc_call(d3_saved *saved, uint32_t id) {
         if (x[0] == 0) {
             if (g_batch_logs < 24) {
                 g_batch_logs++;
-                if (x[1] != 0 && x[2] <= 8) {
+                if (x[1] != 0 && x[2] <= 64) {
                     const uint8_t *bytes = (const uint8_t *)(uintptr_t)x[1];
-                    char text[32] = {0};
+                    char text[256] = {0};
                     int pos = 0;
-                    for (size_t byte = 0; byte < x[2]; ++byte)
+                    for (size_t byte = 0; byte < x[2] && pos < 200; ++byte)
                         pos += snprintf(text + pos, sizeof text - (size_t)pos,
                                         "%02x ", bytes[byte]);
                     info("Break bytes %s", text);
+                    char ascii[72] = {0};
+                    for (size_t byte = 0; byte < x[2] && byte < 64; ++byte) {
+                        unsigned char c = bytes[byte];
+                        ascii[byte] = (c >= 32 && c < 127) ? (char)c : '.';
+                    }
+                    info("Break ascii %s", ascii);
+                }
+                if (x[6] > g_bias && x[6] - g_bias < (1u << 30)) {
+                    const uint8_t *s = (const uint8_t *)(uintptr_t)x[6];
+                    char text[200] = {0};
+                    int pos = 0;
+                    for (size_t byte = 0; byte < 48; ++byte) {
+                        unsigned char c = s[byte];
+                        if (c < 32 || c >= 127)
+                            break;
+                        pos += snprintf(text + pos, sizeof text - (size_t)pos, "%c", c);
+                    }
+                    info("Break x6 string [%s]", text);
                 }
                 info("Break assertion reason=%" PRIu64 " arg=%#" PRIx64 " size=%" PRIu64
                     " lr=%#" PRIx64 " (%s+%#" PRIx64 ") x0=%#" PRIx64 " x1=%#" PRIx64
