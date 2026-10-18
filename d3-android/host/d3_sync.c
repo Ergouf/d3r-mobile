@@ -157,12 +157,26 @@ uint32_t d3_sync_lock(uint32_t owner, uint32_t *mutex, uint32_t tag) {
     if (result != 0)
         return result;
     pthread_mutex_lock(&g_sync_lock);
-    if (__atomic_load_n(mutex, __ATOMIC_ACQUIRE) != (owner | D3_SYNC_WAIT_MASK)) {
+    /* Only a take by the thread that already owns the mutex may return without
+       waiting, and the caller's identity is `tag` (the value nn::os writes into
+       every lock word it owns).  `owner` is only what the caller read out of the
+       word -- the *current* owner, which for a second thread is someone else, so
+       comparing against it made a contended take look recursive and both threads
+       believed they held the same SDK mutex. */
+    const uint32_t value = __atomic_load_n(mutex, __ATOMIC_ACQUIRE);
+    if (tag == (value & ~D3_SYNC_WAIT_MASK)) {
         result = 0;
-    } else if (!sync_owner(owner)) {
+    } else if (!sync_owner(tag) && !sync_owner(owner)) {
         result = SYNC_INVALID_HANDLE;
     } else {
-        sync_log("sync: lock %p tag=%u blocks", (void *)mutex, tag);
+        /* Horizon signals "there are waiters" with the WAIT bit, and the unlocker's
+           *fast* path in guest code checks that bit: when it is clear the fast path
+           just stores zero and never comes back through svcArbitrateUnlock.  Setting
+           the bit here is what makes the release reach sync_unlock_locked (without
+           it a contended mutex slept forever, which is where nninitStartup's
+           nn::os::LockMutex call stalled). */
+        __atomic_fetch_or(mutex, D3_SYNC_WAIT_MASK, __ATOMIC_ACQ_REL);
+        sync_log("sync: lock %p tag=%u owner=%u blocks", (void *)mutex, tag, owner);
         sync_append(&waiter);
         result = sync_sleep(&waiter, 0);
         sync_log("sync: lock %p woke result=%#x", (void *)mutex, result);
@@ -180,12 +194,18 @@ uint32_t d3_sync_unlock(uint32_t *mutex, uint32_t tag) {
         return SYNC_INVALID_HANDLE;
     pthread_mutex_lock(&g_sync_lock);
     sync_log("sync: unlock %p tag=%u", (void *)mutex, tag);
-    if ((__atomic_load_n(mutex, __ATOMIC_ACQUIRE) & ~D3_SYNC_WAIT_MASK) != tag)
-        result = SYNC_INVALID_STATE;
-    else
-        sync_unlock_locked(mutex);
+    /* svcArbitrateUnlock never fails on hardware: it releases the word whatever it
+       currently holds and hands it to the first waiter.  The SDK aborts when the
+       call reports an error, and the title legitimately releases locks it does not
+       own (the thread-start mutex is taken by the new thread and released by its
+       parent), so a mismatched owner must still be a successful release. */
+    if ((__atomic_load_n(mutex, __ATOMIC_ACQUIRE) & ~D3_SYNC_WAIT_MASK) != tag) {
+        const uint32_t word = __atomic_load_n(mutex, __ATOMIC_ACQUIRE);
+        sync_log("sync: unlock %p owner mismatch word=%#x tag=%u", (void *)mutex, word, tag);
+    }
+    sync_unlock_locked(mutex);
     pthread_mutex_unlock(&g_sync_lock);
-    return result;
+    return 0;
 }
 
 uint32_t d3_sync_wait(uint32_t *mutex, uint32_t *key, uint32_t tag, int64_t timeout) {

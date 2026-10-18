@@ -11,7 +11,10 @@
 #endif
 
 int d3_host_start(const char *guest_path);
-void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved);
+/* thread_tp is the dispatching guest thread's tpidr_el0; the veneer passes it in
+   x3 so the dispatcher never reads a shared table slot that another guest thread
+   may be writing. */
+void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved, uint64_t thread_tp);
 void d3_trace_guest(const char *tag, const d3_saved *saved);
 
 #endif

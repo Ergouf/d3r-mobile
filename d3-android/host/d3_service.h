@@ -32,6 +32,8 @@ int d3_handle_close(uint32_t handle);
 void d3_handle_dump(void);
 
 void d3_service_open(void);
+/* Fill the Npad section of nn::hid's shared memory once the title mapped it. */
+void d3_hid_seed(uint64_t address);
 void d3_service_dump(const char *what, uint64_t address, const void *data, size_t size);
 void d3_svc_connect_to_named_port(d3_saved *saved);
 void d3_svc_send_sync_request(d3_saved *saved, uint64_t tls);

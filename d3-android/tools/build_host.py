@@ -14,6 +14,9 @@ HOST_SRC = [
     os.path.join(ROOT, "host", "d3_service.c"),
     os.path.join(ROOT, "host", "d3_sync.c"),
     os.path.join(ROOT, "host", "d3_jni.c"),
+    # The hook entry stub: TPIDR_EL0 switch + body dispatch, encoded by the
+    # assembler (hand written opcodes in C were wrong twice in a row).
+    os.path.join(ROOT, "host", "hook_stub.S"),
 ]
 GPU_LIB = os.path.join(ROOT, "build", "libeden_gpu.a")
 PROBE_SRC = os.path.join(ROOT, "tools", "d3_probe.c")

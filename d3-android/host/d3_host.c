@@ -3,6 +3,7 @@
 #include "d3_service.h"
 #include "d3_sync.h"
 #include "../guest_layout.h"
+#include "guest_relocs.h"
 
 #include <android/log.h>
 #include <dlfcn.h>
@@ -178,6 +179,160 @@ static uint32_t g_ring_next;
 static uint64_t g_guest_tid;
 static uint64_t g_last_kind;
 static uint64_t g_last_extra;
+
+static uint64_t this_guest_tls(void);
+static uint64_t current_guest_region(void);
+static int is_guest_region(uint64_t tls);
+static int thread_is_guest(pid_t tid);
+static uint64_t hook_guest_tp(void);
+static uint32_t guest_thread_id(uint64_t thread_tp);
+
+/* Dump the calling thread's guest TLS identity: region, thread object and the
+   id the SDK compares mutex owners against. */
+static void log_guest_region(const char *what) {
+    const uint64_t tlr = current_guest_region();
+    const uint64_t tp = tlr - 0x4000;
+    const uint64_t thread = tlr ? *(const uint64_t *)(uintptr_t)(tlr + 0x1f8) : 0;
+    const uint32_t id = thread ? *(const uint32_t *)(uintptr_t)(thread + 0x1b0) : 0;
+    info("%s tid=%ld tls=%#" PRIx64 " tlr=%#" PRIx64 " thread=%#" PRIx64 " id=%#x",
+         what, (long)gettid(), tp, tlr, thread, (unsigned)id);
+}
+
+
+/* Per-thread host TLS for the hook trampolines, plus the guest return address of
+   the hook call that is currently running (which is what names the call site of
+   an nn::diag::AbortImpl in the logs). */
+#define GUEST_TLS_SIZE 0xC000u
+#define GUEST_TLR_OFFSET 0x4000u
+#define GUEST_THREAD_OFFSET 0x8000u
+
+/* A guest thread may replace tpidr_el0 with a TLS block the SDK allocated for
+   itself (nn::os does that during nninitStartup), so tpidrro_el0 can no longer be
+   derived from the thread pointer.  Each thread therefore keeps the region this
+   host allocated for it, and the dispatcher maps the thread pointer back to that
+   region: the read-only thread pointer is what carries the message buffer and the
+   per-thread thread object the SDK compares mutex owners against. */
+#define MAX_TP_MAP 64
+static struct {
+    uint64_t tp;
+    uint64_t tls;
+} g_tp_map[MAX_TP_MAP];
+static int g_tp_map_count;
+
+static void tp_map_add(uint64_t tp, uint64_t tls) {
+    if (!tp || !tls)
+        return;
+    for (int index = 0; index < g_tp_map_count; index++) {
+        if (g_tp_map[index].tp == tp) {
+            g_tp_map[index].tls = tls;
+            return;
+        }
+    }
+    if (g_tp_map_count < MAX_TP_MAP) {
+        g_tp_map[g_tp_map_count].tp = tp;
+        g_tp_map[g_tp_map_count].tls = tls;
+        __atomic_store_n(&g_tp_map_count, g_tp_map_count + 1, __ATOMIC_RELEASE);
+    }
+}
+
+static uint64_t guest_tls_for_tp(uint64_t tp) {
+    const int count = __atomic_load_n(&g_tp_map_count, __ATOMIC_ACQUIRE);
+    for (int index = 0; index < count; index++) {
+        if (g_tp_map[index].tp == tp)
+            return g_tp_map[index].tls;
+    }
+    return 0;
+}
+
+/* The read-only thread pointer of the dispatching thread. */
+/* The title's own code re-points tpidr_el0 at its module TLS during main
+   DT_INIT, which has nothing to do with the region this host allocated for the
+   thread.  tpidrro_el0 still has to name that region, so the dispatcher falls
+   back to the host thread id, which guest_call recorded per thread. */
+static struct {
+    uint64_t tid;
+    uint64_t tls;
+} g_tid_map[MAX_TP_MAP];
+static int g_tid_map_count;
+
+static void tid_map_set(uint64_t tid, uint64_t tls) {
+    if (!tid || !tls)
+        return;
+    for (int index = 0; index < g_tid_map_count; index++) {
+        if (g_tid_map[index].tid == tid) {
+            g_tid_map[index].tls = tls;
+            return;
+        }
+    }
+    if (g_tid_map_count < MAX_TP_MAP) {
+        g_tid_map[g_tid_map_count].tid = tid;
+        g_tid_map[g_tid_map_count].tls = tls;
+        __atomic_store_n(&g_tid_map_count, g_tid_map_count + 1, __ATOMIC_RELEASE);
+    }
+}
+
+static uint64_t tid_map_get(uint64_t tid) {
+    const int count = __atomic_load_n(&g_tid_map_count, __ATOMIC_ACQUIRE);
+    for (int index = 0; index < count; index++) {
+        if (g_tid_map[index].tid == tid)
+            return g_tid_map[index].tls;
+    }
+    return 0;
+}
+
+static uint64_t guest_tlr_for_tp(uint64_t tp) {
+    uint64_t tls = guest_tls_for_tp(tp);
+    if (tls && !is_guest_region(tls))
+        tls = 0;
+    if (!tls) {
+        tls = tid_map_get((uint64_t)syscall(SYS_gettid));
+        if (tls && !is_guest_region(tls))
+            tls = 0;
+    }
+    /* A thread that never re-entered the veneer through guest_call (a title
+       thread, or the very first dispatch on a worker) has no map entry; falling
+       back to the title's own thread pointer then gives it a *different* thread
+       object than the one it used earlier, so nn::os TLS slots read back as NULL.
+       The calling thread's own region is always the right answer. */
+    const uint64_t from_map = tls;
+    if (!tls)
+        tls = tid_map_get((uint64_t)syscall(SYS_gettid));
+    const uint64_t from_tid = tls;
+    if (!tls)
+        tls = this_guest_tls();
+    const uint64_t from_self = tls;
+    if (!tls)
+        tls = tp;
+    if (from_map == 0 && from_tid == 0 && from_self == 0) {
+        static int logs;
+        if (logs < 8) {
+            logs++;
+            info("tlr: unresolved tp=%#" PRIx64 " tid=%ld self=%#" PRIx64, tp,
+                 (long)syscall(SYS_gettid), this_guest_tls());
+        }
+    }
+    if (tp && tls && tp != tls)
+        tp_map_add(tp, tls);
+    const uint64_t region = tls;
+    const uint64_t tlr = region + GUEST_TLR_OFFSET;
+    /* The kernel guarantees that every thread's read-only region points at a
+       thread object; a zero there makes nn::os dereference NULL (SIGSEGV at
+       0x1b0).  The title's own TLS setup never fills this host-owned page. */
+    if (tls && tlr && *(const uint64_t *)(uintptr_t)(tlr + 0x1f8) == 0)
+        *(uint64_t *)(uintptr_t)(tlr + 0x1f8) = region + GUEST_THREAD_OFFSET;
+    return tlr;
+}
+
+
+/* Non-static because hook_stub.S publishes the guest return address and thread
+   pointer here on every hook entry; the offsets (0/8/16) are fixed in that file
+   and in hook_guest_tp()'s callers. */
+struct {
+    uint64_t guest_lr;
+    uint64_t host_tp;
+    uint64_t guest_tp;
+} g_hook_tls;
+
 static uint32_t g_info_logs;
 static uint64_t g_tls;
 static uint64_t g_thread;
@@ -308,6 +463,7 @@ static void dump_index(const char *prefix, uint32_t index, uint64_t value) {
 }
 
 static int safe_read(uint64_t address, void *dst, uint64_t size);
+static int safe_write(uint64_t address, const void *src, uint64_t size);
 
 /* Prints the string a word points at, but only when it really is one: an abort
    records its message as a const char* on the faulting stack. */
@@ -418,8 +574,30 @@ static void raw_sigaction(int signal, const D3SigAction *action, D3SigAction *ol
 }
 
 static struct sigaction g_previous_signals[NSIG];
+/* The kernel slot each forced signal had before install_signal_actions took it
+   over: with ART loaded that is libsigchain's trampoline. */
+static D3SigAction g_kernel_signals[NSIG];
 static sig_atomic_t g_signal_reset[NSIG];
 static pthread_once_t g_signal_once = PTHREAD_ONCE_INIT;
+
+static void crash_handler(int sig, siginfo_t *si, void *context);
+
+/* Hand a signal back to whatever owned the kernel slot before the forcing: ART
+   resolves null checks in compiled code (and GC read barriers) by faulting and
+   resuming, and libsigchain dispatches those to its own handler, which the
+   forced slot otherwise hides behind SIG_DFL.  The signal stays pending while
+   this handler runs, so it is delivered again on return. */
+static int chain_kernel(int sig) {
+    const D3SigAction saved = g_kernel_signals[sig];
+    if (!saved.handler || saved.handler == (uint64_t)(uintptr_t)crash_handler)
+        return 0;
+    const uint64_t mask = UINT64_C(1) << (sig - 1);
+    raw_sigaction(sig, &saved, 0);
+    raw_syscall6(RAW_SYS_TGKILL, raw_syscall4(RAW_SYS_GETPID, 0, 0, 0, 0),
+                 raw_syscall4(RAW_SYS_GETTID, 0, 0, 0, 0), sig, 0, 0, 0);
+    raw_syscall6(RAW_SYS_RT_SIGPROCMASK, SIG_UNBLOCK, (long)(uintptr_t)&mask, 0, sizeof mask, 0, 0);
+    return 1;
+}
 
 static void default_signal(int sig) {
     D3SigAction action = {0};
@@ -465,6 +643,17 @@ static int safe_read(uint64_t address, void *dst, uint64_t size) {
                         (long)(uintptr_t)&local, 1, (long)(uintptr_t)&remote, 1, 0) == (long)size;
 }
 
+
+/* Write into guest memory through the kernel: never trust the pointer (a bad one
+   would fault the whole emulator), and report whether it landed. */
+static int safe_write(uint64_t address, const void *src, uint64_t size) {
+    if (!address || !src || size == 0 || size > 4096)
+        return 0;
+    struct iovec local = {(void *)src, (size_t)size};
+    struct iovec remote = {(void *)(uintptr_t)address, (size_t)size};
+    return syscall(SYS_process_vm_writev, getpid(), &local, 1, &remote, 1, 0) == (ssize_t)size;
+}
+
 static void dump_memory_links(uint32_t reg, uint64_t address) {
     uint64_t words[24];
     dump_field("m_register", reg);
@@ -481,11 +670,160 @@ static void dump_memory_links(uint32_t reg, uint64_t address) {
     }
 }
 
+/* Some guest code reads the *physical* counter (mrs Xt, cntpct_el0), which is
+   trapped at EL0 on Android: it arrives here as SIGILL and used to kill the
+   process.  Emulate it from the virtual counter, which runs at the same rate. */
+static int emulate_counter_read(mcontext_t *mc) {
+    const uint32_t *pc = (const uint32_t *)(uintptr_t)mc->pc;
+    uint32_t insn = 0;
+    if (!pc)
+        return 0;
+    insn = *pc;
+    if ((insn & 0xFFFFFFE0u) != 0xD53BE020u) /* mrs Xt, cntpct_el0 */
+        return 0;
+    uint64_t now = 0;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(now));
+    mc->regs[insn & 31u] = now;
+    mc->pc = (uint64_t)(uintptr_t)(pc + 1);
+    return 1;
+}
+
+/* Whether this tid ever entered guest code (see the definition further down). */
+static int thread_is_guest(pid_t tid);
+
 static void crash_handler(int sig, siginfo_t *si, void *context) {
     /* Only a guest fault needs its host TLS restored. Other threads must retain
        their own TLS while the preceding signal action runs. */
-    const ucontext_t *uc = context;
-    const mcontext_t *mc = &uc->uc_mcontext;
+    ucontext_t *uc = context;
+    mcontext_t *mc = &uc->uc_mcontext;
+    /* Not one of our guest threads: hand the fault back to whoever installed a
+       handler before us (ART, the framework), exactly as the kernel would. */
+    if (!thread_is_guest((pid_t)syscall(SYS_gettid))) {
+        const struct sigaction *previous = &g_previous_signals[sig];
+        static int framework_logs;
+        if (framework_logs < 24) {
+            framework_logs++;
+            info("framework fault sig=%d pc=%#" PRIx64 " tid=%ld prev=%s",
+                 sig, (uint64_t)(uintptr_t)mc->pc, (long)syscall(SYS_gettid),
+                 previous->sa_handler == SIG_DFL ? "dfl"
+                 : previous->sa_handler == SIG_IGN ? "ign"
+                                                   : "handler");
+        }
+        if (framework_logs <= 2) {
+            /* The faulting instruction and the thread pointer block say whether
+               ART lost its Thread* (a TLS problem of ours) or dereferenced a
+               null field of a Java object.  Read both through the kernel so a
+               bad pointer cannot fault the handler itself. */
+            const uint64_t pc = (uint64_t)(uintptr_t)mc->pc;
+            uint64_t code[8];
+            uint64_t tls[16];
+            uint64_t tp = 0;
+            __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tp));
+            g_dump_used = 0;
+            dump_text("tag=d3fault\n");
+            dump_field("sig", (uint64_t)sig);
+            dump_field("pc", pc);
+            dump_field("tpidr", tp);
+            if (safe_read(pc - 16, code, sizeof code)) {
+                for (uint32_t i = 0; i < 8; i++)
+                    dump_index("code", i, code[i]);
+            }
+            if (safe_read(tp, tls, sizeof tls)) {
+                for (uint32_t i = 0; i < 16; i++)
+                    dump_index("tls", i, tls[i]);
+            }
+            dump_file(CRASH_PATH);
+        }
+        if ((previous->sa_flags & SA_SIGINFO) && previous->sa_sigaction) {
+            previous->sa_sigaction(sig, si, context);
+            return;
+        }
+        if (previous->sa_handler && previous->sa_handler != SIG_DFL &&
+            previous->sa_handler != SIG_IGN) {
+            previous->sa_handler(sig);
+            return;
+        }
+        /* sigaction() cannot see ART's own handlers: libsigchain keeps them out
+           of the user chain, so a slot that reads as SIG_DFL can still hold its
+           trampoline.  Hand the signal back to that trampoline and re-raise
+           rather than killing the process; without this an ordinary Java null
+           fault in compiled code (ART resolves those by resuming at a throw
+           stub) ends the whole run. */
+        if (chain_kernel(sig))
+            return;
+        signal(sig, SIG_DFL);
+        raise(sig);
+        return;
+    }
+    /* A trapped counter read is not a fault: fix it up and resume the guest. */
+    if (sig == SIGILL && emulate_counter_read(mc))
+        return;
+    /* A jump into unmapped memory: the dumps show the guest landing on
+       0x4803xxxx/0x4805xxxx with x17 = 0, i.e. an indirect call through a NULL
+       function pointer (the placeholder objects this host hands out have no
+       vtable).  Name the call site and treat the call as having returned 0, so the
+       engine keeps running and the next call site shows up in the log too. */
+    if ((sig == SIGSEGV || sig == SIGBUS || sig == SIGILL) && mc->pc) {
+        Dl_info where;
+        const uint64_t pc = (uint64_t)mc->pc;
+        const int known_module = dladdr((void *)(uintptr_t)pc, &where) != 0;
+        const int in_guest = pc >= g_bias && pc < g_bias + 0x4000000ull;
+        static int wild_logs;
+        /* A target inside the image *size* but below the bias is an unrelocated
+           guest vaddr: add the bias and continue there instead of dying. */
+        if (!known_module && !in_guest && pc >= 0x10000ull && pc < 0x40000000ull) {
+            static int bias_logs;
+            if (bias_logs < 12) {
+                bias_logs++;
+                info("wild jump pc=%#" PRIx64 " is an unrelocated vaddr -> %#" PRIx64
+                     " (caller %s+%#" PRIx64 ")",
+                     pc, g_bias + pc, module_of((uint64_t)mc->regs[30]),
+                     (uint64_t)mc->regs[30] >= g_bias ? (uint64_t)mc->regs[30] - g_bias : (uint64_t)0);
+            }
+            mc->pc = g_bias + pc;
+            return;
+        }
+        if (!known_module && !in_guest && wild_logs < 24) {
+            wild_logs++;
+            Dl_info caller;
+            const char *caller_name = "?";
+            uint64_t caller_off = 0;
+            if (dladdr((void *)(uintptr_t)(uint64_t)mc->regs[30], &caller) && caller.dli_sname) {
+                caller_name = caller.dli_sname;
+                caller_off = (uint64_t)(uintptr_t)(uint64_t)mc->regs[30] -
+                             (uint64_t)(uintptr_t)caller.dli_saddr;
+            }
+            info("wild jump pc=%#" PRIx64 " lr=%#" PRIx64 " x0=%#" PRIx64 " x19=%#" PRIx64
+                 " caller=%s+%#" PRIx64 " lib=%s",
+                 pc, (uint64_t)mc->regs[30], (uint64_t)mc->regs[0], (uint64_t)mc->regs[19],
+                 caller_name, caller_off,
+                 (dladdr((void *)(uintptr_t)(uint64_t)mc->regs[30], &caller) && caller.dli_fname)
+                     ? caller.dli_fname
+                     : "?");
+            mc->pc = (uint64_t)mc->regs[30];
+            mc->regs[0] = 0;
+            return;
+        }
+    }
+    /* Veneer return trap: name the target and the caller, then take the branch. */
+    if (sig == SIGTRAP && mc->pc) {
+        const uint32_t insn = *(const uint32_t *)(uintptr_t)mc->pc;
+        if ((insn & 0xFFFF0000u) == 0xD4220000u) {
+            const uint64_t target = mc->regs[16];
+            const uint64_t caller = mc->regs[30];
+            static int veneer_logs;
+            /* Any guest address carries the load bias in its high bits; a target
+               without it (the 0x4803xxxx family in the dumps) is bogus. */
+            if ((target >> 32) != (g_bias >> 32) && veneer_logs < 12) {
+                veneer_logs++;
+                info("veneer: target %#" PRIx64 " outside image (caller %#" PRIx64 " %s+%#"
+                     PRIx64 ")",
+                     target, caller, module_of(caller), caller >= g_bias ? caller - g_bias : caller);
+            }
+            mc->pc = target;
+            return;
+        }
+    }
     /* Not __thread: a fault can arrive while TPIDR_EL0 still points at the guest
        TLS, and touching a thread-local then faults again, which the kernel turns
        into a silent default-action kill. */
@@ -656,7 +994,7 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
     dump_file(CRASH_PATH);
     dump_file(CRASH_PATH_FALLBACK);
     dump_file(CRASH_PATH_SDCARD);
-    if (known)
+    if (known || !thread_is_guest(fault_tid))
         chain_signal(sig, si, context);
     else
         default_signal(sig);
@@ -680,6 +1018,38 @@ static int pause_requested(void) {
 static int selftest_crash(void) {
     struct stat st;
     return stat(D3_DATA_ROOT "/selftest-crash", &st) == 0;
+}
+
+/* The wild jumps land in the 0x48xxxxxx range, which dladdr cannot name.  Log
+   every executable mapping once at startup so the dump can be matched against the
+   process layout (ours vs the framework's). */
+static void log_exec_maps(void) {
+    FILE *maps = fopen("/proc/self/maps", "re");
+    if (!maps)
+        return;
+    char line[512];
+    int logs = 0;
+    while (logs < 40 && fgets(line, sizeof line, maps)) {
+        const size_t len = strlen(line);
+        if (len < 20 || strstr(line, " r-xp ") == 0)
+            continue;
+        char *const nl = strchr(line, '\n');
+        if (nl)
+            *nl = 0;
+        info("map: %s", line);
+        logs++;
+    }
+    fclose(maps);
+}
+
+/* /data/user/0/<pkg>/files/d3-host-force-signals hands the kernel slots for
+   SIGSEGV/SIGBUS/SIGABRT to crash_handler.  It stays off by default: libsigchain
+   owns those slots to run ART's fault manager, which resolves the null checks
+   compiled Java relies on, and a forced slot turns every one of them into a dead
+   process.  Our own handler still sees guest faults through libsigchain's chain. */
+static int signal_force_disabled(void) {
+    struct stat st;
+    return stat(D3_PRIVATE_ROOT "/files/d3-host-force-signals", &st) != 0;
 }
 
 static void install_signal_actions(void) {
@@ -709,16 +1079,24 @@ static void install_signal_actions(void) {
         if (sig == SIGSEGV || sig == SIGBUS || sig == SIGABRT) {
             /* ART installs libsigchain, so the kernel slot points at its
                trampoline even though sigaction() reports our handler; a fatal
-               fault then never reaches crash_handler.  Force the kernel slot. */
-            D3SigAction forced = {0};
-            forced.handler = (uint64_t)(uintptr_t)crash_handler;
-            forced.flags = SA_SIGINFO | SA_RESTART;
-            forced.restorer = kernel.restorer;
-            forced.mask = kernel.mask;
-            raw_sigaction(sig, &forced, 0);
-            raw_sigaction(sig, 0, &kernel);
-            info("sig %d forced kernel=%" PRIx64 " ours=%d", sig, kernel.handler,
-                 kernel.handler == (uint64_t)(uintptr_t)crash_handler);
+               fault then never reaches crash_handler.  Force the kernel slot,
+               unless the no-force flag asks for libsigchain to keep it: ART then
+               resolves the null checks its compiled code relies on, which a
+               forced slot turns into process death. */
+            g_kernel_signals[sig] = kernel;
+            if (signal_force_disabled()) {
+                info("sig %d left to libsigchain kernel=%" PRIx64, sig, kernel.handler);
+            } else {
+                D3SigAction forced = {0};
+                forced.handler = (uint64_t)(uintptr_t)crash_handler;
+                forced.flags = SA_SIGINFO | SA_RESTART;
+                forced.restorer = kernel.restorer;
+                forced.mask = kernel.mask;
+                raw_sigaction(sig, &forced, 0);
+                raw_sigaction(sig, 0, &kernel);
+                info("sig %d forced kernel=%" PRIx64 " ours=%d", sig, kernel.handler,
+                     kernel.handler == (uint64_t)(uintptr_t)crash_handler);
+            }
         }
         info("sig %d user=%p ours=%d kernel=%" PRIx64 " chained=%d", sig,
              (void *)(uintptr_t)current.sa_sigaction, current.sa_sigaction == crash_handler,
@@ -1492,6 +1870,15 @@ static int fs_open_host_mode(const char *path, int writable) {
 
 static uint64_t hook_fs_open_file(uint64_t out, uint64_t path, uint64_t mode) {
     info("fs: OpenFile %s mode=%#" PRIx64, path ? (const char *)(uintptr_t)path : "(null)", mode);
+    if (path && strstr((const char *)(uintptr_t)path, "CrashInfo")) {
+        static int logs;
+        if (logs < 6) {
+            logs++;
+            info("fs: CrashInfo open caller=%#" PRIx64 " (%s+%#" PRIx64 ")", g_hook_tls.guest_lr,
+                 module_of(g_hook_tls.guest_lr),
+                 g_hook_tls.guest_lr >= g_bias ? g_hook_tls.guest_lr - g_bias : 0);
+        }
+    }
     /* mode bit 0 is read; the title opens with 1 and only creates through
        nn::fs::CreateFile, so a plain open must never create. */
     int handle = path ? fs_open_host_mode((const char *)(uintptr_t)path, (mode & 2) != 0) : -1;
@@ -1615,25 +2002,57 @@ static uint64_t hook_fs_set_file_size(uint64_t handle, uint64_t size) {
    handle the host does not model yet, so the holder is handed a stable zeroed
    block instead: everything that later treats it as an opaque pointer keeps
    working, and the display path can be grown behind it. */
-static unsigned char g_native_window[0x100];
-static unsigned char g_vi_layer[0x100];
+/* The guest is a 32-bit-minded title: it stores object pointers in 32-bit fields,
+   and a host address above 4 GiB then gets truncated (the wild jumps to 0x48xxxxxx
+   are exactly the low halves of our 0x6e0e... pointers).  Keep the objects this
+   host hands out in the low 4 GiB so a truncating store still yields a valid
+   pointer. */
+static unsigned char *g_native_window;
+static unsigned char *g_vi_layer;
+
+#define D3_LOW_ARENA 0x20000000ull
+#define D3_LOW_ARENA_SIZE 0x2000u
+
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+
+static void *low_arena(void) {
+    static void *arena;
+    if (arena)
+        return arena;
+    /* A plain mapping: forcing the arena into a low gap collided with ART's JIT
+       space (binder threads started faulting) and the truncation theory it was
+       meant to test is disproven. */
+    void *mapped = mmap(0, D3_LOW_ARENA_SIZE, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mapped == MAP_FAILED)
+        fail("vi arena allocation errno %d", errno);
+    arena = mapped;
+    g_native_window = (unsigned char *)arena + 0x1000;
+    g_vi_layer = (unsigned char *)arena + 0x800;
+    info("vi: placeholder arena at %p", arena);
+    return arena;
+}
 
 /* The real nn::vi::Layer is built from a binder-backed native window.  Handing
    the title a stable placeholder layer keeps its display code running while the
    window system stays unimplemented. */
 static uint64_t hook_vi_create_layer(uint64_t out, uint64_t display, uint64_t arg2, uint64_t arg3) {
+    (void)low_arena();
     (void)display;
     (void)arg2;
     (void)arg3;
     if (out)
         *(uint64_t *)(uintptr_t)out = (uint64_t)(uintptr_t)g_vi_layer;
-    info("vi: CreateLayer -> placeholder %p", (void *)g_vi_layer);
+    info("vi: CreateLayer out=%p -> placeholder %p", (void *)(uintptr_t)out, (void *)g_vi_layer);
     return 0;
 }
 
 /* A zeroed block makes the first dereference land on 0; pointing the head at the
    tail keeps a shallow chain of loads inside the block. */
 static void native_window_init(void) {
+    (void)low_arena();
     *(uint64_t *)&g_native_window[0] = (uint64_t)(uintptr_t)&g_native_window[0x40];
     *(uint64_t *)&g_native_window[0x40] = (uint64_t)(uintptr_t)&g_native_window[0x80];
 }
@@ -1644,7 +2063,8 @@ static uint64_t hook_vi_deserialize_native_window(uint64_t holder, uint64_t parc
     native_window_init();
     if (holder)
         *(uint64_t *)(uintptr_t)holder = (uint64_t)(uintptr_t)g_native_window;
-    info("vi: DeserializeNativeWindow -> dummy %p", (void *)g_native_window);
+    info("vi: DeserializeNativeWindow holder=%p -> dummy %p", (void *)(uintptr_t)holder,
+         (void *)g_native_window);
     return 0;
 }
 
@@ -1652,7 +2072,7 @@ static uint64_t hook_vi_get_native_window(uint64_t out, uint64_t layer) {
     (void)layer;
     if (out)
         *(uint64_t *)(uintptr_t)out = (uint64_t)(uintptr_t)g_native_window;
-    info("vi: GetNativeWindow -> dummy");
+    info("vi: GetNativeWindow out=%p -> dummy %p", (void *)(uintptr_t)out, (void *)g_native_window);
     return 0;
 }
 
@@ -1661,7 +2081,7 @@ static uint64_t hook_vi_get_native_window(uint64_t out, uint64_t layer) {
    address is the throw site, which is exactly what is missing from the crash
    reports.  The hook logs and stops, because a throw must not return. */
 static uint64_t hook_cxa_throw(uint64_t object, uint64_t type_info, uint64_t destructor) {
-    uint64_t site = (uint64_t)__builtin_return_address(0);
+    const uint64_t site = g_hook_tls.guest_lr;
     const char *name = "?";
     if (type_info) {
         uint64_t name_ptr = *(const uint64_t *)(uintptr_t)(type_info + 8);
@@ -1676,7 +2096,7 @@ static uint64_t hook_cxa_throw(uint64_t object, uint64_t type_info, uint64_t des
 }
 
 static uint64_t hook_terminate(void) {
-    uint64_t site = (uint64_t)__builtin_return_address(0);
+    const uint64_t site = g_hook_tls.guest_lr;
     info("std::terminate caller=%#" PRIx64 " (%s+%#" PRIx64 ")", site, module_of(site),
          site >= g_bias ? site - g_bias : 0);
     abort();
@@ -1684,7 +2104,7 @@ static uint64_t hook_terminate(void) {
 }
 
 static uint64_t hook_raise_exception(uint64_t exception) {
-    uint64_t site = (uint64_t)__builtin_return_address(0);
+    const uint64_t site = g_hook_tls.guest_lr;
     info("_Unwind_RaiseException exception=%#" PRIx64 " caller=%#" PRIx64 " (%s+%#" PRIx64 ")",
          exception, site, module_of(site), site >= g_bias ? site - g_bias : 0);
     abort();
@@ -1696,28 +2116,234 @@ static void log_cstr(const char *label, uint64_t ptr) {
         info("%s=(null)", label);
         return;
     }
-    const char *s = (const char *)(uintptr_t)ptr;
+    unsigned char raw[16] = {0};
     char text[160] = {0};
+    if (!safe_read(ptr, raw, sizeof raw)) {
+        info("%s ptr=%#" PRIx64 " unreadable", label, ptr);
+        return;
+    }
     for (int i = 0; i < 120; ++i) {
-        unsigned char c = (unsigned char)s[i];
+        unsigned char c = raw[0];
+        if (i < (int)sizeof raw)
+            c = raw[i];
+        else if (!safe_read(ptr + (uint64_t)i, &c, 1))
+            break;
         if (c < 32 || c >= 127)
             break;
         text[i] = (char)c;
     }
-    info("%s=[%s]", label, text);
+    if (text[0]) {
+        info("%s=[%s] ptr=%#" PRIx64, label, text, ptr);
+        return;
+    }
+    info("%s is not text: ptr=%#" PRIx64 " words=%08x %08x %08x %08x", label, ptr,
+         (unsigned)raw[0] | ((unsigned)raw[1] << 8) | ((unsigned)raw[2] << 16) |
+             ((unsigned)raw[3] << 24),
+         (unsigned)raw[4] | ((unsigned)raw[5] << 8) | ((unsigned)raw[6] << 16) |
+             ((unsigned)raw[7] << 24),
+         (unsigned)raw[8] | ((unsigned)raw[9] << 8) | ((unsigned)raw[10] << 16) |
+             ((unsigned)raw[11] << 24),
+         (unsigned)raw[12] | ((unsigned)raw[13] << 8) | ((unsigned)raw[14] << 16) |
+             ((unsigned)raw[15] << 24));
 }
 
-static uint64_t hook_abort_impl(uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+/* The trampoline records the guest's return address, so an abort names the guest
+   call site instead of the hook stub. */
+static void log_hook_region(const char *what) {
+    const uint64_t tp = g_hook_tls.guest_tp;
+    const uint64_t tlr = tp + GUEST_TLR_OFFSET;
+    const uint64_t thread = tlr ? *(const uint64_t *)(uintptr_t)(tlr + 0x1f8) : 0;
+    const uint32_t id = thread ? *(const uint32_t *)(uintptr_t)(thread + 0x1b0) : 0;
+    uint32_t word = 0;
+    if (g_bias)
+        (void)safe_read(g_bias + 0xcd9b4cu, &word, sizeof word);
+    info("%s tid=%ld tp=%#" PRIx64 " thread=%#" PRIx64 " id=%#x applet_mutex=%#x", what,
+         (long)syscall(SYS_gettid), tp, thread, (unsigned)id, word);
+    const int count = __atomic_load_n(&g_tp_map_count, __ATOMIC_ACQUIRE);
+    for (int index = 0; index < count; index++)
+        info("tp map %d: tp=%#" PRIx64 " tls=%#" PRIx64, index, g_tp_map[index].tp,
+             g_tp_map[index].tls);
+}
+
+static void log_hook_site(const char *what) {
+    const uint64_t site = g_hook_tls.guest_lr;
+    info("%s caller=%#" PRIx64 " (%s+%#" PRIx64 ")", what, site, module_of(site),
+         site >= g_bias ? site - g_bias : (uint64_t)0);
+}
+
+/* The innermost frame only names the assert helper; the caller chain that got
+   there is still on the guest stack, so keep the return addresses that point into
+   the image and name them by module. */
+static void log_guest_stack(uint64_t sp, int words) {
+    int shown = 0;
+    for (int index = 0; index < words && shown < 24; index++) {
+        uint64_t word = 0;
+        if (!safe_read(sp + (uint64_t)index * 8u, &word, sizeof word))
+            break;
+        const char *module = module_of(word);
+        if (module[0] == 'h' && module[1] == 'o')
+            continue;
+        const uint64_t off = word - g_bias;
+        const uint64_t rel = off < 0x1000000u ? off : off - 0x1000000u;
+        info("  stack[%d] %s+%#" PRIx64, index, module, rel);
+        shown++;
+    }
+}
+
+/* nn::os::SdkRecursiveMutexType::Unlock = assert(IsLockedByCurrentThread) then
+   --count, and Leave() when the count reaches zero.  The assert is what keeps
+   firing while the title hands locks between threads, so the decrement and the
+   release happen here instead.  Layout: word at +0, recursion count at +4. */
+static uint64_t hook_recursive_mutex_unlock(uint64_t self) {
+    uint32_t count = 0;
+    uint32_t word = 0;
+    if (!self || !safe_read(self + 4, &count, sizeof count))
+        return 0;
+    (void)safe_read(self, &word, sizeof word);
+    const uint32_t id = guest_thread_id(hook_guest_tp());
+    static int logs;
+    if (logs < 16) {
+        logs++;
+        const uint64_t site = g_hook_tls.guest_lr;
+        info("SdkRecursiveMutexType::Unlock self=%p count=%u word=%#x my_id=%#x caller=%s+%#" PRIx64,
+             (void *)(uintptr_t)self, count, word, id, module_of(site), site - g_bias);
+    }
+    if (count > 1) {
+        const uint32_t next = count - 1;
+        *(uint32_t *)(uintptr_t)(self + 4) = next;
+        return 0;
+    }
+    *(uint32_t *)(uintptr_t)(self + 4) = 0;
+    (void)d3_sync_unlock((uint32_t *)(uintptr_t)self, id);
+    return 0;
+}
+
+/* nn::os TLS slots.  Storing them in the guest's thread object
+   ([tpidrro_el0+0x1f8]+0x80+slot*8) looked right, but the title re-points that
+   word at different thread objects while it runs, so a slot set on one object was
+   read back from another as 0 -- and the engine then dereferenced the NULL it got
+   from GetTlsValue.  Every TLS access goes through these two SDK functions, so the
+   table can live here, keyed by the calling thread's own region. */
+#define MAX_TLS_SLOTS 256
+static struct {
+    uint64_t region;
+    uint32_t slot;
+    uint64_t value;
+} g_tls_slots[MAX_TLS_SLOTS];
+static int g_tls_slot_count;
+static pthread_mutex_t g_tls_slot_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int tls_slot_find(uint64_t region, uint32_t slot) {
+    const int count = __atomic_load_n(&g_tls_slot_count, __ATOMIC_ACQUIRE);
+    for (int index = 0; index < count; index++) {
+        if (g_tls_slots[index].region == region && g_tls_slots[index].slot == slot)
+            return index;
+    }
+    return -1;
+}
+
+static uint64_t hook_tls_set(uint64_t slot, uint64_t value) {
+    const uint64_t region = this_guest_tls();
+    if (slot >= 64 || !region)
+        return 0;
+    pthread_mutex_lock(&g_tls_slot_mutex);
+    int index = tls_slot_find(region, (uint32_t)slot);
+    if (index < 0 && g_tls_slot_count < MAX_TLS_SLOTS) {
+        index = g_tls_slot_count++;
+        g_tls_slots[index].region = region;
+        g_tls_slots[index].slot = (uint32_t)slot;
+    }
+    if (index >= 0)
+        g_tls_slots[index].value = value;
+    pthread_mutex_unlock(&g_tls_slot_mutex);
+    static int set_logs;
+    if (set_logs < 16) {
+        set_logs++;
+        info("tls: set slot=%u value=%#" PRIx64 " region=%#" PRIx64 " tid=%ld", (unsigned)slot,
+             value, region, (long)syscall(SYS_gettid));
+    }
+    return 0;
+}
+
+static uint64_t hook_tls_get(uint64_t slot) {
+    const uint64_t region = this_guest_tls();
+    uint64_t value = 0;
+    pthread_mutex_lock(&g_tls_slot_mutex);
+    const int index = tls_slot_find(region, (uint32_t)slot);
+    if (index >= 0)
+        value = g_tls_slots[index].value;
+    pthread_mutex_unlock(&g_tls_slot_mutex);
+    static int get_logs;
+    if (!value && get_logs < 16) {
+        get_logs++;
+        info("tls: get slot=%u -> 0 (region=%#" PRIx64 " tid=%ld)", (unsigned)slot, region,
+             (long)syscall(SYS_gettid));
+    }
+    return value;
+}
+
+/* nn::os::detail::InternalCriticalSectionImplByHorizon::Enter.  The SDK version
+   asserts \"this == NULL\" and compares the lock word against the thread id read
+   from tpidrro_el0; both are fragile here (the title re-points its thread pointer
+   and some engine objects are still uninitialised while the GPU path runs).  The
+   host implements the same word protocol it already uses for svcArbitrateLock. */
+static uint64_t hook_critical_enter(uint64_t self) {
+    if (!self) {
+        static int null_logs;
+        if (null_logs < 8) {
+            null_logs++;
+            info("Enter(NULL) tolerated (engine critical section not initialised)");
+        }
+        return 0;
+    }
+    const uint32_t id = guest_thread_id(hook_guest_tp());
+    uint32_t word = 0;
+    if (!safe_read(self, &word, sizeof word))
+        return 0;
+    if (word == 0) {
+        if (safe_write(self, &id, sizeof id))
+            return 0;
+        return 0;
+    }
+    (void)d3_sync_lock(word & ~D3_SYNC_WAIT_MASK, (uint32_t *)(uintptr_t)self, id);
+    return 0;
+}
+
+/* The engine bails out through nn::os::ExitProcess when an initialisation step
+   fails: the process then dies with no signal and no message.  Report the caller
+   and stop right there so the exit site is in the log. */
+static uint64_t hook_exit_process(uint64_t code) {
+    log_hook_site("ExitProcess");
+    log_guest_stack((uint64_t)(uintptr_t)__builtin_frame_address(0) + 0x200u, 512);
+    info("ExitProcess code=%#" PRIx64, code);
+    abort();
+    return 0;
+}
+
+static uint64_t hook_abort_impl(uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e,
+                                uint64_t f) {
+    log_hook_site("AbortImpl");
+    log_hook_region("abort region");
+    log_guest_stack((uint64_t)(uintptr_t)__builtin_frame_address(0) + 0x200u, 768);
     log_cstr("abort arg0", a);
     log_cstr("abort arg1", b);
     log_cstr("abort arg2", c);
     log_cstr("abort arg3", d);
+    /* The failing nn::Result travels as a pointer in the operand slot (the SDK
+       calls the (f, f, f, i, r, v) variant for these checks), so read it out:
+       "this == NULL" alone never says which call returned what. */
+    uint32_t operand = 0;
+    if (e && safe_read(e, &operand, sizeof operand))
+        info("abort operand [%#" PRIx64 "] = %#x", e, operand);
+    else
+        info("abort operand arg4=%#" PRIx64 " arg5=%#" PRIx64, e, f);
     abort();
     return 0;
 }
 
 static uint64_t hook_assert_failure(uint64_t type, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
     info("OnAssertionFailure type=%" PRIu64, type);
+    log_hook_site("OnAssertionFailure");
     log_cstr("assert arg1", a);
     log_cstr("assert arg2", b);
     log_cstr("assert arg3", c);
@@ -1726,9 +2352,196 @@ static uint64_t hook_assert_failure(uint64_t type, uint64_t a, uint64_t b, uint6
     return 0;
 }
 
+/* Horizon's svcArbitrateUnlock never checks ownership: it releases the lock word
+   and hands it to the first waiter.  Nintendo's SDK adds its own defensive check
+   (nn::os::SdkMutexType::Unlock aborts when the word's owner is not this thread's
+   id, which happens when the applet thread and the boot thread both take the
+   SDK's static applet mutex).  Replacing that wrapper with the kernel behaviour
+   keeps the lock state consistent instead of aborting. */
+static void guest_call(uint64_t fn, uint64_t arg0, uint64_t arg1);
+static void guest_call_with_tp(uint64_t fn, uint64_t arg0, uint64_t arg1, uint64_t guest_tp);
+
+static uint64_t hook_mutex_unlock(uint64_t mutex) {
+    /* Run the SDK's own Leave so its thread-local bookkeeping stays in step; only
+       the ownership assert is skipped.  The call must keep the thread pointer the
+       guest is running on: Leave reads the mutex owner id out of
+       [tpidrro_el0 + 0x1f8] + 0x1b0, and after main DT_INIT that pointer is the
+       title's own TLS block, not the region this host installed. */
+    if (mutex) {
+        static int logs;
+        if (logs < 24) {
+            logs++;
+            uint32_t word = 0;
+            (void)safe_read(mutex, &word, sizeof word);
+            const uint64_t probe_tlr =
+                guest_tlr_for_tp(hook_guest_tp() ? hook_guest_tp() : this_guest_tls());
+            const uint64_t probe_thread =
+                probe_tlr ? *(const uint64_t *)(uintptr_t)(probe_tlr + 0x1f8) : 0;
+            info("SdkMutexType::Unlock mutex=%p word=%#x tp=%#" PRIx64 " tlr=%#" PRIx64
+                 " thread=%#" PRIx64 " id=%#x",
+                 (void *)(uintptr_t)mutex, word, g_hook_tls.guest_tp, probe_tlr, probe_thread,
+                 probe_thread ? *(const uint32_t *)(uintptr_t)(probe_thread + 0x1b0) : 0u);
+        }
+        /* Do the release here instead of running the SDK's Leave: Leave reads the
+           thread object out of tpidrro_el0 and aborts ("this == NULL") whenever the
+           title has re-pointed its thread pointer, which is always the case once
+           the engine is running.  The word itself is all the kernel keeps. */
+        const uint32_t owner = guest_thread_id(hook_guest_tp());
+        const uint32_t result = d3_sync_unlock((uint32_t *)(uintptr_t)mutex, owner);
+        if (result != 0)
+            info("SdkMutexType::Unlock word=%#x owner=%#x -> %#x", *(const uint32_t *)(uintptr_t)mutex,
+                 owner, result);
+    }
+    return 0;
+}
+
+/* NV bring-up probe: this guest function dereferences [[this+8]+0x1ab8], an
+   object created by a later stage, and faults while the host still answers the
+   nvdrv ioctls as stubs.  Report the arguments and skip the call so the boot can
+   continue and reveal the next requirement. */
+static void restore_hook(uint64_t vaddr);
+static int g_nv_restore = 1;
+
+static uint64_t hook_nv_probe(uint64_t self, uint64_t arg) {
+    static int logs;
+    if (logs < 16) {
+        uint64_t device = 0;
+        uint64_t sub = 0;
+        if (self)
+            (void)safe_read(self + 8, &device, sizeof device);
+        if (device)
+            (void)safe_read(device + 0x1ab8, &sub, sizeof sub);
+        logs++;
+        info("nv: probe self=%#" PRIx64 " arg=%#" PRIx64 " device=%#" PRIx64 " sub=%#" PRIx64,
+             self, arg, device, sub);
+        /* The submit path of every frame reads [device+0x1ab8] and dereferences
+           its +0x10.  That object is created by an NV initialisation step this
+           host never completed, so it stays NULL and nothing is ever submitted.
+           Give it a self-consistent placeholder so the engine's "device exists"
+           path can be reached (and then the real submit code can be unhooked). */
+        if (device) {
+            uint64_t placeholder = (uint64_t)(uintptr_t)low_arena() + 0x200;
+            if (sub == 0) {
+                /* Self-referential dummy: whatever field the submit code reads
+                   through this object comes back as the object itself, so a
+                   shallow chain of loads stays inside valid memory. */
+                for (int word = 0; word < 64; word++)
+                    *(uint64_t *)(uintptr_t)(placeholder + (uint64_t)word * 8) = placeholder;
+                if (!safe_write(device + 0x1ab8, &placeholder, sizeof placeholder))
+                    info("nv: probe could not store the placeholder into %#" PRIx64, device);
+                else {
+                    info("nv: probe placeholder %#" PRIx64 " -> [%#" PRIx64 "+0x1ab8]",
+                         placeholder, device);
+                    /* Restoring the real submit function reaches further, but it
+                       then faults on another uninitialised image object, so the
+                       skip stays the default; flip this to 1 to explore it. */
+                    if (g_bias && g_nv_restore)
+                        restore_hook(g_bias + 0x43a9b0u);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+/* Directory listing is not implemented against the host tree; report "path not
+   found" so the engine's own "nothing to enumerate" path runs instead of walking
+   an entry buffer that was never filled (that walk ended in a wild pointer). */
+static uint64_t hook_fs_open_directory(uint64_t out, uint64_t path, uint64_t mode) {
+    (void)mode;
+    info("fs: OpenDirectory %s -> not found", path ? (const char *)(uintptr_t)path : "(null)");
+    (void)out;
+    return D3_FS_NOT_FOUND;
+}
+
+/* nn::fs::ReadDirectory writes the number of entries it filled; leaving it to the
+   unhooked SDK path made the engine walk a directory buffer that never existed
+   (tens of thousands of data:/_CrashInfo-N.txt probes).  An empty listing keeps
+   the walk at zero entries. */
+static uint64_t hook_fs_read_directory(uint64_t out, uint64_t buffer, uint64_t handle,
+                                       uint64_t count) {
+    (void)buffer;
+    (void)handle;
+    (void)count;
+    if (out)
+        *(int64_t *)(uintptr_t)out = 0;
+    return 0;
+}
+
+/* Belt and braces: a caller that ignores the failed OpenDirectory still asks for
+   the entry count, which must never stay an uninitialised stack value. */
+static uint64_t hook_fs_directory_count(uint64_t out, uint64_t handle) {
+    (void)handle;
+    if (out)
+        *(int64_t *)(uintptr_t)out = 0;
+    return 0;
+}
+
+/* The engine's startup walks a list of "crash info" records (0x310 bytes each)
+   and probes data:/_CrashInfo-N.txt for every one of them; the list is driven by
+   engine state the host does not model, so the walk never ends.  Skipping the
+   whole cleanup reports "nothing to clean" and lets nnMain continue. */
+static uint64_t hook_crash_cleanup(uint64_t self, uint64_t arg) {
+    static int logs;
+    if (logs < 6) {
+        logs++;
+        const uint64_t site = g_hook_tls.guest_lr;
+        uint64_t name = 0;
+        if (self)
+            (void)safe_read(self + 8, &name, sizeof name);
+        info("fs: crash probe caller=%#" PRIx64 " (%s+%#" PRIx64 ") self=%#" PRIx64
+             " arg=%#" PRIx64 " name=%#" PRIx64,
+             site, module_of(site), site >= g_bias ? site - g_bias : 0, self, arg, name);
+    }
+    /* The walk breaks as soon as the callback reports "nothing to do" (bit 0 of
+       the return value clear), so this ends the endless data:/_CrashInfo-N.txt
+       probing instead of answering like a missing file. */
+    return 0;
+}
+
+/* nn::sf::hipc::GetPortProcessor(name) hands back a MITM resolver entry; for "hid"
+   the SDK's entry fails its virtual connect, and because an entry exists the direct
+   sm::GetServiceHandle path is never taken.  Reporting "no entry" forces the
+   direct path, which goes through this host's sm service. */
+static uint64_t hook_get_port_processor(uint64_t name) {
+    static int logs;
+    if (logs < 8) {
+        logs++;
+        info("sf: GetPortProcessor(%s) -> none",
+             name ? (const char *)(uintptr_t)name : "(null)");
+    }
+    return 0;
+}
+
 static const GuestHook g_hooks[] = {
+    {0x1002210, (void *)hook_crash_cleanup, "engine: crash-info probe shim"},
+    {0x205660, (void *)hook_fs_directory_count, "nn::fs::GetDirectoryEntryCount"},
+    {0x2071c0, (void *)hook_fs_open_directory, "nn::fs::OpenDirectory"},
+    {0x205550, (void *)hook_fs_read_directory, "nn::fs::ReadDirectory"},
+    {0x43a9b0, (void *)hook_nv_probe, "nv: NV init step ([[this+8]+0x1ab8]+0x10)"},
+    {0x2501e0, (void *)hook_success, "nn::hid::detail::SharedMemoryAccessor::Activate"},
+    {0x349f30, (void *)hook_critical_enter,
+     "nn::os::detail::InternalCriticalSectionImplByHorizon::Enter"},
+    {0x3413f0, (void *)hook_mutex_unlock, "nn::os::SdkMutexType::Unlock"},
+    /* GPU error reporting registers a system worker whose critical section this
+       host never initializes (the SDK aborts on the NULL before the title runs).
+       The GPU error event is not signalled here anyway, so the bring-up build
+       skips the registration. */
+    {0x33dfd0, (void *)hook_success, "nn::oe::SetupGpuErrorHandler"},
     {0x192600, (void *)hook_assert_failure, "nn::diag::detail::OnAssertionFailure(5 args)"},
     {0x192750, (void *)hook_assert_failure, "nn::diag::detail::OnAssertionFailure(4 args)"},
+    {0x343100, (void *)hook_exit_process, "nn::os::ExitProcess"},
+    /* HID getters whose detail call fails while the shared-memory accessor is a
+       stub: the SDK wrapper turns that failure into AbortImpl("this == NULL"), and
+       the engine aborts a whole thread.  Report the neutral value instead
+       (Vertical hold, Handheld enabled, CommunicationMode 0). */
+    {0x25ecd0, (void *)hook_success, "nn::hid::GetNpadJoyHoldType"},
+    {0x25ee10, (void *)hook_success, "nn::hid::GetNpadHandheldActivationMode"},
+    {0x25eeb0, (void *)hook_success, "nn::hid::GetNpadCommunicationMode"},
+    {0x377c60, (void *)hook_get_port_processor, "nn::sf::hipc::GetPortProcessor"},
+    {0x341f40, (void *)hook_tls_get, "nn::os::GetTlsValue"},
+    {0x341f60, (void *)hook_tls_set, "nn::os::SetTlsValue"},
+    {0x341540, (void *)hook_recursive_mutex_unlock, "nn::os::SdkRecursiveMutexType::Unlock"},
     {0x1925e0, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,i)"},
     {0x192500, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,r,f)"},
     {0x1924a0, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,i,r,exc,v)"},
@@ -1778,18 +2591,127 @@ static const GuestHook g_hooks[] = {
     {0x3c6bf0, (void *)hook_success, "nn::vi::SetDisplayLayerStack"},
 };
 
+/* A hook site is entered by a direct branch from guest code, so tpidr_el0 is
+   still the guest thread pointer when the hook body starts.  bionic resolves
+   errno through the TCB ([tp + 8] + 0x300) and the guest TLS block holds zero
+   there, so the first snprintf inside a hook faults at address 0x300 and hides
+   whatever the guest was trying to report (every nn::diag::AbortImpl so far
+   died in the abort hook instead of logging its message).  hook_stub.S therefore
+   swaps in the *calling thread's* host TLS before the body runs.  The site stub
+   stays 16 bytes because some hooked entry points are only 16 bytes apart. */
+
+static uint64_t hook_guest_tp(void) {
+    /* The thread's own region, never a pointer taken from shared state: both
+       g_hook_tls.guest_tp and the veneer table slot are single words that two
+       guest threads overwrite under each other, and resolving through the wrong
+       one lands on another thread's thread object (nn::os TLS slots then read
+       back as 0).  guest_tlr_for_tp maps a region to itself. */
+    return this_guest_tls();
+}
+
+/* One body pointer per d3_hook_page entry (hook_stub.S indexes this table with
+   the index it recovers from the entry that was called).  Filled in
+   install_guest_hooks(); the assembler needs the symbol, so it is not static. */
+#define HOOK_MAX 256
+uint64_t g_hook_bodies[HOOK_MAX];
+
+/* d3_hook_page lives in hook_stub.S: HOOK_MAX entries of "b d3_hook_stub".  A
+   site stub branches to &d3_hook_page[index], which is what tells the stub which
+   hook body to run. */
+extern const uint32_t d3_hook_page[];
+
+/* Original bytes of every hooked site, so a hook can put the real function back
+   once it has prepared the state that function needs. */
+static uint8_t g_hook_original[64][16];
+static uint64_t g_hook_site[64];
+static size_t g_hook_count;
+
+static void restore_hook(uint64_t vaddr) {
+    for (size_t index = 0; index < g_hook_count; index++) {
+        if (g_hook_site[index] != vaddr)
+            continue;
+        /* The image's code pages are read-only by now (the segments got their
+           final protections after the hooks were installed), so the page has to be
+           opened for this write first. */
+        const uint64_t page = vaddr & ~(uint64_t)(g_os_page - 1);
+        if (mprotect((void *)(uintptr_t)page, g_os_page, PROT_READ | PROT_WRITE) != 0) {
+            info("hook restore mprotect(%#" PRIx64 ") errno %d", page, errno);
+            return;
+        }
+        memcpy((void *)(uintptr_t)vaddr, g_hook_original[index], 16);
+        __builtin___clear_cache((char *)(uintptr_t)vaddr, (char *)(uintptr_t)vaddr + 16);
+        if (mprotect((void *)(uintptr_t)page, g_os_page, PROT_READ | PROT_EXEC) != 0)
+            info("hook restore mprotect(RX) errno %d", errno);
+        info("hook %#" PRIx64 " restored to the real function", vaddr);
+        return;
+    }
+}
+
 static void install_guest_hooks(uint64_t base, uint64_t image_size) {
-    for (size_t index = 0; index < sizeof g_hooks / sizeof g_hooks[0]; index++) {
+    log_exec_maps();
+    const size_t count = sizeof g_hooks / sizeof g_hooks[0];
+    if (count > HOOK_MAX)
+        fail("hook table has %zu entries, hook_stub.S only has %d", count, (int)HOOK_MAX);
+    for (size_t index = 0; index < count; index++) {
         const GuestHook *hook = &g_hooks[index];
         if (hook->vaddr + 16 > image_size)
             fail("hook %s outside image", hook->name);
+        /* The stub reads the body from this table; the site stub only carries the
+           address of its own d3_hook_page entry. */
+        g_hook_bodies[index] = (uint64_t)(uintptr_t)hook->target;
+        const uint64_t entry = (uint64_t)(uintptr_t)&d3_hook_page[index];
         uint32_t *stub = (uint32_t *)(uintptr_t)(base + hook->vaddr);
-        uint64_t target = (uint64_t)(uintptr_t)hook->target;
-        stub[0] = 0x58000050u; /* ldr x16, #8 */
+        if (index < 64) {
+            memcpy(g_hook_original[index], stub, 16);
+            g_hook_site[index] = base + hook->vaddr;
+            if (index + 1 > g_hook_count)
+                g_hook_count = index + 1;
+        }
+        stub[0] = 0x58000050u; /* ldr x16, [pc, #8] */
         stub[1] = 0xd61f0200u; /* br x16 */
-        memcpy(&stub[2], &target, sizeof target);
+        memcpy(&stub[2], &entry, sizeof entry);
         __builtin___clear_cache((char *)stub, (char *)stub + 16);
         info("hook %s at %#" PRIx64 " -> %p", hook->name, base + hook->vaddr, hook->target);
+    }
+    /* A few SDK debug asserts abort the process when an optional service (the
+       Nintendo Account authorisation request here) is missing.  The title can
+       carry on without it, and the offsets live in the preserved sdk module, so
+       they are stable. */
+    static const struct {
+        uint64_t vaddr;
+        uint32_t words[3];
+        uint32_t count;
+        const char *name;
+    } patches[] = {
+        /* sdk+0x4c2f8 is the acquire of the account authorisation holder.  The
+           engine asks for an online authorisation request with no Nintendo
+           Account behind it, and the assert that follows would end the process;
+           report the acquire as successful so the title keeps booting offline. */
+        {0x4c2f8u, {0x2a1f03e0u /* mov w0, wzr */}, 1, "account authorisation acquire"},
+        /* nn::os::detail::InternalConditionVariableImplByHorizon::Wait asserts
+           "this == NULL!" when the object it was handed never got initialised.
+           The host has no condition variable to wait on, so the cold tail that
+           raises the assert becomes "return success" and the caller continues as
+           if the wait had been satisfied. */
+        {0x3499b0u, {0x2a1f03e0u /* mov w0, wzr */, 0x17fffffbu /* b <epilogue> */}, 2,
+         "null condition variable wait"},
+        /* ... and the same function's "holder was never initialised" tail: the bl
+           into AbortImpl followed by udf becomes "return success". */
+        {0x4c328u, {0x2a1f03e0u /* mov w0, wzr */, 0xd65f03c0u /* ret */}, 2,
+         "account authorisation holder"},
+    };
+    for (size_t index = 0; index < sizeof patches / sizeof patches[0]; index++) {
+        if (patches[index].vaddr + 4 * patches[index].count > image_size) {
+            info("patch %s outside image", patches[index].name);
+            continue;
+        }
+        uint32_t *site = (uint32_t *)(uintptr_t)(base + patches[index].vaddr);
+        info("patch %s at %#" PRIx64 ": %#x %#x -> %#x %#x", patches[index].name,
+             base + patches[index].vaddr, site[0], site[1], patches[index].words[0],
+             patches[index].words[1]);
+        for (uint32_t word = 0; word < patches[index].count; word++)
+            site[word] = patches[index].words[word];
+        __builtin___clear_cache((char *)site, (char *)site + 4 * patches[index].count);
     }
 }
 
@@ -1879,9 +2801,52 @@ static void load_guest(const char *path) {
             fail("guest relocation outside image");
         *(uint64_t *)(uintptr_t)(base + relocation->r_offset) = base + (uint64_t)relocation->r_addend;
     }
+    /* This image was repacked by a tool that applied only RELATIVE records, so the
+       original module's other relocations (the 246 ABS64 slots for
+       __cxa_pure_virtual, rtld's 9 __rel_* pointers and all 529 JUMP_SLOT imports)
+       were never written and every call through those slots failed.  The table in
+       guest_relocs.h restores them; both fields are image offsets. */
+    {
+        uint32_t done = 0;
+        uint32_t skipped = 0;
+        for (uint32_t index = 0; index < (uint32_t)D3_GUEST_RELOC_COUNT; index++) {
+            const GuestReloc *reloc = &g_guest_relocs[index];
+            if (reloc->slot + sizeof(uint64_t) > max_vaddr || reloc->target > max_vaddr) {
+                skipped++;
+                continue;
+            }
+            *(uint64_t *)(uintptr_t)(base + reloc->slot) = base + (uint64_t)reloc->target;
+            done++;
+        }
+        info("guest: applied %u recovered relocations (%u out of range)", (unsigned)done,
+             (unsigned)skipped);
+    }
     /* The image is still writable here: patch the SDK entry points before the
        segment protections go on. */
     install_guest_hooks(base, reserve_size);
+    {
+        /* The veneer stores the caller's tpidr_el0 at table + 0x10 and calls the
+           dispatcher with (kind, extra, saved).  Its null check on the dispatch
+           pointer is redundant (the host always installs it), and the slot it
+           frees passes that thread pointer in x3 instead: reading the table slot
+           after the fact raced with the other guest thread's veneer, which made
+           one thread resolve tpidrro_el0 -- and therefore its mutex owner id --
+           to the other thread's region. */
+        uint32_t *veneer = (uint32_t *)(uintptr_t)(base + D3_VENEER_BASE);
+        if (veneer[0x90u / 4] == 0xB4000751u /* cbz x17, #0x3000178 */)
+            veneer[0x90u / 4] = 0xF9400A03u;  /* ldr x3, [x16, #0x10] */
+        else
+            fail("unexpected veneer at %#" PRIx64, base + D3_VENEER_BASE + 0x90);
+        /* The veneer's restore stub ends with ldur x16,[sp,#-0x88]; br x16,
+           and a corrupted saved target sends the guest to an address that is not
+           in the image at all (pc 0x4803xxxx in the dumps).  Trap that return so
+           the handler can name the saved target and the caller (x30) before
+           jumping, instead of dying somewhere unmapped. */
+        if (veneer[0x174u / 4] == 0xD61F0200u /* br x16 */)
+            veneer[0x174u / 4] = 0xD4224680u; /* brk #0x1234 */
+        else
+            info("veneer return stub is %#x, not br x16", veneer[0x174u / 4]);
+    }
     for (size_t i = 0; i < g_guest_phnum; i++) {
         if (g_guest_phdr[i].p_type == PT_LOAD)
             protect_guest_segment(base, &g_guest_phdr[i]);
@@ -2029,24 +2994,180 @@ static void reserve_heap(void) {
     fail("heap reserve failed errno %d", errno);
 }
 
+/* One thread-local region per guest thread.  The SDK keeps the running thread's
+   id in the thread object hanging off the region (mrs tpidrro_el0 ->
+   region + 0x1000; [region + 0x1000 + 0x1f8] -> thread object; [thread + 0x1b0]
+   -> id) and its critical sections compare that id with a lock word's owner.  A
+   single shared region made the main thread inherit the worker's id, so
+   unlocking a mutex it did own failed its own ownership check and the SDK
+   aborted ("this == NULL").  The three pages are contiguous so the region can be
+   derived from tpidr_el0 alone. */
+#define MAX_GUEST_REGIONS 256
+static uint64_t g_regions[MAX_GUEST_REGIONS];
+static int g_region_count;
+
+/* Only regions this host mapped may be used as a thread's guest TLS: the map is
+   also fed with the title's own thread pointers, and resolving one of those back
+   to itself fabricates a thread object out of the title's TLS block (which is
+   what made nn::os read a NULL thread object and abort). */
+static int is_guest_region(uint64_t tls) {
+    const int count = __atomic_load_n(&g_region_count, __ATOMIC_ACQUIRE);
+    for (int index = 0; index < count; index++) {
+        if (g_regions[index] == tls)
+            return 1;
+    }
+    return 0;
+}
+
+static uint64_t guest_region_alloc(void) {
+    void *region = mmap(0, GUEST_TLS_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                        -1, 0);
+    if (region == MAP_FAILED)
+        fail("guest tls allocation errno %d", errno);
+    const uint64_t tls = (uint64_t)(uintptr_t)region;
+    if (g_region_count < MAX_GUEST_REGIONS)
+        g_regions[__atomic_fetch_add(&g_region_count, 1, __ATOMIC_ACQ_REL)] = tls;
+    const uint64_t tlr = tls + GUEST_TLR_OFFSET;
+    *(uint16_t *)(uintptr_t)(tlr + 0x100) = 0;
+    *(uint16_t *)(uintptr_t)(tlr + 0x102) = 0;
+    *(uint64_t *)(uintptr_t)(tlr + 0x1f0) = tls;
+    *(uint64_t *)(uintptr_t)(tlr + 0x1f8) = tls + GUEST_THREAD_OFFSET;
+    return tls;
+}
+
+/* Per-thread guest state, keyed by the kernel tid.  A __thread variable cannot be
+   used: a hook runs with whatever host thread pointer the trampoline installed,
+   and that pointer is one global word shared by every guest thread, so __thread
+   reads resolved to another thread's block (the boot thread was seen resolving to
+   three different worker regions, which made nn::os TLS slots read back as 0).
+   Keying by tid avoids TLS completely. */
+#define MAX_THREAD_REGIONS 128
+static struct {
+    pid_t tid;
+    uint64_t tls;
+    uint64_t host_tp;
+    int used;
+} g_thread_regions[MAX_THREAD_REGIONS];
+static pthread_mutex_t g_thread_region_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int thread_region_slot(pid_t tid, int create) {
+    int free_slot = -1;
+    for (int index = 0; index < MAX_THREAD_REGIONS; index++) {
+        if (g_thread_regions[index].used && g_thread_regions[index].tid == tid)
+            return index;
+        if (!g_thread_regions[index].used && free_slot < 0)
+            free_slot = index;
+    }
+    if (!create || free_slot < 0)
+        return -1;
+    g_thread_regions[free_slot].used = 1;
+    g_thread_regions[free_slot].tid = tid;
+    return free_slot;
+}
+
+/* The thread's own host (bionic) thread pointer.  Guest code runs with
+   TPIDR_EL0 pointing at *its* TLS, and the veneer dispatcher has to switch back to
+   this value before touching host libc (mutexes, logging, errno) or the libc
+   reads garbage; the trampoline cannot look it up, so it is cached here per tid. */
+static void thread_region_set_host_tp(uint64_t host_tp) {
+    const pid_t tid = (pid_t)syscall(SYS_gettid);
+    pthread_mutex_lock(&g_thread_region_mutex);
+    const int slot = thread_region_slot(tid, 1);
+    if (slot >= 0 && host_tp)
+        g_thread_regions[slot].host_tp = host_tp;
+    pthread_mutex_unlock(&g_thread_region_mutex);
+}
+
+static uint64_t thread_region_host_tp(void) {
+    const pid_t tid = (pid_t)syscall(SYS_gettid);
+    pthread_mutex_lock(&g_thread_region_mutex);
+    const int slot = thread_region_slot(tid, 0);
+    const uint64_t host_tp = slot >= 0 ? g_thread_regions[slot].host_tp : 0;
+    pthread_mutex_unlock(&g_thread_region_mutex);
+    return host_tp;
+}
+
+/* Faults on threads that never ran guest code are the framework's business: ART
+   uses SIGSEGV for implicit null checks and installs its own handler, and this
+   process-wide handler used to swallow those faults (the "wild jump" logs were
+   actually libart JIT code).  Read-only scan, no mutex: this runs in a signal
+   handler and the worst case is a stale answer. */
+static int thread_is_guest(pid_t tid) {
+    for (int index = 0; index < MAX_THREAD_REGIONS; index++) {
+        if (g_thread_regions[index].used && g_thread_regions[index].tid == tid)
+            return 1;
+    }
+    return 0;
+}
+
+/* Lock-free host thread pointer lookup for the guest's current thread.  Leaf
+   helper called from hook_stub.S while TPIDR_EL0 still holds the *guest's*
+   thread pointer, so it must not touch TLS (bionic's errno, stack canary and
+   pthread internals all resolve through tpidr_el0) and must not call libc:
+   the tid comes from a raw syscall, the pointer from the tid-keyed table. */
+uint64_t d3_host_tp_current(void) {
+    register uint64_t number __asm__("x8") = 178; /* SYS_gettid on arm64 */
+    register uint64_t result __asm__("x0");
+    __asm__ volatile("svc #0" : "=r"(result) : "r"(number) : "memory");
+    const uint64_t tid = result;
+    for (int index = 0; index < MAX_THREAD_REGIONS; index++) {
+        if (g_thread_regions[index].used && (uint64_t)g_thread_regions[index].tid == tid)
+            return g_thread_regions[index].host_tp;
+    }
+    return 0;
+}
+
+static uint64_t this_guest_tls(void) {
+    const pid_t tid = (pid_t)syscall(SYS_gettid);
+    pthread_mutex_lock(&g_thread_region_mutex);
+    int slot = thread_region_slot(tid, 1);
+    if (slot >= 0 && g_thread_regions[slot].tls == 0)
+        g_thread_regions[slot].tls = guest_region_alloc();
+    const uint64_t tls = slot >= 0 ? g_thread_regions[slot].tls : 0;
+    pthread_mutex_unlock(&g_thread_region_mutex);
+    return tls;
+}
+
+/* A guest thread this host spawned already owns a region: record it instead of
+   letting the first hook allocate a second one for the same thread. */
+static void thread_region_assign(uint64_t tls) {
+    const pid_t tid = (pid_t)syscall(SYS_gettid);
+    pthread_mutex_lock(&g_thread_region_mutex);
+    const int slot = thread_region_slot(tid, 1);
+    if (slot >= 0 && tls)
+        g_thread_regions[slot].tls = tls;
+    pthread_mutex_unlock(&g_thread_region_mutex);
+}
+
+
+/* The thread-local region of the guest thread that is running right now.  It
+   must come from host thread state, not from a table slot: both guest threads
+   stored their tpidr_el0 into the same word before every dispatch, so one thread
+   could read the other's thread object -- and with it the other's mutex owner id
+   -- which made nn::os::SdkMutexType::Unlock abort on a mutex the thread did
+   hold. */
+static uint64_t current_guest_region(void) {
+    /* The veneer stores the caller's tpidr_el0 into the table right before it
+       dispatches, so this is the dispatching thread's own region.  guest_call's
+       host TLS is not usable here: the veneer installs the host TLS recorded in
+       the table, which is one thread's TCB for every guest thread. */
+    const uint64_t tp = g_table ? g_table[D3_HOST_OFF_GUEST_TP / 8] : 0;
+    return guest_tlr_for_tp(tp ? tp : this_guest_tls());
+}
+
 static void prepare_memory(void) {
-    void *tls = map_pages(PAGE_SIZE, PROT_READ | PROT_WRITE);
-    void *thread = map_pages(PAGE_SIZE, PROT_READ | PROT_WRITE);
-    void *tlr = map_pages(PAGE_SIZE, PROT_READ | PROT_WRITE);
     void *stack_map = map_pages(STACK_REGION_SIZE, PROT_NONE);
     g_stack_region = (uint64_t)(uintptr_t)stack_map;
     g_stack = g_stack_region + STACK_REGION_SIZE - STACK_SIZE;
     g_guard = g_stack - GUARD_SIZE;
     if (mprotect((void *)(uintptr_t)g_stack, STACK_SIZE, PROT_READ | PROT_WRITE) != 0)
         fail("stack mprotect errno %d", errno);
-    g_tls = (uint64_t)(uintptr_t)tls;
-    g_thread = (uint64_t)(uintptr_t)thread;
-    g_tlr = (uint64_t)(uintptr_t)tlr;
+    g_tls = guest_region_alloc();
+    info("layout: alias=%#" PRIx64 " cap=%#" PRIx64 " stack=%#" PRIx64 " region=%#" PRIx64,
+         g_alias, g_alias_cap, g_stack_region, g_tls);
+    g_tlr = g_tls + GUEST_TLR_OFFSET;
+    g_thread = g_tls + GUEST_THREAD_OFFSET;
     g_guest_tp = g_tls;
-    *(uint16_t *)(uintptr_t)(g_tlr + 0x100) = 0;
-    *(uint16_t *)(uintptr_t)(g_tlr + 0x102) = 0;
-    *(uint64_t *)(uintptr_t)(g_tlr + 0x1f0) = g_tls;
-    *(uint64_t *)(uintptr_t)(g_tlr + 0x1f8) = g_thread;
     struct timespec boot;
     /* nn::os::detail::AddressRegionManager (the VAMM the sdk builds from the
        GetInfo alias region) commits its bookkeeping page and every later
@@ -2205,8 +3326,29 @@ static void default_user_exception_stack(d3_saved *saved) {
 /* One guest thread, so any stable non-zero id works. */
 #define D3_THREAD_ID 1ull
 
+/* The SDK keeps the running thread's id in the thread object hanging off the
+   thread-local region (mrs tpidrro_el0 -> tlr; [tlr + 0x1f8] -> thread object;
+   [thread + 0x1b0] -> thread id) and its critical sections compare that id with
+   the lock word's owner.  Logging both sides makes an owner mismatch visible
+   before it turns into an SDK abort. */
+static void log_thread_id(const char *what, uint32_t *mutex, uint32_t tag) {
+    const uint64_t tlr = current_guest_region();
+    const uint64_t thread = *(const uint64_t *)(uintptr_t)(tlr + 0x1f8);
+    const uint32_t id =
+        thread ? *(const uint32_t *)(uintptr_t)(thread + 0x1b0) : 0xFFFFFFFFu;
+    uint32_t word = 0;
+    if (mutex)
+        (void)safe_read((uint64_t)(uintptr_t)mutex, &word, sizeof word);
+    const uint64_t tp = current_guest_region() - GUEST_TLR_OFFSET;
+    info("%s mutex=%p word=%#x tag=%#x tls=%#" PRIx64 " thread=%#" PRIx64 " id=%#x",
+         what, (void *)mutex, word, tag, tp, thread, (unsigned)id);
+}
+
 static void get_thread_id(d3_saved *saved) {
-    uint64_t id = D3_THREAD_ID;
+    /* Horizon returns a unique id per thread and the SDK stores it as the owner
+       of every mutex the thread takes; a constant id made the boot thread and
+       the first guest worker look like the same lock owner. */
+    const uint64_t id = (uint64_t)gettid();
     set_saved(saved, 0, 0);
     set_saved(saved, 1, id);
     info("GetThreadId handle=%" PRIx64 " = %" PRIx64, saved->x[2], id);
@@ -2304,8 +3446,20 @@ static uint32_t g_batch_logs;
 static uint64_t g_shared[8];
 static int g_nshared;
 
+/* The id nn::os uses as the owner of every mutex this thread takes: the SDK keeps
+   it in the thread object that hangs off the thread-local region, and
+   svcArbitrateUnlock has no owner argument, so the host has to read it from the
+   dispatching thread. */
+static uint32_t guest_thread_id(uint64_t thread_tp) {
+    if (!thread_tp)
+        return 0;
+    const uint64_t tlr = guest_tlr_for_tp(thread_tp);
+    const uint64_t thread = *(const uint64_t *)(uintptr_t)(tlr + 0x1f8);
+    return thread ? *(const uint32_t *)(uintptr_t)(thread + 0x1b0) : 0;
+}
+
 static uint64_t guest_tp(void) {
-    return g_table[D3_HOST_OFF_GUEST_TP / 8];
+    return this_guest_tls();
 }
 
 static void store64(uint64_t address, uint64_t value) {
@@ -2466,17 +3620,23 @@ static uint64_t map_shared_at(uint64_t address, uint64_t size, uint64_t permissi
     compose_regions();
     info("MapSharedMemory addr=%#" PRIx64 " size=%#" PRIx64 " perm=%" PRIu64, address, page,
          permission);
+    /* The 256 KiB block is nn::hid's shared memory: the title reads every pad it
+       believes in from there, and with the block left zeroed the engine never
+       sees a controller (it relaunches the Controller applet instead of
+       booting). */
+    if (page == 0x40000u)
+        d3_hid_seed(address);
     return address;
 }
 
 /* svcStartThread used to be bookkeeping only, so every worker the title created
    never ran.  A guest thread starts with TPIDR_EL0 = 0 exactly like the kernel
    leaves it; the title's own trampoline installs its thread pointer. */
-static void guest_call(uint64_t fn, uint64_t arg0, uint64_t arg1);
 
 typedef struct {
     uint64_t entry;
     uint64_t arg;
+    uint64_t tls; /* the thread-local region the kernel would hand this thread */
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     int initialized;
@@ -2533,9 +3693,20 @@ static uint32_t thread_wait(ThreadStart *start, int64_t timeout_ns) {
     return exited ? 0u : 0xEA01u;
 }
 
+/* bionic's pthread_self() is the pthread_internal_t, not the thread pointer: the
+   veneer hands TPIDR_EL0 back to libc, so these must record the register value
+   or every hook on the thread runs libc against a shuffled TLS block. */
+static uint64_t host_thread_pointer(void) {
+    return (uint64_t)(uintptr_t)__builtin_thread_pointer();
+}
+
 static void *guest_thread_body(void *param) {
     /* The handle keeps referring to this record, so it must outlive the thread. */
     ThreadStart *start = param;
+    thread_region_assign(start->tls);
+    thread_region_set_host_tp(host_thread_pointer());
+    info("thread: body tid=%ld tls=%#" PRIx64, (long)gettid(), start->tls);
+    log_guest_region("worker region");
     install_crash_handler();
     info("thread: start entry=%#" PRIx64 " arg=%#" PRIx64, start->entry, start->arg);
     {
@@ -2600,6 +3771,13 @@ static void event_signal(uint32_t handle, int signaled) {
     pthread_mutex_unlock(&event->mutex);
 }
 
+/* The service layer hands out event handles (ICommonStateGetter::GetEventHandle)
+   and has to signal them when the state the guest is waiting for actually
+   changes, so the signal path needs a non-static entry point. */
+void d3_event_set(uint32_t handle, int signaled) {
+    event_signal(handle, signaled);
+}
+
 /* Returns 0 on success and 0xEA01 (timed out) when the deadline passes. */
 /* Called when a guest closes an EVENT handle: wake waiters and mark the slot
    unusable so a reused handle slot cannot be driven by stale wait/signal paths. */
@@ -2618,6 +3796,10 @@ static uint32_t event_wait(uint32_t handle, int64_t timeout_ns) {
     HostEvent *event = event_of(handle);
     if (event == 0)
         return 0;
+    /* A level triggered event (d3_handle_set_arg(handle, 1) marks one) stays
+       signalled: waiting on it never consumes the signal, which is how a service
+       expresses "this condition still holds". */
+    const int level = (d3_handle_arg(handle) & 1u) != 0;
     struct timespec deadline;
     clock_gettime(CLOCK_MONOTONIC, &deadline);
     if (timeout_ns > 0) {
@@ -2638,7 +3820,7 @@ static uint32_t event_wait(uint32_t handle, int64_t timeout_ns) {
             break;
     }
     const uint32_t result = event->signaled ? 0u : 0xEA01u;
-    if (event->signaled)
+    if (event->signaled && !level)
         event->signaled = 0;
     pthread_mutex_unlock(&event->mutex);
     return result;
@@ -2672,13 +3854,22 @@ void d3_trace_guest(const char *tag, const d3_saved *saved) {
     uint64_t fp = saved->x[29];
     info("bt %s pc=%#" PRIx64 " (%s+%#" PRIx64 ")", tag, pc, module_of(pc),
          pc >= g_bias ? pc - g_bias : 0);
-    for (int depth = 0; depth < 20 && (fp & 7) == 0; depth++) {
-        if (fp < g_bias - 0x100000 || fp > g_bias + 0x40000000u)
+    /* The title's stack is not near the image (it lives megabytes below the
+       mapping), so a walk that range-checks fp against g_bias never runs.  Accept
+       any 8-aligned pointer in the user address space and let the monotonic
+       upward-step test reject garbage; every read goes through safe_read so a
+       stale fp ends the walk instead of faulting inside the svc handler. */
+    for (int depth = 0; depth < 24; depth++) {
+        if ((fp & 7u) != 0 || fp < 0x10000u || fp > 0x10000000000ull)
             break;
-        uint64_t next = *(const uint64_t *)(uintptr_t)fp;
-        uint64_t lr = *(const uint64_t *)(uintptr_t)(fp + 8);
-        if (lr >= g_bias)
-            info("bt %s  #%d %s+%#" PRIx64, tag, depth, module_of(lr), lr - g_bias);
+        uint64_t next = 0;
+        uint64_t lr = 0;
+        if (!safe_read(fp, &next, sizeof next) || !safe_read(fp + 8, &lr, sizeof lr))
+            break;
+        if (lr) {
+            info("bt %s  #%d %s+%#" PRIx64, tag, depth, module_of(lr),
+                 lr >= g_bias ? lr - g_bias : lr);
+        }
         if (next <= fp || next - fp > (1u << 22))
             break;
         fp = next;
@@ -2686,8 +3877,10 @@ void d3_trace_guest(const char *tag, const d3_saved *saved) {
 }
 
 static uint32_t g_sync_logs;
+static uint32_t g_wait_logs;
+static uint32_t g_tpidrro_logs;
 
-static void svc_call(d3_saved *saved, uint32_t id) {
+static void svc_call(d3_saved *saved, uint32_t id, uint64_t thread_tp) {
     uint64_t *x = saved->x;
     switch (id) {
     case 0x01:
@@ -2740,6 +3933,10 @@ static void svc_call(d3_saved *saved, uint32_t id) {
                 fail("CreateThread calloc");
             start->entry = x[1];
             start->arg = x[2];
+            /* Horizon creates a thread-local region per thread; the title's
+               thread trampoline reads it from tpidrro_el0 + 0x1f0 and installs
+               it with msr tpidr_el0, so it has to be this thread's own. */
+            start->tls = guest_region_alloc();
             uint32_t created = d3_handle_alloc(D3_OBJ_THREAD, "thread", (uint64_t)(uintptr_t)start);
             if (out != 0)
                 *(uint32_t *)(uintptr_t)out = created;
@@ -2863,91 +4060,101 @@ static void svc_call(d3_saved *saved, uint32_t id) {
         set_saved(saved, 0, 0);
         return;
     case 0x18: {
-        /* Single handle form is (handle, timeout); the N form passes a list. */
-        if (x[0] >= D3_HANDLE_FIRST && x[0] < D3_HANDLE_FIRST + HOST_EVENTS) {
-            const uint32_t handle = (uint32_t)x[0];
-            uint32_t result;
-            if (d3_handle_kind(handle) == D3_OBJ_THREAD)
-                result = thread_wait((ThreadStart *)(uintptr_t)d3_handle_arg(handle), (int64_t)x[1]);
-            else
-                result = event_wait(handle, (int64_t)x[1]);
-            if (g_batch_logs < 32) {
-                g_batch_logs++;
-                info("WaitSynchronization handle=%#x timeout=%" PRId64 " -> %#x", handle,
-                     (int64_t)x[1], result);
-            }
-            set_saved(saved, 0, result);
-            set_saved(saved, 1, 0);
-            return;
-        }
         /* svcWaitSynchronizationN(s32* out_index, Handle* handles, s32 count,
-           bool wait_all, s64 timeout).  The SDK returns *out_index verbatim when
-           the result is zero, so it must never be left uninitialised. */
-        uint64_t list = x[1];
-        int32_t count = (int32_t)x[2];
-        uint32_t first = 0xFFFFFFFFu;
-        if (list && count > 0)
-            memcpy(&first, (const void *)(uintptr_t)list, sizeof first);
-        if (count <= 0) {
-            if (x[0])
-                *(int32_t *)(uintptr_t)x[0] = -1;
-            if (g_batch_logs < 32) {
-                g_batch_logs++;
-                info("WaitSynchronizationN count=%d -> timed out", count);
+           s64 timeout).  This SDK build passes the timeout in x3 and leaves x4
+           alone: every caller follows that shape (InterProcessEventImplByHorizon
+           Wait passes -1, TryWait 0, MultiWaitImplByHorizon forwards its
+           TimeSpan), which is why reading x4 as the timeout never matched.
+           The veneer wrapper copies the returned index from x1 into *out_index,
+           and the SDK then uses it to pick a MultiWait holder, so x1 must always
+           carry a valid index -- leaving it as the handle pointer made
+           nn::os::detail::MultiWaitImpl::InternalWaitAnyImpl index its holder
+           array with 0x0be73a9c. */
+        const uint64_t out_index = x[0];
+        const uint64_t handles = x[1];
+        const int32_t count = (int32_t)x[2];
+        const int64_t timeout = (int64_t)x[3];
+        enum { MAX_WAIT = 64 };
+        uint32_t list[MAX_WAIT];
+        const int32_t bounded = count > MAX_WAIT ? MAX_WAIT : count;
+        int32_t index = 0;
+        uint32_t wait_result = 0xEA01u;
+        if (bounded <= 0 || handles == 0) {
+            if (out_index)
+                *(int32_t *)(uintptr_t)out_index = -1;
+        } else {
+            memcpy(list, (const void *)(uintptr_t)handles, (size_t)bounded * sizeof list[0]);
+            /* WaitSynchronizationN(any): one pass over the handles consumes the
+               first signal that is already pending; otherwise poll until the
+               deadline.  An infinite wait is capped so a signal this host never
+               delivers cannot stall the emulator, and the SDK simply retries. */
+            const int64_t limit_ns = timeout < 0 ? 2000000000 : timeout;
+            const uint64_t limit_ticks = (uint64_t)limit_ns * 12u / 625u;
+            const uint64_t base = ticks();
+            for (;;) {
+                wait_result = 0xEA01u;
+                for (int32_t slot = 0; slot < bounded; slot++) {
+                    const uint32_t handle = list[slot];
+                    const int kind = d3_handle_kind(handle);
+                    uint32_t ready = 0xEA01u;
+                    if (kind == D3_OBJ_EVENT) {
+                        ready = event_wait(handle, 0);
+                    } else if (kind == D3_OBJ_THREAD && d3_handle_arg(handle) != 0) {
+                        ready = thread_wait((ThreadStart *)(uintptr_t)d3_handle_arg(handle), 0);
+                    }
+                    /* Objects this host cannot wait on report ready rather than
+                       leaving the SDK to index its holder array with whatever
+                       was left in x1. */
+                    if (ready == 0 || kind == D3_OBJ_NONE) {
+                        index = slot;
+                        wait_result = 0;
+                        break;
+                    }
+                }
+                if (wait_result == 0 || ticks() - base >= limit_ticks)
+                    break;
+                usleep(500);
             }
-            set_saved(saved, 0, (uint64_t)-1);
-            return;
-        }
-        if (x[0])
-            *(int32_t *)(uintptr_t)x[0] = 0;
-        /* Wait for real: nn::os builds its MultiWait bookkeeping from this
-           result.  x3 is wait_all (bool); the timeout is x4.  An infinite
-           timeout is capped so a missing signal stalls briefly instead of
-           hanging the app. */
-        /* Skip thread handles here: their object pointers are sometimes stale
-           (fault 0x300 came from a bogus ThreadStart).  Only events are waited. */
-        if (first != 0xFFFFFFFFu && d3_handle_kind(first) == D3_OBJ_EVENT) {
-            int64_t wait_timeout = (int64_t)x[4];
-            if (wait_timeout < 0)
-                wait_timeout = 2000000;
-            uint32_t wait_result;
-            if (d3_handle_kind(first) == D3_OBJ_THREAD && d3_handle_arg(first) != 0) {
-                wait_result = thread_wait(
-                    (ThreadStart *)(uintptr_t)d3_handle_arg(first), wait_timeout);
-            } else {
-                wait_result = event_wait(first, wait_timeout);
+            if (wait_result == 0) {
+                if (out_index)
+                    *(int32_t *)(uintptr_t)out_index = index;
+            } else if (out_index) {
+                *(int32_t *)(uintptr_t)out_index = -1;
             }
-            if (wait_result != 0) {
-                /* The SDK indexes its holder array with the value returned in
-                   w0 (disassembly at sdk+0x335d38: mov w24, w0).  Handing back
-                   0xEA01 makes that index 59905 and walks off the stack, so a
-                   timeout is reported as "the first object was ready" until the
-                   holder bookkeeping itself is modelled. */
-                if (x[0])
-                    *(int32_t *)(uintptr_t)x[0] = 0;
-                set_saved(saved, 0, 0);
-                return;
+            if (g_wait_logs < 40) {
+                g_wait_logs++;
+                info("WaitSynchronizationN count=%d handle=%#x name=%s timeout=%" PRId64
+                     " -> result=%#x index=%d",
+                     (int)count, list[0], d3_handle_name(list[0]), timeout, wait_result,
+                     (int)index);
             }
         }
-        set_saved(saved, 0, 0);
-        if (g_batch_logs < 32) {
-            g_batch_logs++;
-            info("WaitSynchronizationN count=%d handle=%#x name=%s timeout=%" PRId64 " -> index 0",
-                 count, first, d3_handle_name(first), (int64_t)x[4]);
-        }
+        set_saved(saved, 0, wait_result);
+        set_saved(saved, 1, (uint64_t)(uint32_t)index);
         return;
     }
     case 0x19:
         set_saved(saved, 0, 0);
         return;
-    case 0x1A:
-        set_saved(saved, 0, d3_sync_lock((uint32_t)x[0], (uint32_t *)(uintptr_t)x[1],
-                                       (uint32_t)x[2]));
+    case 0x1A: {
+        uint32_t *mutex = (uint32_t *)(uintptr_t)x[1];
+        if (g_sync_logs < 60) {
+            g_sync_logs++;
+            log_thread_id("ArbitrateLock", mutex, (uint32_t)x[2]);
+        }
+        set_saved(saved, 0, d3_sync_lock((uint32_t)x[0], mutex, (uint32_t)x[2]));
         return;
-    case 0x1B:
-        set_saved(saved, 0, d3_sync_unlock((uint32_t *)(uintptr_t)x[0],
-                                         (uint32_t)D3_THREAD_ID));
+    }
+    case 0x1B: {
+        uint32_t *mutex = (uint32_t *)(uintptr_t)x[0];
+        const uint32_t owner = guest_thread_id(thread_tp);
+        if (g_sync_logs < 60) {
+            g_sync_logs++;
+            log_thread_id("ArbitrateUnlock", mutex, owner);
+        }
+        set_saved(saved, 0, d3_sync_unlock(mutex, owner));
         return;
+    }
     case 0x1C: {
         uint32_t *mutex = (uint32_t *)(uintptr_t)x[0];
         uint32_t *key = (uint32_t *)(uintptr_t)x[1];
@@ -2976,7 +4183,7 @@ static void svc_call(d3_saved *saved, uint32_t id) {
     case 0x21:
         /* nn::sf::hipc::GetMessageBufferOnTls() is literally `mrs x0, tpidrro_el0`,
            so the message buffer is the thread-local region and not tpidr_el0. */
-        d3_svc_send_sync_request(saved, g_table[D3_HOST_OFF_TLR / 8]);
+        d3_svc_send_sync_request(saved, guest_tlr_for_tp(thread_tp));
         return;
     case 0x22:
         d3_svc_send_sync_request_user(saved);
@@ -3161,8 +4368,16 @@ static void svc_call(d3_saved *saved, uint32_t id) {
     }
 }
 
-static void on_tpidrro(d3_saved *saved, uint64_t extra) {
-    uint64_t tlr = g_table[D3_HOST_OFF_TLR / 8];
+static void on_tpidrro(d3_saved *saved, uint64_t extra, uint64_t thread_tp) {
+    /* tpidrro_el0 names the region of the thread that is running; the veneer
+       passes that thread's tpidr_el0 in x3. */
+    const uint64_t tlr = guest_tlr_for_tp(thread_tp ? thread_tp : this_guest_tls());
+    if (g_tpidrro_logs < 24) {
+        g_tpidrro_logs++;
+        info("tpidrro x%" PRIu64 " tp=%#" PRIx64 " tlr=%#" PRIx64 " [tlr+0x1f0]=%#" PRIx64,
+             extra, tlr - 0x4000, tlr,
+             *(const uint64_t *)(uintptr_t)(tlr + 0x1f0));
+    }
     if (extra > 30)
         fail("tpidrro register %" PRIu64, extra);
     if (!tlr)
@@ -3173,7 +4388,33 @@ static void on_tpidrro(d3_saved *saved, uint64_t extra) {
 /* Per id entry logs, so every syscall reports its caller once. */
 static uint8_t g_seen[256];
 
-void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved) {
+static void dispatch_inner(uint32_t kind, uint64_t extra, d3_saved *saved, uint64_t thread_tp);
+
+void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved, uint64_t thread_tp) {
+    /* This runs straight from guest code, so TPIDR_EL0 still points at the guest's
+       TLS block.  Everything below (pthread mutexes, logging, errno, malloc) is
+       host libc and needs the host thread pointer, otherwise it reads a bogus
+       pthread structure and faults in bionic. */
+    uint64_t guest_tp = 0;
+    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(guest_tp));
+    const uint64_t host_tp = thread_region_host_tp();
+    if (host_tp)
+        __asm__ volatile("msr tpidr_el0, %0" :: "r"(host_tp));
+    /* Refresh the host thread pointer the hook trampolines use: the trampoline
+       reads one global word, so keeping it written by the thread that is currently
+       dispatching shrinks the window in which a hook runs on another thread's TLS
+       from "anytime" to the few instructions of one dispatch. */
+    {
+        const uint64_t host_tp = thread_region_host_tp();
+        if (host_tp)
+            g_hook_tls.host_tp = host_tp;
+    }
+    dispatch_inner(kind, extra, saved, thread_tp);
+    if (host_tp)
+        __asm__ volatile("msr tpidr_el0, %0" :: "r"(guest_tp));
+}
+
+static void dispatch_inner(uint32_t kind, uint64_t extra, d3_saved *saved, uint64_t thread_tp) {
     __asm__ volatile("mov x18, %0" :: "r"(g_host_x18) : "memory");
     g_last_kind = kind;
     g_last_extra = extra;
@@ -3201,11 +4442,11 @@ void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved) {
         g_trace_count++;
     }
     if (kind == D3_KIND_TPIDRRO) {
-        on_tpidrro(saved, extra);
+        on_tpidrro(saved, extra, thread_tp);
         return;
     }
     if (kind == D3_KIND_SVC) {
-        svc_call(saved, (uint32_t)extra);
+        svc_call(saved, (uint32_t)extra, thread_tp);
         return;
     }
     if (kind == D3_KIND_CALL) {
@@ -3225,17 +4466,40 @@ void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved) {
     fail("unimplemented kind %u extra=%" PRIu64, kind, extra);
 }
 
-static void guest_call(uint64_t fn, uint64_t arg0, uint64_t arg1) {
+static void guest_call_with_tp(uint64_t fn, uint64_t arg0, uint64_t arg1, uint64_t guest_tp) {
     uint64_t io[9];
+    uint64_t host_tp;
+    /* The guest runs with the guest TLS, so the thread's own host TLS has to be
+       recorded while it is still installed: a hook (a direct branch from guest
+       code) switches back to it. */
+    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(host_tp));
+    g_hook_tls.host_tp = host_tp;
+    thread_region_set_host_tp(host_tp);
     io[0] = fn;
     io[1] = arg0;
     io[2] = arg1;
     io[3] = g_guest_x18;
-    io[4] = g_guest_tp;
+    io[4] = guest_tp;
     io[5] = g_host_x18;
-    io[6] = g_host_tp;
+    io[6] = host_tp;
     io[7] = 0;
     io[8] = 0;
+    /* Record the *calling thread's own region*, not the pointer the guest happens
+       to run on: the title re-points tpidr_el0 at its module TLS during main
+       DT_INIT, and mapping that address to itself made later lookups resolve a
+       thread to the title's TLS block (a fabricated thread object, so nn::os TLS
+       slots read back as NULL and the critical section asserts). */
+    {
+        const uint64_t region = this_guest_tls();
+        if (region && io[4] != region)
+            tp_map_add(io[4], region);
+        else if (region)
+            tp_map_add(io[4], io[4]);
+        if (region)
+            tid_map_set((uint64_t)syscall(SYS_gettid), region);
+        else
+            tid_map_set((uint64_t)syscall(SYS_gettid), io[4]);
+    }
     __asm__ volatile(
         "mov x19, %[io]\n"
         "ldr x9, [x19, #0]\n"
@@ -3261,9 +4525,15 @@ static void guest_call(uint64_t fn, uint64_t arg0, uint64_t arg1) {
           "v3", "v4", "v5", "v6", "v7", "memory", "cc");
     if (io[8] != g_guest_tp)
         info("guest tp %" PRIx64 " -> %" PRIx64, g_guest_tp, io[8]);
+    /* The SDK may hand the thread a TLS block of its own; keep the mapping so
+       tpidrro_el0 still resolves to this thread's region. */
+    tp_map_add(io[8], io[4]);
     g_guest_x18 = io[7];
     g_guest_tp = io[8];
-    g_table[D3_HOST_OFF_GUEST_TP / 8] = g_guest_tp;
+}
+
+static void guest_call(uint64_t fn, uint64_t arg0, uint64_t arg1) {
+    guest_call_with_tp(fn, arg0, arg1, this_guest_tls());
 }
 
 static int executable(uint64_t addr) {
@@ -3343,6 +4613,27 @@ static void d3_host_exit_check(void) {
     __android_log_print(ANDROID_LOG_ERROR, "D3Host", "process exiting via libc exit()");
 }
 
+static void *stall_watchdog(void *arg) {
+    (void)arg;
+    uint64_t last = 0;
+    int reports = 0;
+    for (int tick = 0; tick < 40 && reports < 6; tick++) {
+        usleep(500000);
+        const uint64_t svcs = g_svcs;
+        if (svcs != last)
+            last = svcs;
+        else {
+            const D3Ring *entry = &g_ring[(g_ring_next - 1) & 15u];
+            reports++;
+            info("stall: no svc for %d ms, svcs=%" PRIu64 " last dispatch kind=%" PRIx64
+                 " lr=%" PRIx64 " (%s+%#" PRIx64 ") x0=%#" PRIx64,
+                 (tick + 1) * 500, svcs, entry->kind, entry->lr, module_of(entry->lr),
+                 entry->lr >= g_bias ? entry->lr - g_bias : 0, entry->x0);
+        }
+    }
+    return 0;
+}
+
 static void *guest_sampler(void *arg) {
     uint64_t tid = (uint64_t)(uintptr_t)arg;
     for (int tick = 0; tick < 600 && g_sample_count < SAMPLE_SLOTS; tick++) {
@@ -3366,6 +4657,11 @@ static void *guest_thread(void *arg) {
     }
     __asm__ volatile("mrs %0, tpidr_el0" : "=r"(g_host_tp));
     __asm__ volatile("mov %0, x18" : "=r"(g_host_x18));
+    g_hook_tls.host_tp = g_host_tp;
+    /* The boot thread keeps the region the guest's libc init already filled in;
+       threads the guest starts get their own from guest_call. */
+    thread_region_assign(g_tls);
+    thread_region_set_host_tp((uint64_t)(uintptr_t)pthread_self());
     g_table[D3_HOST_OFF_DISPATCH / 8] = (uint64_t)(uintptr_t)d3_hle_dispatch;
     g_table[D3_HOST_OFF_HOST_TP / 8] = g_host_tp;
     g_table[D3_HOST_OFF_GUEST_TP / 8] = g_guest_tp;
@@ -3374,11 +4670,13 @@ static void *guest_thread(void *arg) {
     info("host tp %" PRIx64 " guest tp %" PRIx64 " tlr %" PRIx64 " bias %" PRIx64,
          g_host_tp, g_guest_tp, g_tlr, g_bias);
     {
-        pthread_t sampler, flusher;
+        pthread_t sampler, flusher, watchdog;
         if (pthread_create(&flusher, 0, sample_flusher, 0) == 0)
             pthread_detach(flusher);
         if (pthread_create(&sampler, 0, guest_sampler, (void *)(uintptr_t)g_guest_tid) == 0)
             pthread_detach(sampler);
+        if (pthread_create(&watchdog, 0, stall_watchdog, 0) == 0)
+            pthread_detach(watchdog);
     }
     register_fixed();
     if (pause_requested()) {
