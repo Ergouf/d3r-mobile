@@ -290,6 +290,9 @@ def main() -> None:
                      "-o", output], output)
 
     if args.build_tests:
+        display_test = os.path.join(out_dir, "test_display")
+        compile_one([clang, *PROBE_FLAGS, os.path.join(ROOT, "tests", "test_display.c"),
+                     "-o", display_test], display_test)
         for name, src in (("test_stack_memory", test_stack_memory),
                           ("test_applet_focus", test_applet_focus),
                           ("test_hipc_message", test_hipc_message),

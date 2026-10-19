@@ -45,6 +45,7 @@ BUILD_TOOLS_VERSION = "36.0.0"
 PLATFORM = "android-36"
 
 PACKAGE_NAME = "com.d3mobile.host.recovery"
+OEM_PACKAGES = ("com.miHoYo.Yuanshen", "com.miHoYo.ys.bilibili")
 MAIN_CLASS = "com.d3mobile.host.MainActivity"
 ABI = "arm64-v8a"
 APK_NAME = "d3host-recovery-debug.apk"
@@ -167,7 +168,7 @@ def main():
                         help="Output directory for the APK, metadata and keystore "
                              "(default: <project>/build/apk-recovery)")
     parser.add_argument("--keystore", help="Existing debug keystore to reuse across output directories")
-    parser.add_argument("--package", choices=[PACKAGE_NAME, "com.miHoYo.Yuanshen"], default=PACKAGE_NAME,
+    parser.add_argument("--package", choices=[PACKAGE_NAME, *OEM_PACKAGES], default=PACKAGE_NAME,
                         help="Optional OEM game identity; requires a host compiled for this package's private root")
     parser.add_argument("--driver-hooks-dir", help="Built libadrenotools src/hook directory")
     args = parser.parse_args()

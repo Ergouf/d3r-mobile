@@ -12,6 +12,7 @@
         android:label="Diablo III"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
         android:appCategory="game"
+        android:enableOnBackInvokedCallback="true"
         android:debuggable="true"
         android:extractNativeLibs="true"
         android:hasCode="true">

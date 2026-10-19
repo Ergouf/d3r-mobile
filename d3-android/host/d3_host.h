@@ -11,6 +11,7 @@
 #endif
 
 int d3_host_start(const char *guest_path);
+int d3_host_configure_display(uint32_t width, uint32_t height);
 /* thread_tp is the dispatching guest thread's tpidr_el0; the veneer passes it in
    x3 so the dispatcher never reads a shared table slot that another guest thread
    may be writing. */

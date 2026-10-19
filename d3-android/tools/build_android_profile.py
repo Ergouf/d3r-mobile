@@ -15,13 +15,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=["recovery", "genshin"], default="recovery")
+    parser.add_argument("--profile", choices=["recovery", "genshin", "genshin-bilibili"], default="recovery")
     parser.add_argument("--guest", required=True)
     parser.add_argument("--keystore", required=True)
     parser.add_argument("--sdk", default=r"D:\workspace\Gdict\android_sdk")
     parser.add_argument("--ndk", default=r"D:\workspace\Gdict\android_sdk\ndk\28.2.13676358")
     args = parser.parse_args()
-    package = "com.miHoYo.Yuanshen" if args.profile == "genshin" else "com.d3mobile.host.recovery"
+    package = {"genshin": "com.miHoYo.Yuanshen",
+               "genshin-bilibili": "com.miHoYo.ys.bilibili"}.get(args.profile, "com.d3mobile.host.recovery")
     private = "/data/user/0/" + package
     output = ROOT / "build" / ("android-" + args.profile)
     build_adreno.build(args.sdk, args.ndk)

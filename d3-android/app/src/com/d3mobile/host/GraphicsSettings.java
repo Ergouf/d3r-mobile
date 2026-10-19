@@ -16,9 +16,9 @@ import java.util.zip.*;
 /** Settings are committed before renderer creation, and changed on the next launch. */
 final class GraphicsSettings {
     static final int IMPORT_DRIVER = 517;
-    private final Activity activity;
+    private final MainActivity activity;
     private final SharedPreferences prefs;
-    GraphicsSettings(Activity activity) {
+    GraphicsSettings(MainActivity activity) {
         this.activity = activity;
         prefs = activity.getSharedPreferences("graphics", 0);
         if (prefs.getBoolean("custom", false) && prefs.getString("driver", "").equals(prefs.getString("launchedDriver", "-"))) {
@@ -34,13 +34,16 @@ final class GraphicsSettings {
             .putInt("launchedPid", android.os.Process.myPid()).commit();
     }
     int scale() { return prefs.getInt("scale", 10) == 15 ? 15 : 10; }
+    boolean widescreen() { return prefs.getBoolean("widescreen", true); }
     String driverName() { return prefs.getBoolean("custom", false) ? prefs.getString("library", "") : ""; }
     String driverDirectory() { return new File(activity.getFilesDir(), prefs.getString("driver", "drivers/none")).getAbsolutePath(); }
 
     void show() {
         final String[] items = {"渲染倍数：" + (scale() == 15 ? "1.5×" : "1.0×"),
-            "GPU 驱动：" + (driverName().isEmpty() ? "系统 Vulkan" : prefs.getString("driverLabel", "自定义")),
-            "导入 Adreno / Turnip 驱动 ZIP", "设置保存后，下次启动生效"};
+            "下次启动驱动：" + (driverName().isEmpty() ? "系统 Vulkan" : prefs.getString("driverLabel", "自定义")),
+            "导入 GPU 驱动 ZIP（Adreno / Turnip / Mali）", "虚拟手柄与界面",
+            "本次驱动状态：" + activity.nativeDriverStatus(),
+            "原生宽屏：" + (widescreen() ? "开启" : "16:9 基线") + "（重启生效）", "渲染倍数和驱动重启生效"};
         new AlertDialog.Builder(activity).setTitle("画面与 GPU")
             .setItems(items, (dialog, which) -> {
                 if (which == 0) new AlertDialog.Builder(activity).setTitle("渲染倍数")
@@ -57,6 +60,12 @@ final class GraphicsSettings {
                     Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);
                     activity.startActivityForResult(intent, IMPORT_DRIVER);
                 }
+                if (which == 3) activity.showOverlaySettings();
+                if (which == 5) {
+                    prefs.edit().putBoolean("widescreen", !widescreen()).apply();
+                    Toast.makeText(activity, "画面比例将在重启游戏后生效", Toast.LENGTH_LONG).show();
+                    show();
+                }
             }).setNegativeButton("返回游戏", null).show();
     }
 
@@ -69,6 +78,7 @@ final class GraphicsSettings {
                 int entries = 0;
                 try (InputStream input = activity.getContentResolver().openInputStream(uri);
                      ZipInputStream zip = new ZipInputStream(input)) {
+                    if (input == null) throw new IOException("无法读取驱动 ZIP");
                     ZipEntry entry;
                     byte[] buffer = new byte[65536];
                     while ((entry = zip.getNextEntry()) != null) {
@@ -94,16 +104,10 @@ final class GraphicsSettings {
                 if (json.optInt("minApi", 0) > Build.VERSION.SDK_INT) throw new IOException("驱动不支持当前 Android 版本");
                 String library = json.getString("libraryName");
                 if (!library.matches("[A-Za-z0-9_.+-]+\\.so")) throw new IOException("驱动库名无效");
-                File so = new File(staging, library);
-                try (InputStream elf = new FileInputStream(so)) {
-                    byte[] header = new byte[20];
-                    if (elf.read(header) != 20 || header[0] != 127 || header[1] != 'E' || header[2] != 'L' || header[3] != 'F'
-                            || header[4] != 2 || header[5] != 1 || (header[18] & 255) != 183 || header[19] != 0)
-                        throw new IOException("需要 ARM64 ELF 驱动");
-                }
+                DriverLibrary.validate(staging, library);
                 prefs.edit().putString("library", library).putString("driver", "drivers/" + staging.getName())
                     .putString("driverLabel", json.optString("name", library)).putBoolean("custom", true).commit();
-                activity.runOnUiThread(() -> Toast.makeText(activity, "驱动已导入，下次启动生效", Toast.LENGTH_LONG).show());
+                activity.runOnUiThread(() -> Toast.makeText(activity, "驱动已导入，重启后验证实际加载情况", Toast.LENGTH_LONG).show());
             } catch (Exception error) {
                 remove(staging);
                 activity.runOnUiThread(() -> new AlertDialog.Builder(activity).setTitle("导入失败")

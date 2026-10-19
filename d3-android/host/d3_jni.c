@@ -47,21 +47,36 @@ Java_com_d3mobile_host_MainActivity_nativePrivateRoot(JNIEnv *env, jobject activ
 
 JNIEXPORT jint JNICALL
 Java_com_d3mobile_host_MainActivity_nativeConfigure(JNIEnv *env, jobject activity,
-        jint scale, jstring libraries, jstring directory, jstring name) {
+        jint scale, jint width, jint height, jstring libraries, jstring directory, jstring name) {
     (void)activity;
+    if (width < 1600 || width > 4096 || height != 900) return -1;
 #ifdef D3_WITH_GPU
-    extern int d3_gpu_configure(int, const char*, const char*, const char*);
+    extern int d3_gpu_configure(int, int, const char*, const char*, const char*);
     const char *libs = (*env)->GetStringUTFChars(env, libraries, NULL);
     const char *dir = (*env)->GetStringUTFChars(env, directory, NULL);
     const char *file = (*env)->GetStringUTFChars(env, name, NULL);
-    int result = d3_gpu_configure(scale, libs, dir, file);
+    int result = d3_gpu_configure(scale, width != 1600, libs, dir, file);
     (*env)->ReleaseStringUTFChars(env, libraries, libs);
     (*env)->ReleaseStringUTFChars(env, directory, dir);
     (*env)->ReleaseStringUTFChars(env, name, file);
+    if (result == 0) result = d3_host_configure_display((uint32_t)width, (uint32_t)height);
     return result;
 #else
     (void)env; (void)scale; (void)libraries; (void)directory; (void)name;
     return -1;
+#endif
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_d3mobile_host_MainActivity_nativeDriverStatus(JNIEnv *env, jobject activity) {
+    (void)activity;
+#ifdef D3_WITH_GPU
+    extern void d3_gpu_driver_status(char*, size_t);
+    char status[1024];
+    d3_gpu_driver_status(status, sizeof(status));
+    return (*env)->NewStringUTF(env, status);
+#else
+    return (*env)->NewStringUTF(env, "GPU bridge unavailable");
 #endif
 }
 

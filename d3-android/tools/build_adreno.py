@@ -16,6 +16,12 @@ def build(sdk, ndk):
     revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     if revision != REVISION:
         raise RuntimeError("Unexpected libadrenotools revision: " + revision)
+    patch = ROOT / "gpu/patches/adrenotools-mali-isolation.patch"
+    applied = subprocess.run(["git", "-C", str(source), "apply", "--reverse", "--check", str(patch)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if applied.returncode:
+        subprocess.run(["git", "-C", str(source), "apply", "--check", str(patch)], check=True)
+        subprocess.run(["git", "-C", str(source), "apply", str(patch)], check=True)
     cmake_root = pathlib.Path(sdk) / "cmake/3.22.1/bin"
     cmake = str(cmake_root / "cmake.exe")
     output = ROOT / "build/adrenotools"

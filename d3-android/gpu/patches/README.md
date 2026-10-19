@@ -16,6 +16,12 @@ git -C reference/eden apply ../../d3-android/gpu/patches/eden-local-20261019.pat
 ```
 
 其余依赖按清单恢复到对应 commit；libadrenotools 构建器校验固定 revision。
+`adrenotools-mali-isolation.patch` 修复 Mali 与已预载系统驱动同名时的复用：
+在非共享 namespace 中先用绝对路径及 FORCE_LOAD 加载补全核心，再加载 wrapper，
+系统/vendor 依赖继续链接，不修改系统分区。仅对 `vulkan.mali.so` 路径启用。
+`tools/build_adreno.py` 自动检查并幂等应用；恢复依赖不再只需原始 revision。
+`tools/probe_driver.cpp` 的 `--system-first` 场景在 X200 Pro 上能同时映射两套库，
+并枚举 Mali-G925；app 内仍需分别核对 maps 和实际渲染日志。
 Boost 是本地 archive，路径 `d3-android/gpu/third_party/boost/boost_1_86_0/`，
 需另行保留或恢复 1.86.0。恢复依赖后运行：
 

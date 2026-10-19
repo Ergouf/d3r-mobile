@@ -5,6 +5,7 @@
 #include "../guest_layout.h"
 #include "guest_relocs.h"
 #include "d3_content.h"
+#include "d3_display.h"
 #ifdef D3_WITH_GPU
 #include "../gpu/host/gpu_bridge.h"
 #endif
@@ -55,6 +56,14 @@
 #define PROBE_INFO_PATH D3_DATA_ROOT "/logs/d3-sysinfo.txt"
 #define SYS_RES_TOTAL 0x2000000ull
 #define SYS_RES_USED 0x400000ull
+
+static uint32_t g_display_width = 1600, g_display_height = 900;
+
+int d3_host_configure_display(uint32_t width, uint32_t height) {
+    if (width < 1600 || width > 4096 || height != 900) return -1;
+    g_display_width = width; g_display_height = height;
+    return 0;
+}
 
 enum {
     MEM_FREE = 0,
@@ -3008,6 +3017,19 @@ static void restore_hook(uint64_t vaddr) {
 }
 
 static void install_guest_hooks(uint64_t base, uint64_t image_size) {
+    if (g_display_width != 1600) {
+        const uint64_t offset = 0x10e7858;
+        const uint64_t letterbox_offset = 0x1eb0b10;
+        if (offset + 24 > image_size || letterbox_offset + 4 > image_size ||
+            d3_display_patch((uint32_t*)(uintptr_t)(base + offset),
+                             (uint32_t*)(uintptr_t)(base + letterbox_offset), g_display_width, g_display_height))
+            fail("native widescreen: guest resolution initializer differs from the verified update image");
+        __builtin___clear_cache((char*)(uintptr_t)(base + offset), (char*)(uintptr_t)(base + offset + 24));
+        info("native widescreen: docked=%ux%u aspect=%.6f (verified guest initializer)",
+             g_display_width, g_display_height, (double)g_display_width / g_display_height);
+        info("native widescreen: scene/UI letterbox aspect synchronized at guest vaddr=%#llx",
+             (unsigned long long)letterbox_offset);
+    }
     log_exec_maps();
     const size_t count = sizeof g_hooks / sizeof g_hooks[0];
     if (count > HOOK_MAX)

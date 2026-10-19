@@ -12,7 +12,8 @@ import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
-import android.graphics.Insets;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -70,12 +71,18 @@ public class MainActivity extends Activity {
     private TextView statusView;
     private Button startButton;
     private GameControlsView controls;
+    private OverlaySettings overlay;
+    private final OnBackInvokedCallback settingsBack = () -> {
+        if (controls != null) controls.releaseAll();
+        if (graphics != null) graphics.show();
+    };
     private AudioManager audioManager;
     private AudioFocusRequest audioFocus;
     private boolean foreground;
 
     /** Guards the start button so the native request is only ever sent once. */
     private volatile boolean started = false;
+    private static android.view.Surface activeSurface;
 
     private native void nativeStart(String path);
     private native void nativePresent(android.view.Surface surface);
@@ -84,8 +91,9 @@ public class MainActivity extends Activity {
     private native void nativeAttach();
     private native void nativeDetach();
     private native void nativeKeyboardReply(String text);
-    private native int nativeConfigure(int scale, String libraries, String directory, String name);
+    private native int nativeConfigure(int scale, int width, int height, String libraries, String directory, String name);
     private native String nativePrivateRoot();
+    native String nativeDriverStatus();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -94,7 +102,18 @@ public class MainActivity extends Activity {
         PRIVATE_ROOT = getDataDir().getAbsolutePath();
         if (!PRIVATE_ROOT.equals(nativePrivateRoot())) throw new IllegalStateException("APK 身份与原生数据目录不匹配，请重新构建对应版本");
         graphics = new GraphicsSettings(this);
-        nativeConfigure(graphics.scale(), getApplicationInfo().nativeLibraryDir, graphics.driverDirectory(), graphics.driverName());
+        android.graphics.Point dimensions = new android.graphics.Point();
+        getWindowManager().getDefaultDisplay().getRealSize(dimensions);
+        int outputWidth = graphics.widescreen() ? Math.max(1600,
+            Math.min(4096, Math.round(900f * Math.max(dimensions.x, dimensions.y) / Math.min(dimensions.x, dimensions.y) / 8) * 8)) : 1600;
+        int configuration = nativeConfigure(graphics.scale(), outputWidth, 900, getApplicationInfo().nativeLibraryDir,
+                graphics.driverDirectory(), graphics.driverName());
+        if (configuration < 0) throw new IllegalStateException("画面参数初始化失败");
+        if (configuration > 0) started = true;
+        if (configuration == 0)
+            Log.i(TAG, "guest output=" + outputWidth + "x900; native widescreen=" + (outputWidth != 1600));
+        else
+            Log.i(TAG, "reattaching to the running guest; pending graphics settings require process restart");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setDecorFitsSystemWindows(false);
         getWindow().getAttributes().layoutInDisplayCutoutMode =
@@ -113,6 +132,7 @@ public class MainActivity extends Activity {
         Log.i(TAG, "onCreate entry pkg=" + getPackageName() + " privateRoot=" + PRIVATE_ROOT);
 
         setContentView(buildUi());
+        getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, settingsBack);
         enterFullscreen();
         logBuildInfo();
 
@@ -144,8 +164,6 @@ public class MainActivity extends Activity {
         statusView.setPadding(24, 16, 24, 16);
         statusView.setVisibility(View.GONE);
         SurfaceView preview = new SurfaceView(this);
-        // The guest renders 1600 x 900. Composite at the same horizontal
-        // resolution and let Android scale the fullscreen layer to the panel.
         android.graphics.Point display = new android.graphics.Point();
         getWindowManager().getDefaultDisplay().getRealSize(display);
         int longEdge = Math.max(display.x, display.y), shortEdge = Math.min(display.x, display.y);
@@ -155,6 +173,7 @@ public class MainActivity extends Activity {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
                 Log.i(TAG, "surfaceCreated; handing the window to the GPU bridge");
+                activeSurface = holder.getSurface();
                 nativePresent(holder.getSurface());
                 holder.getSurface().setFrameRate(60f, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
             }
@@ -163,17 +182,29 @@ public class MainActivity extends Activity {
             public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {}
 
             @Override
-            public void surfaceDestroyed(SurfaceHolder holder) { nativePresent(null); }
+            public void surfaceDestroyed(SurfaceHolder holder) {
+                if (activeSurface == holder.getSurface()) {
+                    activeSurface = null;
+                    nativePresent(null);
+                }
+            }
         });
         root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
         controls = new GameControlsView(this);
         root.addView(controls, new FrameLayout.LayoutParams(-1, -1));
         Button settings = new Button(this);
         settings.setText("画面"); settings.setAlpha(0.65f);
+        settings.setTextSize(12);
+        settings.setPadding(0, 0, 0, 0);
+        settings.setMinWidth(0); settings.setMinimumWidth(0);
+        settings.setMinHeight(0); settings.setMinimumHeight(0);
         settings.setOnClickListener(v -> { controls.releaseAll(); graphics.show(); });
-        FrameLayout.LayoutParams settingsLayout = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
-        settingsLayout.leftMargin = 16; settingsLayout.topMargin = 12;
-        root.addView(settings, settingsLayout);
+        root.addView(settings);
+        overlay = new OverlaySettings(this, controls, settings);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            overlay.setInsets(insets);
+            return insets;
+        });
         root.addView(statusView, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
         startButton = new Button(this);
         startButton.setText("启动游戏");
@@ -188,6 +219,10 @@ public class MainActivity extends Activity {
             bars.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             bars.hide(WindowInsets.Type.systemBars());
         }
+    }
+
+    void showOverlaySettings() {
+        overlay.show();
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
@@ -256,6 +291,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(settingsBack);
         nativeDetach();
         super.onDestroy();
     }

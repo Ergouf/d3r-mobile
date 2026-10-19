@@ -5,6 +5,9 @@
 稳定 60fps 和第一章完整通关仍待完成。
 
 先读 [当前交接](HANDOFF_CURRENT.md)、[目标](GOAL.md)和[验收证据](evidence/20261019-handoff/README.md)。
+vivo X200 Pro 原生宽屏、左侧安全区浮动摇杆和 Mali 补全包见 [续测记录](X200PRO_20261019.md)。
+补全包使用本机 r49p1 实现，不是新版驱动；已验证 app 内实际加载及宽屏标题渲染，
+完整玩法、HUD 和长时稳定性仍待验收。
 旧首帧、nnMain 和 time 服务记录仅对应历史阶段。
 
 ## 正式源码
@@ -29,7 +32,9 @@ python -I d3-android/tools/build_android_profile.py --profile recovery --guest r
 
 脚本构建 adrenotools、GPU、host 和 APK，不安装。NDK 28.2.13676358、第三方依赖、
 生成 shader headers、guest 和签名文件须已准备；步骤见当前交接和 [依赖补丁](gpu/patches/README.md)。
-`--profile genshin` 构建可选身份包，尚未安装验证。正常基线为系统 Vulkan、1.0×、write-watch 关闭。
+`--profile genshin` 使用 `com.miHoYo.Yuanshen`；`--profile genshin-bilibili` 使用
+`com.miHoYo.ys.bilibili`，后者已在 X200 Pro 安装并被识别为游戏，AI 插帧仍未验收。
+设备已有真实原神时保留其包和数据。正常基线为系统 Vulkan、1.0×、write-watch 关闭。
 APK 和 Git 不含主游戏及约 5.2GiB 中文资源。
 
 ## 代码探索
