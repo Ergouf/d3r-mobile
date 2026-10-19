@@ -1,5 +1,8 @@
 # Diablo 3 Android Emulator - Boot Sequence Debugging Handoff
 
+> 当前交接已更新至 2026-10-19 的第一章和中文音频阶段，见
+> [d3-android/HANDOFF_CURRENT.md](d3-android/HANDOFF_CURRENT.md)。下文仅为启动历史。
+
 > **WARNING - PARTLY SUPERSEDED (last revised 2026-10-16, code stage
 > `4eb34b9`).** This handoff predates the source-recovery checkpoint. Its "4/5
 > blockers resolved" status, line numbers, `d3_table.c` layout and ABI

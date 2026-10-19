@@ -1,0 +1,56 @@
+[
+  {
+    "path": "reference/eden",
+    "revision": "e0d47f2790e3f758fa2188926a0bb2f56af6b310",
+    "origin": "https://github.com/eden-emulator/mirror.git",
+    "status": "M src/common/thread.h\n M src/video_core/cdma_pusher.cpp",
+    "patch": "d3-android/gpu/patches/eden-local-20261019.patch"
+  },
+  {
+    "path": "d3-android/gpu/third_party/boost",
+    "revision": null,
+    "note": "Local archive; preserve this directory separately"
+  },
+  {
+    "path": "d3-android/gpu/third_party/fmt",
+    "revision": "18164eaf8bd04879a058b8a6f14d8386d13e1582",
+    "origin": "https://github.com/fmtlib/fmt.git",
+    "status": ""
+  },
+  {
+    "path": "d3-android/gpu/third_party/libadrenotools",
+    "revision": "8fae8ce254dfc1344527e05301e43f37dea2df80",
+    "origin": "https://github.com/bylaws/libadrenotools.git",
+    "status": ""
+  },
+  {
+    "path": "d3-android/gpu/third_party/sirit",
+    "revision": "7eb23c168629347f6de93487a309a93de2415bb2",
+    "origin": "https://github.com/eden-emulator/sirit.git",
+    "status": ""
+  },
+  {
+    "path": "d3-android/gpu/third_party/SPIRV-Headers",
+    "revision": "86f980c731e62ae4eaf383d320449d71687936bf",
+    "origin": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+    "status": ""
+  },
+  {
+    "path": "d3-android/gpu/third_party/VMA",
+    "revision": "bfb2ca99e1e7e9684dc06546b552ee3eff4b10aa",
+    "origin": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git",
+    "status": ""
+  },
+  {
+    "path": "d3-android/gpu/third_party/Vulkan-Headers",
+    "revision": "acbb9391c0a597272800cd3f4363661c00a27c77",
+    "origin": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+    "status": ""
+  },
+  {
+    "path": "d3-android/gpu/third_party/Vulkan-Utility-Libraries",
+    "revision": "90738f6edfa19561a978fc5f97543ba37075ba9d",
+    "origin": "https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git",
+    "status": ""
+  }
+]

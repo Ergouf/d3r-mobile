@@ -155,6 +155,8 @@ static void sc_child_thread(void) {
    whole block is pure: no libc, no host TLS, only the instructions below. On
    return (non-fatal), host TLS is back and post_* hold what the handler left. */
 static void sc_trigger_guest(uint64_t sentinel) {
+    (void)this_guest_tls();
+    thread_region_set_host_tp(host_thread_pointer());
     struct ScGuestTls {
         uint64_t word;
     } *fake = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE,

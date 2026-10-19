@@ -1,5 +1,8 @@
 # D3HOST 源码恢复检查点
 
+> 本文件记录 2026-10-16 恢复历史；当前第一章、中文音频和 GPU 交接见
+> [HANDOFF_CURRENT.md](HANDOFF_CURRENT.md)。下文当前阻塞仅对应旧阶段。
+
 日期：2026-10-16
 分支：`recovery/d3host-sources`　代码阶段 `4b8f419`（"preserve Android signal chain for non-guest threads"，signal 检查点）。此前阶段 `4eb34b9`（单次初始化修复）、`3595280`（独立测试 APK）、`ab074d3`（set 服务）；更早检查点打标签 `recovered-original-sources-20261016` = `3e1c61c`，无远程仓库。
 

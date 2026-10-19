@@ -112,6 +112,7 @@ typedef struct {
     uint32_t out0;         /* first out argument (payload + 4) */
     int special;           /* the reply carried a special header */
     uint32_t move_handles; /* moved handles in the special header */
+    uint32_t copy_handles;
     uint32_t handle;       /* the first handle slot value, if any */
     int domain_reply;      /* the frame word was a domain header, not CMIF_OUT */
     uint32_t domain_word;  /* the raw frame word (the codebase's domain header) */
@@ -128,11 +129,12 @@ static void reply_read(const uint32_t *w, Reply *r) {
     if (r->special) {
         const uint32_t special = w[2];
         r->move_handles = (special >> 5) & 0xfu;
+        r->copy_handles = (special >> 1) & 0xfu;
         slot += 1;
         if (special & 1u)
             slot += 2;
     }
-    if (r->special && r->move_handles > 0)
+    if (r->special && r->move_handles + r->copy_handles > 0)
         r->handle = w[slot];
     size_t payload;
     if (w[frame] == CMIF_OUT) {
@@ -287,7 +289,7 @@ int main(void) {
     domain_send(session, 20, root, 0, &r);
     CHECK(r.result == 0);                       /* the method itself succeeds */
     CHECK(r.domain_reply);                      /* still a domain reply */
-    CHECK(r.special && r.move_handles == 1);    /* exactly one out handle */
+    CHECK(r.special && r.copy_handles == 1 && r.move_handles == 0);
     CHECK(r.handle != 0);                       /* a real allocated handle */
     CHECK(d3_handle_kind(r.handle) == D3_OBJ_SHARED_MEM);
     CHECK(d3_handle_arg(r.handle) == D3_TIME_SHARED_MEMORY_BYTES);

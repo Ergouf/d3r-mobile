@@ -63,7 +63,7 @@
 #define RES_INVALID_HANDLE UINT32_C(0xe401)
 #define RES_INVALID_STATE UINT32_C(0xfa01)
 
-#define CASE_LIMIT_MS 2000
+#define CASE_LIMIT_MS 4000
 #define RACE_ROUNDS 100
 
 /* A statement that survives -Wempty-body and stops the compiler from hoisting
@@ -564,6 +564,12 @@ static d3_saved svc_frame(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3) {
    0x1B passes is D3_THREAD_ID (1) -- the single-guest context value; this does
    not imply multi-threaded guest support (CreateThread/Start are still stubs). */
 static int case_svc_abi(void) {
+    const uint64_t region = this_guest_tls();
+    const uint64_t tlr = guest_tlr_for_tp(region);
+    const uint64_t current_thread = *(uint64_t *)(uintptr_t)(tlr + 0x1f8);
+    *(uint32_t *)(uintptr_t)(current_thread + 0x1b0) = MAIN_TAG;
+    thread_region_set_host_tp(host_thread_pointer());
+    __asm__ volatile("mov %0, x18" : "=r"(g_host_x18));
     d3_saved saved;
 
     /* 0x1A ArbitrateLock: a word that is not (owner | mask) returns 0 and is
@@ -571,7 +577,7 @@ static int case_svc_abi(void) {
     static uint32_t word;
     word = UINT32_C(0x2468ace0);
     saved = svc_frame(MAIN_TAG, (uint64_t)(uintptr_t)&word, g_worker_tag, 0);
-    d3_hle_dispatch(D3_KIND_SVC, 0x1A, &saved);
+    d3_hle_dispatch(D3_KIND_SVC, 0x1A, &saved, region);
     CHECK(saved.x[0] == 0);
     CHECK(saved.x[1] == (uint64_t)(uintptr_t)&word);
     CHECK(saved.x[2] == g_worker_tag);
@@ -579,7 +585,7 @@ static int case_svc_abi(void) {
     /* 0x1A matching word the current thread already owns: returns 0. */
     word = MAIN_TAG;
     saved = svc_frame(MAIN_TAG, (uint64_t)(uintptr_t)&word, MAIN_TAG, 0);
-    d3_hle_dispatch(D3_KIND_SVC, 0x1A, &saved);
+    d3_hle_dispatch(D3_KIND_SVC, 0x1A, &saved, region);
     CHECK(saved.x[0] == 0);
     CHECK(word == MAIN_TAG);
 
@@ -588,7 +594,7 @@ static int case_svc_abi(void) {
     static uint32_t mutex;
     mutex = MAIN_TAG;
     saved = svc_frame((uint64_t)(uintptr_t)&mutex, SENTINEL, SENTINEL, 0);
-    d3_hle_dispatch(D3_KIND_SVC, 0x1B, &saved);
+    d3_hle_dispatch(D3_KIND_SVC, 0x1B, &saved, region);
     CHECK(saved.x[0] == 0);
     CHECK(saved.x[1] == SENTINEL);
     CHECK(saved.x[2] == SENTINEL);
@@ -600,7 +606,7 @@ static int case_svc_abi(void) {
     mutex = MAIN_TAG;
     key = 0;
     saved = svc_frame((uint64_t)(uintptr_t)&mutex, (uint64_t)(uintptr_t)&key, MAIN_TAG, 0);
-    d3_hle_dispatch(D3_KIND_SVC, 0x1C, &saved);
+    d3_hle_dispatch(D3_KIND_SVC, 0x1C, &saved, region);
     CHECK(saved.x[0] == TIMED_OUT);
     CHECK(saved.x[1] == (uint64_t)(uintptr_t)&key);
     CHECK(saved.x[2] == MAIN_TAG);
@@ -611,7 +617,7 @@ static int case_svc_abi(void) {
        passed them; a key with no waiter is cleared to 0. */
     key = 1;
     saved = svc_frame((uint64_t)(uintptr_t)&key, 0, SENTINEL, SENTINEL);
-    d3_hle_dispatch(D3_KIND_SVC, 0x1D, &saved);
+    d3_hle_dispatch(D3_KIND_SVC, 0x1D, &saved, region);
     CHECK(saved.x[0] == (uint64_t)(uintptr_t)&key); /* unchanged */
     CHECK(saved.x[1] == 0);
     CHECK(saved.x[2] == SENTINEL);
@@ -625,6 +631,55 @@ static int case_svc_abi(void) {
     CHECK(result_ == 0); \
 } while (0)
 
+static int case_address_cache(void) {
+    uint32_t *word = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(word != MAP_FAILED);
+    d3_sync_enable_address_cache(1);
+    CHECK(d3_sync_signal(word, 1) == 0);
+    const uint32_t cached = g_address_cache_next;
+    CHECK(cached > 0);
+    CHECK(d3_sync_signal(word, 1) == 0 && g_address_cache_next == cached);
+    range_prot((uint64_t)(uintptr_t)word, PAGE_SIZE, 1, "test-cache-readonly");
+    CHECK(d3_sync_signal(word, 1) == RES_INVALID_MEMORY);
+    CHECK(sync_address_access(word, 0) == 0);
+    range_prot((uint64_t)(uintptr_t)word, PAGE_SIZE, 0, "test-cache-unmapped");
+    CHECK(sync_address_access(word, 0) == RES_INVALID_MEMORY);
+    range_prot((uint64_t)(uintptr_t)word, PAGE_SIZE, 3, "test-cache-writable");
+    CHECK(d3_sync_signal(word, 1) == 0);
+    d3_sync_enable_address_cache(0);
+    CHECK(munmap(word, PAGE_SIZE) == 0);
+    return 0;
+}
+
+static void *delayed_exit(void *argument) {
+    ThreadStart *start = argument;
+    msleep(2200);
+    pthread_mutex_lock(&start->mutex);
+    start->exited = 1;
+    pthread_cond_broadcast(&start->cond);
+    pthread_mutex_unlock(&start->mutex);
+    return NULL;
+}
+
+static int case_scene_loading_wait(void) {
+    ThreadStart start = {0};
+    thread_state_init(&start);
+    const uint32_t handle = d3_handle_alloc(D3_OBJ_THREAD, "delayed-loader", (uint64_t)(uintptr_t)&start);
+    CHECK(handle != 0);
+    pthread_t worker;
+    CHECK(pthread_create(&worker, NULL, delayed_exit, &start) == 0);
+    int32_t index = -1;
+    d3_saved saved = svc_frame((uint64_t)(uintptr_t)&index, (uint64_t)(uintptr_t)&handle, 1, UINT64_MAX);
+    struct timespec begin; clock_gettime(CLOCK_MONOTONIC, &begin);
+    d3_hle_dispatch(D3_KIND_SVC, 0x18, &saved, this_guest_tls());
+    CHECK(saved.x[0] == 0 && saved.x[1] == 0 && index == 0);
+    CHECK(ns_since(&begin) >= 2100000000LL);
+    CHECK(pthread_join(worker, NULL) == 0);
+    d3_handle_close(handle);
+    pthread_cond_destroy(&start.cond); pthread_mutex_destroy(&start.mutex);
+    return 0;
+}
+
 int main(void) {
     g_worker_tag = d3_handle_alloc(D3_OBJ_THREAD, "sync-waiter", 0);
     CHECK(g_worker_tag != 0);
@@ -635,6 +690,7 @@ int main(void) {
 
     RUN_CASE(case_alignment);
     RUN_CASE(case_invalid_memory);
+    RUN_CASE(case_address_cache);
     RUN_CASE(case_invalid_owner);
     RUN_CASE(case_unlock_mismatch);
     RUN_CASE(case_handoff);
@@ -648,6 +704,7 @@ int main(void) {
     RUN_CASE(case_signal_wake_one);
     RUN_CASE(case_signal_wake_all);
     RUN_CASE(case_svc_abi);
+    RUN_CASE(case_scene_loading_wait);
 
     puts("PASS: sync lock/unlock/wait/signal honour handoff, timeout and key "
          "semantics, and the 0x1A-0x1D SVC ABI");

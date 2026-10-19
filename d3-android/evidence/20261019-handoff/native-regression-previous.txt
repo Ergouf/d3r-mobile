@@ -1,0 +1,24 @@
+test_address_arbiter: 0 PASS: address arbitration predicates, timeouts, wake counts, atomic updates, races and SVC ABI 
+test_applet_focus: 0 PASS: applet focus notification is one message per object, objects are independent, the queue empties after consume, wrong-session pops are vacuous, close/reset clears it, SetOutOfFocusSuspendingEnabled stores a byte-normalized bool per object, ConvertCurrentObjectToDomain returns the actual per-session root id or a real error when full, pctl factory 0/1 with child Initialize manages per-object state, and domain CloseVirtualHandle is recognized without a CMIF payload while malformed shapes are refused 
+test_audio: 0 PASS: real PCM mixer, partial consumption, FIFO tags/events, pause/resume, six-channel downmix, capacity and invalid guest memory 
+test_boot_sequence: 0 PASS: DT_INIT owns SDK/main constructors once; nnMain follows both modules 
+test_cpu_write_tracker: 0 PASS: CPU cache page snapshots, exact changes, repeat-cache, boundaries, uncache and reentrant collection 
+test_directory: 0 PASS: Horizon directory ABI, entry filters, size, count cursor, close and symlink exclusion 
+test_guest_tls: 0 PASS: original guest vibration enumerator accepts the seeded single FullKey style
+PASS: four threads each preserve guest/host TP and x18 across 1000 real SDK veneer and hook calls
+PASS: original game file-existence code distinguishes existing and missing files 
+test_hid_memory: 0 PASS: read-only/RW HID views, writable alias, ring wrap, simultaneous buttons, clamped axes, release and detach 
+test_hid_service: 0 PASS: HID session/domain, copy shared memory, reply PID, close, controller result C buffer and allocation errors 
+test_hipc_message: 0 PASS: the HIPC walker counts X/A/B/W descriptors, places the CMIF frame on the 16 byte boundary, recognizes a capture with one receive descriptor as a plain request (domain 0, frame 8, magic 8, cmd 5), validates the domain data size against the raw data, never scans for SFCI outside the declared frame, and accepts only a genuine bare HIPC close 
+test_keyboard: 0 PASS keyboard UTF16/UTF8, text check, cancellation and completion event 
+test_nvdrv: 0 PASS: GPU characteristics, nvmap lifecycle, per-session descriptors and VA reservations 
+test_nvdrv_gpu: 0 PASS: GPU bridge map failure rollback, alias metadata, kind-only partial remap and pin lifetime 
+test_save_filesystem: 0 PASS: save filesystem auto-creation, persistent contents, commit, capacity, close and access-log ABI 
+test_set_service: 0 PASS: set decodes the three word receive descriptor with the full size and address fields, writes the 18 LanguageCodes into the guest buffer (including a 4 byte aligned 0x200 output like the APK's) with en-US readable, reports a matching count, answers commands 0..6 from scalar arguments and refuses a short, unwritable, badly moded, send only, exchange only, missing, legacy or unknown request without a host fault 
+test_signal_chain: 0 PASS: previous handler chained once, non-guest TLS preserved, guest TLS restored with dump, default fatal exits by signal 
+test_stack_memory: 0 PASS: stack region, MapMemory/UnmapMemory backing, protections, queries, rejection cases, tpidrro TLR, bounded crash memory 
+test_startup_services: 0 PASS: VI parcel, Binder refs/connect/query, nvmap pins, preallocate/dequeue/request/cancel/disconnect and bounds
+PASS: AOC cmd2 returns a zero count without leaking handles; cmd8 returns a copy event
+PASS: account, launch storage, nvdrv, offline NIFM, PCTL, APM, NotifyRunning and no-device NFP 
+test_sync: 0 PASS: sync lock/unlock/wait/signal honour handoff, timeout and key semantics, and the 0x1A-0x1D SVC ABI 
+test_time_service: 0 PASS: time:u converts to a D3_IF_TIME root (not iface 0), domain root cmd 3 hands out exactly one D3_IF_TIME_ZONE child distinct from the root, root cmd 20 hands back exactly one fresh D3_OBJ_SHARED_MEM out handle of 0x1000 bytes with no out object id (and the child refuses it), two sessions stay isolated with foreign ids unreachable and closed ids invalid, an exhausted domain table makes cmd 3 return a non-zero error with no fabricated object id, unknown root/child commands are refused, and a non-domain session's cmd 3 returns a move session handle while cmd 20 returns a shared-memory handle 

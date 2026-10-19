@@ -52,6 +52,7 @@ d3_hook_stub:
     /* Save the guest's argument registers (the hook bodies take up to five
        arguments, and the body may not be entered with a live x8 either) plus the
        frame pointer and the guest's return address. */
+    stp     x18, xzr, [sp, #-16]!
     stp     x29, x30, [sp, #-16]!
     stp     x0, x1, [sp, #-16]!
     stp     x2, x3, [sp, #-16]!
@@ -60,6 +61,7 @@ d3_hook_stub:
     stp     x8, x16, [sp, #-16]!
     bl      d3_host_tp_current
     mov     x17, x0
+    mov     x18, x1
     ldp     x8, x16, [sp], #16
     ldp     x6, x7, [sp], #16
     ldp     x4, x5, [sp], #16
@@ -81,5 +83,96 @@ d3_hook_stub:
 1:  blr     x16
     ldp     x9, x30, [sp], #16
     msr     tpidr_el0, x9
+    ldp     x18, xzr, [sp], #16
     ret
     .size   d3_hook_stub, . - d3_hook_stub
+
+    .p2align 4
+    .global d3_veneer_bridge
+    .hidden d3_veneer_bridge
+    .type d3_veneer_bridge, %function
+d3_veneer_bridge:
+    mrs     x23, tpidr_el0
+    mov     x24, sp
+    stp     q8, q9, [sp, #-0x180]!
+    stp     q10, q11, [sp, #0x20]
+    stp     q12, q13, [sp, #0x40]
+    stp     q14, q15, [sp, #0x60]
+    stp     q16, q17, [sp, #0x80]
+    stp     q18, q19, [sp, #0xa0]
+    stp     q20, q21, [sp, #0xc0]
+    stp     q22, q23, [sp, #0xe0]
+    stp     q24, q25, [sp, #0x100]
+    stp     q26, q27, [sp, #0x120]
+    stp     q28, q29, [sp, #0x140]
+    stp     q30, q31, [sp, #0x160]
+    bl      d3_host_tp_current
+    cbz     x0, 2f
+    msr     tpidr_el0, x0
+    mov     x18, x1
+    ldr     w0, [x19, #0x10]
+    ldr     w1, [x19, #0x14]
+    mov     x2, x24
+    mov     x3, x23
+    bl      d3_hle_dispatch
+    msr     tpidr_el0, x23
+    ldp     q10, q11, [sp, #0x20]
+    ldp     q12, q13, [sp, #0x40]
+    ldp     q14, q15, [sp, #0x60]
+    ldp     q16, q17, [sp, #0x80]
+    ldp     q18, q19, [sp, #0xa0]
+    ldp     q20, q21, [sp, #0xc0]
+    ldp     q22, q23, [sp, #0xe0]
+    ldp     q24, q25, [sp, #0x100]
+    ldp     q26, q27, [sp, #0x120]
+    ldp     q28, q29, [sp, #0x140]
+    ldp     q30, q31, [sp, #0x160]
+    ldp     q8, q9, [sp], #0x180
+    adrp    x16, g_veneer_resume
+    ldr     x16, [x16, :lo12:g_veneer_resume]
+    br      x16
+2:  brk     #0x4321
+    .size d3_veneer_bridge, . - d3_veneer_bridge
+
+    .p2align 4
+    .global crash_handler
+    .hidden crash_handler
+    .type crash_handler, %function
+crash_handler:
+    stp x19, x20, [sp, #-64]!
+    stp x21, x30, [sp, #16]
+    stp x0, x1, [sp, #32]
+    str x2, [sp, #48]
+    str x18, [sp, #56]
+    mrs x19, tpidr_el0
+    bl d3_host_tp_current
+    cbz x0, 3f
+    msr tpidr_el0, x0
+    mov x18, x1
+3:  ldp x0, x1, [sp, #32]
+    ldr x2, [sp, #48]
+    bl d3_crash_handler_body
+    msr tpidr_el0, x19
+    ldr x18, [sp, #56]
+    ldp x21, x30, [sp, #16]
+    ldp x19, x20, [sp], #64
+    ret
+    .size crash_handler, . - crash_handler
+
+    .p2align 4
+    .global d3_call_guest_one
+    .hidden d3_call_guest_one
+    .type d3_call_guest_one, %function
+d3_call_guest_one:
+    stp x19, x30, [sp, #-32]!
+    str x18, [sp, #16]
+    mrs x19, tpidr_el0
+    mov x9, x0
+    mov x0, x1
+    msr tpidr_el0, x2
+    blr x9
+    msr tpidr_el0, x19
+    ldr x18, [sp, #16]
+    ldp x19, x30, [sp], #32
+    ret
+    .size d3_call_guest_one, . - d3_call_guest_one

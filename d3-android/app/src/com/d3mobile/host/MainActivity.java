@@ -11,11 +11,24 @@ import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.graphics.Insets;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.FrameLayout;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.media.AudioManager;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.widget.EditText;
+import android.text.InputFilter;
+import android.text.InputType;
 
 import java.io.File;
 
@@ -51,29 +64,56 @@ public class MainActivity extends Activity {
      * /data/user/0/com.d3mobile.host.recovery/files/runtime, which is the
      * profile the host is compiled against (D3_PRIVATE_ROOT / D3_DATA_ROOT).
      */
-    private static final String PRIVATE_ROOT = "/data/user/0/com.d3mobile.host.recovery";
+    private String PRIVATE_ROOT;
+    private GraphicsSettings graphics;
 
     private TextView statusView;
     private Button startButton;
+    private GameControlsView controls;
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocus;
+    private boolean foreground;
 
     /** Guards the start button so the native request is only ever sent once. */
     private volatile boolean started = false;
 
     private native void nativeStart(String path);
     private native void nativePresent(android.view.Surface surface);
+    native void nativeInput(long buttons, int lx, int ly, int rx, int ry);
+    private native void nativeAudioActive(boolean active);
+    private native void nativeAttach();
+    private native void nativeDetach();
+    private native void nativeKeyboardReply(String text);
+    private native int nativeConfigure(int scale, String libraries, String directory, String name);
+    private native String nativePrivateRoot();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        nativeAttach();
+        PRIVATE_ROOT = getDataDir().getAbsolutePath();
+        if (!PRIVATE_ROOT.equals(nativePrivateRoot())) throw new IllegalStateException("APK 身份与原生数据目录不匹配，请重新构建对应版本");
+        graphics = new GraphicsSettings(this);
+        nativeConfigure(graphics.scale(), getApplicationInfo().nativeLibraryDir, graphics.driverDirectory(), graphics.driverName());
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().setDecorFitsSystemWindows(false);
+        getWindow().getAttributes().layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
+        audioFocus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                .setOnAudioFocusChangeListener(new AudioManager.OnAudioFocusChangeListener() {
+                    @Override public void onAudioFocusChange(int change) {
+                        nativeAudioActive(foreground && change == AudioManager.AUDIOFOCUS_GAIN);
+                    }
+                }).build();
         Log.i(TAG, "onCreate entry pkg=" + getPackageName() + " privateRoot=" + PRIVATE_ROOT);
 
         setContentView(buildUi());
-        WindowInsetsController bars = getWindow().getInsetsController();
-        if (bars != null) {
-            int lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-            bars.setSystemBarsAppearance(lightBars, lightBars);
-        }
+        enterFullscreen();
         logBuildInfo();
 
         startButton.setOnClickListener(new View.OnClickListener() {
@@ -84,7 +124,7 @@ public class MainActivity extends Activity {
         });
 
         Intent intent = getIntent();
-        boolean autostart = intent != null && intent.getBooleanExtra("autostart", false);
+        boolean autostart = intent == null || intent.getBooleanExtra("autostart", true);
         if (autostart) {
             // ADB-driven: "am start ... --ez autostart true" fires the same path
             // as a tap. Still exactly one attempt.
@@ -96,57 +136,136 @@ public class MainActivity extends Activity {
     }
 
     private View buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
-        root.setPadding(pad, pad, pad, pad);
-        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-            @Override
-            public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
-                Insets bars = insets.getInsets(WindowInsets.Type.systemBars()
-                        | WindowInsets.Type.displayCutout());
-                view.setPadding(pad + bars.left, pad + bars.top,
-                        pad + bars.right, pad + bars.bottom);
-                return insets;
-            }
-        });
-
-        TextView title = new TextView(this);
-        title.setText("D3HOST Recovery（离线诊断）");
-        title.setTextSize(20);
-        root.addView(title);
-
-        startButton = new Button(this);
-        startButton.setText("启动兼容层");
-        root.addView(startButton);
-
-        ScrollView scroll = new ScrollView(this);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(0xff000000);
         statusView = new TextView(this);
-        statusView.setTextSize(13);
+        statusView.setTextSize(14);
+        statusView.setTextColor(0xffead8b4);
+        statusView.setPadding(24, 16, 24, 16);
+        statusView.setVisibility(View.GONE);
         SurfaceView preview = new SurfaceView(this);
+        // The guest renders 1600 x 900. Composite at the same horizontal
+        // resolution and let Android scale the fullscreen layer to the panel.
+        android.graphics.Point display = new android.graphics.Point();
+        getWindowManager().getDefaultDisplay().getRealSize(display);
+        int longEdge = Math.max(display.x, display.y), shortEdge = Math.min(display.x, display.y);
+        int renderWidth = Math.min(graphics.scale() == 15 ? 2400 : 1600, longEdge);
+        preview.getHolder().setFixedSize(renderWidth, Math.max(1, renderWidth * shortEdge / longEdge));
         preview.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
                 Log.i(TAG, "surfaceCreated; handing the window to the GPU bridge");
                 nativePresent(holder.getSurface());
+                holder.getSurface().setFrameRate(60f, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
             }
 
             @Override
             public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {}
 
             @Override
-            public void surfaceDestroyed(SurfaceHolder holder) {}
+            public void surfaceDestroyed(SurfaceHolder holder) { nativePresent(null); }
         });
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (int) (200 * getResources().getDisplayMetrics().density));
-        root.addView(preview, previewParams);
-
-        scroll.addView(statusView);
-
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        root.addView(scroll, lp);
+        root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
+        controls = new GameControlsView(this);
+        root.addView(controls, new FrameLayout.LayoutParams(-1, -1));
+        Button settings = new Button(this);
+        settings.setText("画面"); settings.setAlpha(0.65f);
+        settings.setOnClickListener(v -> { controls.releaseAll(); graphics.show(); });
+        FrameLayout.LayoutParams settingsLayout = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT);
+        settingsLayout.leftMargin = 16; settingsLayout.topMargin = 12;
+        root.addView(settings, settingsLayout);
+        root.addView(statusView, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        startButton = new Button(this);
+        startButton.setText("启动游戏");
+        startButton.setVisibility(View.GONE);
+        root.addView(startButton, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         return root;
+    }
+
+    private void enterFullscreen() {
+        WindowInsetsController bars = getWindow().getInsetsController();
+        if (bars != null) {
+            bars.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            bars.hide(WindowInsets.Type.systemBars());
+        }
+    }
+
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request == GraphicsSettings.IMPORT_DRIVER && result == RESULT_OK && data != null && data.getData() != null)
+            graphics.importDriver(data.getData());
+    }
+
+    /** Called by the guest worker through JNI; all widgets stay on Android's UI thread. */
+    private void showKeyboard(final String title, final String hint, final String initial,
+                              final int minimum, final int maximum) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                controls.releaseAll();
+                final EditText text = new EditText(MainActivity.this);
+                text.setSingleLine(true);
+                text.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+                text.setFilters(new InputFilter[] {new InputFilter.LengthFilter(maximum)});
+                text.setText(initial); text.setHint(hint); text.selectAll();
+                final AlertDialog dialog = new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(title.length() > 0 ? title : "角色名称")
+                        .setView(text).setPositiveButton("确定", null)
+                        .setNegativeButton("取消", new DialogInterface.OnClickListener() {
+                            @Override public void onClick(DialogInterface d, int which) { nativeKeyboardReply(null); }
+                        }).setOnCancelListener(new DialogInterface.OnCancelListener() {
+                            @Override public void onCancel(DialogInterface d) { nativeKeyboardReply(null); }
+                        }).create();
+                dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+                    @Override public void onShow(DialogInterface d) {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                            @Override public void onClick(View v) {
+                                if (text.length() < minimum) { text.setError("至少输入 " + minimum + " 个字符"); return; }
+                                nativeKeyboardReply(text.getText().toString());
+                                dialog.dismiss(); enterFullscreen();
+                            }
+                        });
+                        text.requestFocus();
+                        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                    }
+                });
+                dialog.show();
+            }
+        });
+    }
+
+    @Override public void onWindowFocusChanged(boolean focus) {
+        super.onWindowFocusChanged(focus);
+        if (focus) enterFullscreen();
+        else if (controls != null) controls.releaseAll();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        foreground = true;
+        nativeAudioActive(audioManager.requestAudioFocus(audioFocus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+        if (controls != null) controls.setActive(true);
+        enterFullscreen();
+    }
+
+    @Override protected void onPause() {
+        foreground = false;
+        if (controls != null) controls.setActive(false);
+        nativeAudioActive(false);
+        audioManager.abandonAudioFocusRequest(audioFocus);
+        super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        nativeDetach();
+        super.onDestroy();
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        return controls != null && controls.handleKey(event) || super.dispatchKeyEvent(event);
+    }
+
+    @Override public boolean onGenericMotionEvent(MotionEvent event) {
+        return controls != null && controls.handleMotion(event) || super.onGenericMotionEvent(event);
     }
 
     private void logBuildInfo() {

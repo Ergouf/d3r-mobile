@@ -1,0 +1,32 @@
+diff --git a/src/common/thread.h b/src/common/thread.h
+index 4a36295..e2fc6c9 100644
+--- a/src/common/thread.h
++++ b/src/common/thread.h
+@@ -77,8 +77,10 @@ public:
+             condvar.notify_all();
+             return true;
+         } else {
+-            condvar.wait(lk, token,
+-                        [this, current_generation] { return current_generation != generation; });
++            // Port note: Android libc++ has no stop_token overload, so poll the token.
++            condvar.wait(lk, [this, current_generation, token] {
++                return current_generation != generation || token.stop_requested();
++            });
+             return !token.stop_requested();
+         }
+     }
+diff --git a/src/video_core/cdma_pusher.cpp b/src/video_core/cdma_pusher.cpp
+index d04b738..0c16d46 100644
+--- a/src/video_core/cdma_pusher.cpp
++++ b/src/video_core/cdma_pusher.cpp
+@@ -33,7 +33,9 @@ CDmaPusher::CDmaPusher(Host1x::Host1x& host1x_, s32 id)
+         while (!stop_token.stop_requested()) {
+             {
+                 std::unique_lock l{command_mutex};
+-                command_cv.wait(l, stop_token, [this]() { return command_lists.size() > 0; });
++                // Port note: Android libc++ lacks the stop_token overload of
++                // condition_variable_any::wait, so stop requests are polled here instead.
++                command_cv.wait(l, [this, stop_token]() { return command_lists.size() > 0 || stop_token.stop_requested(); });
+                 if (stop_token.stop_requested()) {
+                     return;
+                 }

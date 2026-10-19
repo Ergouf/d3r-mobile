@@ -1,237 +1,190 @@
-# D3 on Android — current handoff (read this first)
+# Android 第一章与中文音频交接
 
-Goal: run the **Diablo III Eternal Collection** Switch guest (XCI update version) on
-the Galaxy Tab S8 (SM-X700) through a host that loads the guest ELF **in-process**
-and emulates Horizon OS services (HLE). Milestones:
+更新：2026-10-19，分支 `recovery/d3host-sources`。本文件为当前入口。
+用户要求停止继续调试，更新文档并提交。首帧阶段记录见
+[历史归档](HANDOFF_HISTORY_PRE_PLAYABLE_20261019.md)。
 
-- M0/M1 — **done**: Eden's Vulkan clear + composite reach the screen
-  (`d3-android/gpu/probe/m1-clear-*.png`, `m3-composite-*.png`).
-- **M2 — open**: the guest must actually issue nvdrv ioctls (`nvdrv::Ioctl` > 0 in the
-  probe log). Currently **0**.
-- M3 — open: first real game frame.
+## 当前基线和限制
 
-Long history (rounds 1–36 of the previous session plus the last four rounds) is in
-`d3-android/HANDOFF_GPU_M2.md`. This file is the short, current, self-contained view.
+- 真机 `R52T90127WT` / Samsung SM-X700，Android 16，Adreno 730，2560×1600。
+- `com.d3mobile.host.recovery`，系统 Vulkan、1.0×、write-watch 关闭。
+- 最后验证 PID 5330 连续运行超过十分钟。第一章英雄 `Zogri`（男巫医），
+  已验证触控移动、攻击、击杀、经验增长、存档恢复和 HOME→返回同一进程。
+- 中文 DLC 部署、逐文件校验后，缺语音包提示消失；**用户确认“能听到中文对白”**。
+- 系统 1.0× 早期玩法约 34–37fps；完整日志后段约 30–33fps，部分复杂/长时间片段约 21–28fps。
+  下降原因尚未区分场景、温升和其他开销。1.5× 既有实测约 22–23fps。
+- **完整第一章通关、持续稳定 60fps、跨设备兼容、OEM AI 插帧和超分均未验收。**
+  标题/视频约 60fps 不能当玩法性能。
+- 本次交接检查时目标平板已断开 ADB；未操作另一台已连接手机，未重新安装或清数据。
+  PID/资源/存档均为最后一次验证记录，不代表当前在线。
 
----
+截图、日志和身份见 [验收证据](evidence/20261019-handoff/README.md)。
 
-## 1. Where the boot stands right now
+## 构建身份
 
-Run `cv1` (latest probe) shows:
+| 构建 | 本地 APK（相对仓库） | 验证范围 |
+| --- | --- | --- |
+| 真机基线 | `d3-android/build/apk-touch-audio/d3host-recovery-debug.apk` | 中文对白、第一章、存档、HOME 返回 |
+| 当前源码交接包 | `d3-android/build/handoff-apk/d3host-recovery-debug.apk` | 重新编译、打包和签名成功；未安装 |
+| 可选原神身份 | `d3-android/build/android-genshin/apk/d3host-recovery-debug.apk` | 已构建、未安装；早于末尾静态页 watch 变更 |
 
-- the guest image is mapped, **784 recovered relocations** applied;
-- the real SDK start-up runs and **returns**: `call nninitStartup` / `back nninitStartup`;
-- the library applet framework completes a full cycle (creator → 3 storages →
-  `Start` → state wait → `PopOutData`);
-- parental-control (`pctl`) factory sequence completes;
-- then it dies in a guest assert:
+真机 APK SHA-256：
+`fd88b9d2b7d778e6d3f64820c79fb3b278849bb0b9f024d9483c638520632cf3`。
+host：`e5d995bc582826ea04cb6856f0ff92d31d0035e5eb40cfc1dfa01d5b667e7538`。
 
+交接 APK SHA-256：
+`63461ff8bb1a54ad91b1fa1080e92beebefea8106ddcaadd001afe6dc325f9b9`。
+host：`df6f92bc04a3e2c8d55481d901adb508080e2de3f7a395a5a5ef3206babae203`。
+
+交接构建包含末尾 AOC mount/unmount 日志节流及“连续 16 轮不变才 watch”实验源码，
+这些末尾变更没有进入已验证的 PID 5330。实验仍默认关闭。
+
+共同 guest：
+`recovery/d3host-20261016-huRwPN/extracted/lib/arm64-v8a/libd3guest.so`，
+SHA-256 `dd050ef63cbaeaaeae9f7c842b26456a05d7482aaf9b91103a9bf0e0188625a2`。
+完整元数据保存在 evidence 的 `device-tested-apk.json`、`handoff-apk.json` 和 `genshin-apk.json`。
+
+## 本轮代码与定位
+
+| 模块 | 入口与变化 |
+| --- | --- |
+| Android | `MainActivity.java`、`GameControlsView.java`、Manifest：横屏沉浸启动，左摇杆/右侧按钮区，多指绑定，全手柄键与物理输入，50ms 短按保持 |
+| HID | `d3_host.c`、`d3_service.c`：memfd 双视图，guest 只读、服务端 RW，修复按 A 写只读映射闪退 |
+| 音频 | `d3_audio.c`、`d3_audio_service.inc`、JNI：AAudio 48k PCM16 stereo，6ch downmix、tag/event、焦点/后台处理和断连重开 |
+| 键盘/存档 | `d3_keyboard_service.inc`、`d3_save_ops.inc`：swkbd UTF16/UTF8、text-check、完成事件，真实建角及持久化 |
+| DLC | `d3_content.h`、`d3_service.c::aoc_command`、host mount/path hooks、`hook_stub.S::d3_call_guest_one` |
+| GPU | `gpu_host.cpp`、`renderer_bringup.cpp`、`emu_window_d3.*`：真实 GPFIFO、canonical mapping、精确页快照、三路扫描和 Surface 恢复 |
+| 设置/打包 | `GraphicsSettings.java`、`graphics_config.*`、`build_adreno.py`、`build_android_profile.py`：倍率、驱动、匹配包名和 native 私有目录 |
+| 同步 | `d3_sync.c`、host SVC、汇编：线程/TLS/x18，真实无限等待，ExitThread cleanup 完成通知 |
+| 启动接口 | account cmd50 返回注册不可用；profile selector 0x10；offline web applet 0x1010 ExitRequested；friend 离线子集 |
+
+这些是当前路径所需兼容子集，非完整 Horizon 实现。friend 10700 等仍有 unsupported。
+不要用 `*_minimal.c`、`*_new.*`、`d3_table.c`、`jni_template.c` 代替正式源码。
+
+## 中文语音与主资源
+
+原设备 `CPKs` 只有 enUS 文件，AOC Count/List 为 0，也没有 DLC mount；
+游戏中的中文选项不能代替资源安装。
+
+- 原文件：`D:\workspace\Diablo\[20181102][XCI][Diablo III Eternal Collection][2.7.7.92380][1G+1U+4D][21.88 GB].xci`。
+- 中文 title ID `01001b300b9bf00b`，DLC index **11**。
+- NCA `c4cf91f251ed3209a50a5feb710282be.nca`，5,620,826,112 bytes。
+- 本地 `reference/extract/voice_zh/romfs/`；14 个 `ztCN_*.cpk` 合计 5,609,750,528 bytes。
+  包括一至五章、共用与过场语音；哈希见 evidence 的 `zh-voice-manifest.json`。
+- 设备 `/data/local/tmp/d3romfs/AddOnContent/11/`，
+  marker `.d3-content-complete` 内容 `01001b300b9bf00b` 加换行。
+- 14 个文件本地与设备 SHA-256 一致后才写 marker。
+  游戏实际打开 `aoc_11:/ztCN_Common.cpk`、CoreCommon、Act1 等。
+  可选 `ztCN_ServerCommon.cpk` 打开失败未阻塞已验证对白。
+
+`D3_CONTENT_ROOT` 默认 `/data/local/tmp/d3romfs`，与 app 私有 runtime 分开。
+主游戏 `CPKs/` 必须保留正确更新版 CoreCommon/ServerCommon，换回旧版会复现 Particle 断言。
+旧文件备份在 `recovery/resource-backup-20261019/`，不入 Git。
+
+`d3_content.h` 仅识别有正确 marker 的安装；AOC Count/List 支持 offset/count 及真实输出 buffer，
+Prepare 校验已安装。Mount cache-size hook `0x23be20` 返回 4096，mount `0x23c050` 注册只读挂载；
+Unmount `0x204f80` 管理 DLC，其余通过保留原前 16 字节的 RX trampoline 调回 SDK。
+`test_content` 覆盖读取、missing、只读、路径穿越和卸载；启动服务测试覆盖安装枚举。
+
+提取/校验脚本已保留到 [tools/resource_recovery](tools/resource_recovery/README.md)。
+**APK 不含主资源或约 5.2GiB 中文 DLC，换机必须另行部署。**
+
+## GPU 与可选身份
+
+画面设置提供 1.0×/1.5× 与 SAF ZIP 驱动导入，重启生效。
+倍率作用于 Eden render targets，不是仅放大合成图；1.5× 目前性能不足。
+libadrenotools 静态库和四个 hook so 已打包，自定义 OpenLibrary 与 driver 目录末尾斜线已接线。
+
+- 系统 Vulkan：当前推荐基线。
+- Turnip 26.0 R8：真实加载后 DEVICE_LOST。
+- Turnip 24.3 R9v2：真实加载并运行标题/主菜单约 9 分钟；随后 account cmd50 abort。
+  账号路径已另行修复，但该驱动未做同场景第一章对照，不能归因为 GPU 故障或宣称更快。
+- 当前 native crash 回系统驱动范围较宽，非 GPU native crash 也可能误触发，诊断时注意。
+- genshin profile 参考 Eden，包名 `com.miHoYo.Yuanshen` 且 native 私有路径匹配。
+  已构建、未安装，OEM AI 功能无启用证据；安装前检查真正原神包及其数据。
+
+## 写监控实验：默认关闭
+
+默认精确页快照保证 CPU/GPU 缓存一致性，两个持久 worker 加提交线程三路扫描。
+旧采样显示 memcmp/扫描为主要 CPU 开销；约 2–3 万页，是后续性能线索。
+
+`cpu_write_watch.h` 对 host 管理的 RW guest heap/alias 页使用 mprotect、lock-free fault 状态，
+识别 AArch64 ESR 写 fault，跟踪内核写入、权限变化和 uncache。
+启用时 kernel interceptor 先于 ART prehandler 处理 guest TLS 下的写 fault，其余交回原信号链。
+
+**只有 runtime 存在 `gpu-write-watch` marker 才启用**，JNI 与 signal installer 条件一致。
+最后真机验证无此 marker，旧 `gpu-no-write-watch` 已无效。
+全量 watch 集成曾在菜单处 abort：
+`critical section ... wait failed: 0xe401`，owner `0x55`、tag `0x1`、
+word `0x40000055`、owner-kind `0`。根因未解决。
+
+最新“连续 16 轮不变才 watch、256 轮 audit”只通过独立测试；
+本次源码已重建，未做真机集成验证。标题 60fps 不代表实验稳定，正常交接保持关闭。
+
+## 存档与备份
+
+设备根目录 `/data/user/0/com.d3mobile.host.recovery/files/runtime/saves/`，英雄文件：
+
+```text
+1-0000000000000000-4433484f53545531-4c4f43414c555345-0000000000000000-00000001/heroes/3ba77b620369e10e.dat
 ```
-patch null condition variable wait at ... OK
-AbortImpl caller = sdk+0x4b4bc        ("this == NULL!")
-abort operand [sp+8] = 0x1a80a        (module 10, description 212)
-```
 
-`0x4b4bc` is inside `nn::account::IsNetworkServiceAccountAvailable`; that code only
-accepts `(result & 0x3FFFFF) == 0x2C7C` (Account/22, "not initialised") and aborts on
-anything else. So *some* call on this path returned module-10/212 instead of Account/22.
+最后记录 639 bytes，持久化已验证。备份
+`d3-android/build/touch-audio/saves-before-watch.tar`，28,672 bytes。
+更新复用 `d3-android/build/apk-gpu-waitn/local-debug.keystore`，使用 `adb install -r`。
+不要卸载、清数据或覆盖原 `com.d3mobile.host`，不要混用 genshin profile 的存档路径。
 
-Logs to read first: `d3-android/gpu/probe/logcat-cv1.txt`,
-`d3-android/gpu/probe/d3-crash-cv1.txt`.
+## 构建、测试和复测
 
----
-
-## 2. Device / environment
-
-| item | value |
-|---|---|
-| device | SM-X700, serial `R52T90127WT` |
-| package | `com.d3mobile.host.recovery` (debuggable, `run-as` works) |
-| start | `adb shell am start -n com.d3mobile.host.recovery/com.d3mobile.host.MainActivity --ez autostart true` |
-| data root | `/data/user/0/com.d3mobile.host.recovery/files/runtime` (logs, flags) |
-| python | `C:\Users\fengj\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe` |
-| NDK | `D:\workspace\Gdict\android_sdk\ndk\28.2.13676358` |
-| adb | `D:\workspace\Gdict\android_sdk\platform-tools\adb.exe` |
-| disk | XCI (21.9 GB) present at repo root; `reference/extract/ncas` was deleted (regenerable from the XCI with `nstool`/`hactool` + `prod.keys`); `romfs`/`romfs_update` still present |
-
----
-
-## 3. Build / probe commands
-
-Full iteration (build host → package APK → install → probe):
+仓库根 `D:\workspace\Diablo`，PowerShell，Python 3.12；
+NDK `D:\workspace\Gdict\android_sdk\ndk\28.2.13676358`，minSdk 34、targetSdk 36。
+需保留 Eden、third_party、Boost 1.86.0、guest 和签名文件。
+版本、两处已有 Eden 修改和恢复方式见 [gpu/patches/README.md](gpu/patches/README.md)。
+GPU PS1 硬编码本机路径，迁移先调整。新环境恢复依赖和补丁后先生成 shader headers：
 
 ```powershell
-pwsh -File d3-android/tools/rebuild_and_probe.ps1 -Tag <tag> -Seconds 28
+python -I d3-android/gpu/tools/gen_shaders.py
+python -I d3-android/tools/build_android_profile.py --profile recovery --guest recovery/d3host-20261016-huRwPN/extracted/lib/arm64-v8a/libd3guest.so --keystore d3-android/build/apk-gpu-waitn/local-debug.keystore
 ```
 
-Manual pieces (when the script is inconvenient):
+统一脚本输出 `build/android-recovery/`，不安装；可选 `--profile genshin`。
+本次交接输出 `build/handoff-{host,apk}/`，等效分步命令：
 
 ```powershell
-py -I d3-android/tools/build_host.py --with-gpu `
-   --data-root /data/user/0/com.d3mobile.host.recovery/files/runtime `
-   --private-root /data/user/0/com.d3mobile.host.recovery `
-   --output-dir d3-android/build/host-gpu
-py -I d3-android/tools/build_apk.py --host d3-android/build/host-gpu/libd3host.so `
-   --guest recovery/d3host-20261016-huRwPN/extracted/lib/arm64-v8a/libd3guest.so `
-   --output-dir d3-android/build/apk-gpu-<tag> `
-   --keystore d3-android/build/apk-gpu-waitn/local-debug.keystore
-adb install -r d3-android/build/apk-gpu-<tag>/d3host-recovery-debug.apk
-pwsh -File d3-android/tools/run_probe.ps1 -Name <tag> -Seconds 28
+pwsh -File d3-android/gpu/build_gpu.ps1
+python -I d3-android/tools/build_host.py --with-gpu --data-root /data/user/0/com.d3mobile.host.recovery/files/runtime --private-root /data/user/0/com.d3mobile.host.recovery --output-dir d3-android/build/handoff-host
+python -I d3-android/tools/build_apk.py --host d3-android/build/handoff-host/libd3host.so --guest recovery/d3host-20261016-huRwPN/extracted/lib/arm64-v8a/libd3guest.so --output-dir d3-android/build/handoff-apk --keystore d3-android/build/apk-gpu-waitn/local-debug.keystore --driver-hooks-dir d3-android/build/adrenotools/src/hook
+python -I d3-android/tools/build_host.py --build-tests --build-gpu-tests --sandbox-root /data/local/tmp/d3-native-regression --output-dir d3-android/build/handoff-native
+python -I -m unittest discover -s d3-android/tests -p 'test_*.py' -v
 ```
 
-Eden's GPU archive (only needed when Eden sources change, or if
-`build/libeden_gpu.a` is missing): `pwsh -File d3-android/gpu/build_gpu.ps1`.
+本次 GPU 353 个 translation units、严格 host 编译/链接、签名 APK、21 个 native 测试程序构建成功；
+Python 两套工具回归通过。平板断开，**当前 21 套未整组重跑**。
+此前 20 套真机结果见 evidence 的 `native-regression-previous.txt`。
+之后内容挂载、账号和静态页 watch 测试分别通过，不混写为当前源码全部真机通过。
 
-**Gotchas**
+连接后，指定 `adb -s R52T90127WT` 将 `build/handoff-native/test_*` 推到
+`/data/local/tmp/d3-native-regression/`，chmod 755 后**串行**运行，保留 exit code。
+`test_guest_tls` 额外传该目录的 `guest.so`（保留 guest 的副本）。
+测试沙箱与 app 存档分开，不要把 app 私有 runtime 当测试沙箱。
 
-- `-SkipBuild` requires `build/apk-gpu-<tag>` to already exist; otherwise it probes
-  whatever is installed, silently.
-- `build/apk-gpu-waitn/local-debug.keystore` must exist (the shared signing key). If
-  it is lost, run `build_apk.py` **without** `--keystore` once and copy the generated
-  keystore there. A new keystore means a new signature → `adb uninstall` first.
-- Never delete `d3-android/gpu/probe/*.cpp`, `coverage*.json`, `m1-*.png`,
-  `m3-*.png` — they are tracked project assets (restore with `git checkout --
-  d3-android/gpu/probe/`).
+## 下一位的优先事项
 
----
+1. 系统驱动、1.0×、write-watch 关闭，复测交接包冷启动、存档和中文对白。
+2. 完成第一章连续任务及战斗验收；记录至少 15 分钟帧时间、温升和 unsupported 接口。
+3. 同一存档比较系统与 Turnip 24.3 R9v2。写监控先解决 critical-section abort，再谈启用。
+4. 补全技能/多指、物理手柄、蓝牙/耳机切换、Activity 销毁重建及多次后台恢复。
+   当前旧 Surface 引用保留可能随重建增长，尚未测清。
+5. 兼容 OEM 设备且无包冲突时验原神身份，分别证明 AI 开关和原生/显示帧率。
 
-## 4. Architecture in one page
+## Git 与迁移清单
 
-**Guest image** — `recovery/d3host-20261016-huRwPN/extracted/lib/arm64-v8a/libd3guest.so`
-(33 MB file, 54 MB image). It is a *repacked merge* of the update build's `main` and
-`sdk` modules, mapped 1:1 at a random base (`g_bias`) in the host process. Offsets in
-logs (`sdk+0x…`, `main+0x…`, `veneer+0x…`) are image offsets.
+源码、测试、构建工具、文档、依赖补丁及少量证据纳入本次 commit。
+约 677MiB 自动生成日志/截图留在 `d3-android/gpu/probe/`，新阶段原始记录在 `build/touch-audio/`。
+22 个一次性分析/文本替换草稿归档到 `tools/scratch/handoff-20261019/`；
+其中空 `gen_guest_relocs.py` 不代表 guest 重建器已恢复。
 
-Merged layout (`d3-android/guest_layout.h`): sdk at `0x00010000`, **main at
-`0x01000000`**, veneer at `0x03000000`, host table at `0x03100000`.
-
-**Loader** (`load_guest()` in `d3-android/host/d3_host.c`): maps the PT_LOAD segments,
-applies `R_AARCH64_RELATIVE` from `.dynamic`, then applies the **784 recovered
-relocations** from `host/guest_relocs.h`, then installs 66 hook sites and a few code
-patches, then sets segment protections.
-
-**Recovered relocations** — the repack kept only `RELATIVE`, dropping 246 `ABS64`
-(vtables → `__cxa_pure_virtual`), 9 `GLOB_DAT` (`__rel_dyn_*`/`__rel_plt_*`) and 529
-`JUMP_SLOT` (main's imports from sdk/libc). `tools/gen_guest_relocs.py` regenerates
-the table from `reference/extract/exefs_update/main.nso0`; it writes
-`host/guest_relocs.h` (784 rows, 0 unresolved). **Do not hand-edit that header.**
-
-**Symbol file** — `reference/d3-symbols/sdk.symbols.json` (25142 entries) holds
-**sdk-module-relative** offsets: merged offset = value + `0x10000`. Verified with
-`nninitInitializeSdkModule` (file 0x29d960 vs host `D3_SYM_` 0x2ad960) and by
-disassembling `__cxa_pure_virtual` at merged `0x004d7bd8`.
-
-**Veneer** — the guest image contains NintendoSDK's own syscall veneer at
-`0x03000000`: each 32-byte stub carries `{kind, extra, arg}` and branches to the
-dispatcher, which switches TPIDR_EL0 to the host TP (`[table+8]`), calls
-`[table]` (host dispatcher) and switches back. `nn::os` mutexes/events and the SDK's
-memory functions go through it. Our host writes the table at `0x03100000`.
-
-**Hooks** — `hook_stub.S` patches 16-byte guest sites with
-`ldr x16,[pc,#8]; br x16; <literal>`; the stub saves x0–x8/x29/x30, switches to the
-calling thread's host TP (`d3_host_tp_current()`), records
-`g_hook_tls{guest_lr, host_tp, guest_tp}`, calls `g_hook_bodies[index]`, restores the
-guest TP and returns. Hook bodies receive up to 6 args. **Every patch must stay inside
-16 bytes and must never use a direct `b` into the host library.**
-
-**Service layer** (`d3_service.c`) — CMIF/HIPC parsing plus HLE for `sm`, `fsp-srv`,
-`lm`, `Logger`, `set`, `time`, `nvdrv`, `vi` (manager/app), `hid`, `aoc`, `nns`,
-`pctl`, `appletOE` (application proxy, application functions, self/window/debug
-controllers, library-applet framework, storage/accessor), `acc:u0`, `nifm:u`.
-Unimplemented commands answer `0x278` (CMIF "unsupported") and are logged.
-
-**Sync layer** (`d3_sync.c`) — emulates Horizon mutex/condition waits
-(`svcArbitrateLock/Unlock`, `svcWaitSynchronization*`). Horizon signals "waiters
-exist" with bit `0x40000000`, and the guest's **fast unlock path only takes the slow
-path when that bit is set** — `d3_sync_lock` must set it before sleeping (it does now).
-
-**Signals** — `crash_handler` dumps to `files/d3-crash.txt` and logs
-`AbortImpl caller=…`, `abort operand [ptr] = value`, guest stack symbols. SIGSEGV/
-SIGBUS/SIGABRT are **not** forced into our handler by default (that broke ART's
-null-check recovery and killed the process); `files/d3-host-force-signals` re-enables
-the forcing if ever needed.
-
-**Stall watchdog** — the host logs `stall: no svc for N ms, … last dispatch kind=…
-lr=…` when the guest stops making svc calls; this is how guest spin/deadlock sites
-were found.
-
----
-
-## 5. Things that were fixed the hard way (do not regress)
-
-1. **Relocations** — see §4. Symptom if lost: `HID/1` at `sdk+0x25d614`, `0x20b` at
-   `sdk+0x8ff2c`, wild jumps into `0x48xxxxxx`.
-2. **Signal forcing** — forcing the kernel SIGSEGV slot to our handler bypassed
-   libsigchain and turned ART's routine null checks into process death.
-3. **Thread pointer** — guest threads must register `__builtin_thread_pointer()`, not
-   `pthread_self()` (bionic's `pthread_t` is not the TLS base).
-4. **Account asserts** — two code patches in `install_guest_hooks` neutralise the
-   Nintendo Account authorisation asserts (`sdk+0x4c2f8`, `sdk+0x4c328`).
-5. **`nn::hid::CreateAppletResource` is hid command 0**, not 100 (100 is
-   `SetSupportedNpadStyleSet`). Getting this wrong makes the engine relaunch the
-   Controller applet forever.
-6. **Library applet semantics** — signal the applet-state event on `Start`, keep the
-   "library applet launchable" event level-triggered, and return
-   `ControllerSupportResultInfo` (0xC bytes: 1 player, player 1, success) from
-   `PopOutData`.
-7. **Storage buffers** — `IStorageAccessor` requests carry the buffer descriptor at
-   `magic+6` (size, address, flags), not in the header; and a missing buffer means
-   "nothing to copy", not an error.
-8. **Mutex wait bit** — see §4 sync layer.
-9. **CMIF reply shape** — result goes at `payload+2`, params from `payload+4`, and a
-   domain object reply writes `1` at `frame` plus the object id at `payload+4`.
-
----
-
-## 6. Immediate next steps (in order)
-
-1. **Explain `sdk+0x4b4bc` (`0x1a80a`)** — decode module 10 / description 212, find which
-   HLE call returned it (grep the log for the last service calls before the abort),
-   and make that call answer Account/22 (`0x2C7C`) or success as appropriate. The
-   relevant function is `nn::account::IsNetworkServiceAccountAvailable`
-   (`sdk+0x4b450`); it only tolerates `(result & 0x3FFFFF) == 0x2C7C`.
-2. **hid shared memory** — `MapSharedMemory` never happens, so `d3_hid_seed()` never
-   runs and the engine sees no controller. Either make the SDK's
-   `SharedMemoryAccessor::Activate` path work (it currently aborts with `HID/1`
-   because the map helper's PLT slot was unresolved — check whether that is fixed now
-   that the 784 relocations are applied) or map a synthetic block and seed it.
-3. **romfs** — the engine will need the game's data. `reference/extract/romfs*` holds
-   it (29 GB); the guest's `fsp-srv` will have to serve those files. The last observed
-   file call was `fsp-srv cmd=51 -> fs not-found`.
-4. **nvdrv** — once the boot reaches graphics init, `nvdrv::Open`/`Initialize` run and
-   the first `nvdrv::Ioctl …` lines appear (the host already logs and acks them). That
-   is M2. Then real ioctl semantics are needed for M3 — mine
-   `reference/eden/src/core/hle/service/nvdrv/*` (37 files: `nvhost_gpu`,
-   `nvhost_as_gpu`, `nvmap`, `syncpoint_manager`, `ioctl_serialization.h`).
-
----
-
-## 7. Tool inventory (`d3-android/tools`)
-
-| tool | purpose |
-|---|---|
-| `rebuild_and_probe.ps1` | build host → package APK → install → probe |
-| `run_probe.ps1` | start app, wait, dump `logcat-<name>.txt`, crash dump, tombstone |
-| `build_host.py`, `build_apk.py` | compile host; package + sign APK |
-| `gen_guest_relocs.py` | regenerate `host/guest_relocs.h` from the original NSOs |
-| `nso_reloc.py`, `nso_info.py` | inspect NSO dynamic/relocation tables (works on `*.nso0`) |
-| `dis_guest.py` | disassemble guest image offsets (`py -3 dis_guest.py <so> <vaddr> <size>`) |
-| `find_calls.py`, `find_writes.py` | find `bl`/`b` call sites and `adrp`+`str` writers |
-| `sdk_sym.py` | look up a name in `sdk.symbols.json` (remember: **+0x10000**) |
-
-External reference tree: `reference/eden` (full recent checkout — nvdrv, hid_core,
-am, android frontend, video_core), `reference/extract/exefs*` (original NSOs),
-`reference/d3-symbols`, `reference/tools/{nstool,hactool}` + `prod.keys`.
-
----
-
-## 8. Ground rules from the previous sessions
-
-- Validate every change on the real device with a probe; do not claim progress from
-  code alone.
-- Keep hook sites at exactly 16 bytes, keep generated tables generated, and keep the
-  HLE answers shaped like the real ones (result code + param words) — the SDK aborts
-  on unexpected shapes.
-- When a run dies, first distinguish: tombstone (real signal) vs `d3-crash.txt` (our
-  handler) vs silent death (ActivityManager "has died", no signal) vs stall
-  (`stall:` watchdog line).
+Git 不含游戏数据、guest、APK、keys、私钥、存档、完整日志、依赖检出和生成文件。
+迁移时另行保存 XCI、合法已有 keys、guest、keystore、RomFS/中文 DLC、存档备份、
+Eden/third_party 和本地工具。当前依赖保留 guest，不能声称仅 Git 可完整重建。
+没有配置 remote，本次只 commit、不 push。

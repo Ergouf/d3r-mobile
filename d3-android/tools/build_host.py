@@ -13,6 +13,8 @@ HOST_SRC = [
     os.path.join(ROOT, "host", "d3_host.c"),
     os.path.join(ROOT, "host", "d3_service.c"),
     os.path.join(ROOT, "host", "d3_sync.c"),
+    os.path.join(ROOT, "host", "d3_nvdrv.c"),
+    os.path.join(ROOT, "host", "d3_audio.c"),
     os.path.join(ROOT, "host", "d3_jni.c"),
     # The hook entry stub: TPIDR_EL0 switch + body dispatch, encoded by the
     # assembler (hand written opcodes in C were wrong twice in a row).
@@ -27,19 +29,54 @@ PROBE_SRC = os.path.join(ROOT, "tools", "d3_probe.c")
 # #includes both host.c and sync.c, so it links only d3_service.c.
 test_stack_memory = [os.path.join(ROOT, "tests", "test_stack_memory.c"),
                      os.path.join(ROOT, "host", "d3_service.c"),
+                     os.path.join(ROOT, "host", "hook_stub.S"),
                      os.path.join(ROOT, "host", "d3_sync.c")]
-test_applet_focus = [os.path.join(ROOT, "tests", "test_applet_focus.c")]
-test_hipc_message = [os.path.join(ROOT, "tests", "test_hipc_message.c")]
-test_set_service = [os.path.join(ROOT, "tests", "test_set_service.c")]
+SERVICE_HOST_STUBS = os.path.join(ROOT, "tests", "service_host_stubs.c")
+test_applet_focus = [os.path.join(ROOT, "tests", "test_applet_focus.c"), SERVICE_HOST_STUBS]
+test_hipc_message = [os.path.join(ROOT, "tests", "test_hipc_message.c"), SERVICE_HOST_STUBS]
+test_hid_service = [os.path.join(ROOT, "tests", "test_hid_service.c"), SERVICE_HOST_STUBS]
+test_audio = [os.path.join(ROOT, "tests", "test_audio.c")]
+test_hid_memory = [os.path.join(ROOT, "tests", "test_hid_memory.c"),
+                   os.path.join(ROOT, "host", "d3_service.c"),
+                   os.path.join(ROOT, "host", "d3_sync.c"),
+                   os.path.join(ROOT, "host", "hook_stub.S")]
+test_set_service = [os.path.join(ROOT, "tests", "test_set_service.c"), SERVICE_HOST_STUBS]
 test_boot_sequence = [os.path.join(ROOT, "tests", "test_boot_sequence.c"),
                       os.path.join(ROOT, "host", "d3_service.c"),
+                      os.path.join(ROOT, "host", "hook_stub.S"),
                       os.path.join(ROOT, "host", "d3_sync.c")]
 test_signal_chain = [os.path.join(ROOT, "tests", "test_signal_chain.c"),
                      os.path.join(ROOT, "host", "d3_service.c"),
-                     os.path.join(ROOT, "host", "d3_sync.c")]
-test_time_service = [os.path.join(ROOT, "tests", "test_time_service.c")]
+                     os.path.join(ROOT, "host", "d3_sync.c"),
+                     os.path.join(ROOT, "host", "hook_stub.S")]
+test_time_service = [os.path.join(ROOT, "tests", "test_time_service.c"), SERVICE_HOST_STUBS]
 test_sync = [os.path.join(ROOT, "tests", "test_sync.c"),
-             os.path.join(ROOT, "host", "d3_service.c")]
+             os.path.join(ROOT, "host", "d3_service.c"),
+             os.path.join(ROOT, "host", "hook_stub.S")]
+
+test_address_arbiter = [os.path.join(ROOT, "tests", "test_address_arbiter.c"),
+                        os.path.join(ROOT, "host", "d3_service.c"),
+                        os.path.join(ROOT, "host", "hook_stub.S")]
+
+test_guest_tls = [os.path.join(ROOT, "tests", "test_guest_tls.c"),
+                  os.path.join(ROOT, "tests", "test_guest_tls.S"),
+                  os.path.join(ROOT, "host", "d3_service.c"),
+                  os.path.join(ROOT, "host", "d3_sync.c"),
+                  os.path.join(ROOT, "host", "hook_stub.S")]
+
+test_save_filesystem = [os.path.join(ROOT, "tests", "test_save_filesystem.c"), SERVICE_HOST_STUBS]
+test_keyboard = [os.path.join(ROOT, "tests", "test_keyboard.c"), SERVICE_HOST_STUBS]
+test_nvdrv = [os.path.join(ROOT, "tests", "test_nvdrv.c")]
+test_nvdrv_gpu = [os.path.join(ROOT, "tests", "test_nvdrv_gpu.c")]
+test_startup_services = [os.path.join(ROOT, "tests", "test_startup_services.c"), SERVICE_HOST_STUBS]
+test_directory = [os.path.join(ROOT, "tests", "test_directory.c"),
+                  os.path.join(ROOT, "host", "d3_service.c"),
+                  os.path.join(ROOT, "host", "d3_sync.c"),
+                  os.path.join(ROOT, "host", "hook_stub.S")]
+test_content = [os.path.join(ROOT, "tests", "test_content.c"),
+                os.path.join(ROOT, "host", "d3_service.c"),
+                os.path.join(ROOT, "host", "d3_sync.c"),
+                os.path.join(ROOT, "host", "hook_stub.S")]
 
 # Strict flags preserved verbatim from the original build_host.py.
 HOST_FLAGS = [
@@ -148,7 +185,10 @@ def build_host_with_gpu(clang: str, defines, out_dir: str, host_out: str) -> Non
         *defines,
         *objects,
         GPU_LIB,
+        os.path.join(ROOT, "build", "adrenotools", "libadrenotools.a"),
+        os.path.join(ROOT, "build", "adrenotools", "lib", "linkernsbypass", "liblinkernsbypass.a"),
         "-llog",
+        "-laaudio",
         "-ldl",
         "-landroid",
         "-ljnigraphics",
@@ -198,9 +238,14 @@ def main() -> None:
         action="store_true",
         help="Compile-only: also build the native Android tests (test_stack_memory, "
         "test_applet_focus, test_hipc_message, test_set_service, test_boot_sequence, "
-        "test_signal_chain, test_time_service) "
+        "test_signal_chain, test_time_service, test_hid_service, test_hid_memory) "
         "into the output directory. Does not "
         "touch a device.",
+    )
+    parser.add_argument(
+        "--build-gpu-tests",
+        action="store_true",
+        help="Also compile the standalone CPU write-tracker Android regression test",
     )
     args = parser.parse_args()
 
@@ -226,7 +271,7 @@ def main() -> None:
         build_host_with_gpu(clang, defines, out_dir, host_out)
     else:
         compile_one(
-            [clang, *HOST_FLAGS, *defines, *HOST_SRC, "-llog", "-ldl", "-o", host_out],
+            [clang, *HOST_FLAGS, *defines, *HOST_SRC, "-llog", "-laaudio", "-landroid", "-ldl", "-o", host_out],
             host_out,
         )
 
@@ -237,18 +282,40 @@ def main() -> None:
             probe_out,
         )
 
+    if args.build_gpu_tests:
+        output = os.path.join(out_dir, "test_cpu_write_tracker")
+        clangxx = os.path.join(os.path.dirname(clang), "clang++.exe")
+        compile_one([clangxx, *PROBE_FLAGS, "-std=c++20", "-static-libstdc++",
+                     os.path.join(ROOT, "tests", "test_cpu_write_tracker.cpp"),
+                     "-o", output], output)
+
     if args.build_tests:
         for name, src in (("test_stack_memory", test_stack_memory),
                           ("test_applet_focus", test_applet_focus),
                           ("test_hipc_message", test_hipc_message),
+                          ("test_hid_service", test_hid_service),
+                          ("test_audio", test_audio),
+                          ("test_hid_memory", test_hid_memory),
                           ("test_set_service", test_set_service),
                           ("test_boot_sequence", test_boot_sequence),
                           ("test_signal_chain", test_signal_chain),
                           ("test_time_service", test_time_service),
-                          ("test_sync", test_sync)):
+                          ("test_sync", test_sync),
+                          ("test_address_arbiter", test_address_arbiter),
+                          ("test_guest_tls", test_guest_tls),
+                          ("test_save_filesystem", test_save_filesystem),
+                          ("test_keyboard", test_keyboard),
+                          ("test_nvdrv", test_nvdrv),
+                          ("test_nvdrv_gpu", test_nvdrv_gpu),
+                          ("test_startup_services", test_startup_services),
+                          ("test_content", test_content),
+                          ("test_directory", test_directory)):
             out = os.path.join(out_dir, name)
             compile_one(
-                [clang, *PROBE_FLAGS, *defines, *src, "-llog", "-ldl", "-o", out],
+                [clang, *PROBE_FLAGS, *defines, *src,
+                 *([] if name == "test_nvdrv_gpu" else [os.path.join(ROOT, "host", "d3_nvdrv.c")]),
+                 *([] if name == "test_audio" else [os.path.join(ROOT, "host", "d3_audio.c")]),
+                 "-llog", "-laaudio", "-ldl", "-o", out],
                 out,
             )
 

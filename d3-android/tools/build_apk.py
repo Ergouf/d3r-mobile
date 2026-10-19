@@ -125,7 +125,7 @@ def collect_java_sources(src_dir):
     return sources
 
 
-def pack_apk(tmp, linked_apk, host_so, guest_so, dex_dir):
+def pack_apk(tmp, linked_apk, host_so, guest_so, dex_dir, driver_hooks=None):
     """Insert classes.dex and the arm64 libs into the aapt2-linked APK.
 
     Native libraries are stored uncompressed so zipalign -P 16 can page-align
@@ -145,6 +145,8 @@ def pack_apk(tmp, linked_apk, host_so, guest_so, dex_dir):
                                      (guest_so, "libd3guest.so")):
                 # ZIP_STORED keeps the .so uncompressed for -P 16 alignment.
                 dst.write(so_path, lib_prefix + so_name, zipfile.ZIP_STORED)
+            for hook in driver_hooks or []:
+                dst.write(hook, lib_prefix + os.path.basename(hook), zipfile.ZIP_STORED)
     return packed
 
 
@@ -165,6 +167,9 @@ def main():
                         help="Output directory for the APK, metadata and keystore "
                              "(default: <project>/build/apk-recovery)")
     parser.add_argument("--keystore", help="Existing debug keystore to reuse across output directories")
+    parser.add_argument("--package", choices=[PACKAGE_NAME, "com.miHoYo.Yuanshen"], default=PACKAGE_NAME,
+                        help="Optional OEM game identity; requires a host compiled for this package's private root")
+    parser.add_argument("--driver-hooks-dir", help="Built libadrenotools src/hook directory")
     args = parser.parse_args()
 
     host_so = os.path.abspath(args.host)
@@ -175,6 +180,12 @@ def main():
     require_file(host_so, "host library (--host)")
     require_file(guest_so, "guest library (--guest)")
     require_file(MANIFEST, "AndroidManifest.xml")
+    driver_hooks = []
+    if args.driver_hooks_dir:
+        for name in ("libhook_impl.so", "libmain_hook.so", "libfile_redirect_hook.so", "libgsl_alloc_hook.so"):
+            path = os.path.abspath(os.path.join(args.driver_hooks_dir, name))
+            require_file(path, "Adreno driver hook")
+            driver_hooks.append(path)
 
     jdk = find_jdk(sdk, args.jdk)
     if not jdk:
@@ -213,6 +224,7 @@ def main():
              "-o", linked_apk,
              "-I", android_jar,
              "--manifest", MANIFEST,
+             "--rename-manifest-package", args.package,
              "--min-sdk-version", "34",
              "--target-sdk-version", "36",
              "--version-code", "1",
@@ -223,7 +235,7 @@ def main():
         classes_dir = os.path.join(tmp, "classes")
         os.makedirs(classes_dir, exist_ok=True)
         run([javac, "-encoding", "UTF-8", "-source", "8", "-target", "8",
-             "-bootclasspath", android_jar,
+             "-bootclasspath", os.pathsep.join([android_jar, os.path.join(bt, "core-lambda-stubs.jar")]),
              "-d", classes_dir] + sources)
 
         # 3. Dex (invoke D8 through java -cp, never d8.bat). D8 rejects a bare
@@ -240,7 +252,7 @@ def main():
              "--min-api", "34", "--output", dex_dir, classes_jar])
 
         # 4. Pack resources + classes.dex + libs into one unsigned APK.
-        packed = pack_apk(tmp, linked_apk, host_so, guest_so, dex_dir)
+        packed = pack_apk(tmp, linked_apk, host_so, guest_so, dex_dir, driver_hooks)
 
         # 5. Page-align (16 KiB page size for .so) for 16 KiB-page devices.
         aligned = os.path.join(tmp, "aligned.apk")
@@ -259,7 +271,8 @@ def main():
         shutil.move(aligned, apk_out)
 
         metadata = {
-            "package": PACKAGE_NAME,
+            "package": args.package,
+            "driver_hooks": [{"name": os.path.basename(p), "sha256": sha256_file(p)} for p in driver_hooks],
             "label": "D3HOST Recovery",
             "main_class": MAIN_CLASS,
             "abi": ABI,
@@ -292,7 +305,7 @@ def main():
     print("")
     print("wrote %s (%d bytes)" % (apk_out, os.path.getsize(apk_out)))
     print("wrote %s" % meta_out)
-    print("package %s | host sha256 %s" % (PACKAGE_NAME, metadata["host_so"]["sha256"]))
+    print("package %s | host sha256 %s" % (args.package, metadata["host_so"]["sha256"]))
     print("install with the device tooling of your choice (this script does not "
           "install anything).")
 

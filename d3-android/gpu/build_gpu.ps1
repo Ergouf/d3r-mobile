@@ -10,7 +10,7 @@
 param(
     [switch]$Clean,
     [int]$Throttle = 8,
-    [string]$Opt = '-O1'
+    [string]$Opt = '-O2'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +40,7 @@ $exclude = @(
     '\\host1x\\vic\.cpp$',
     '\\post_processing\\',
     '\\present\\post_process\.cpp$'
+    '\\vulkan_common\\vulkan_library\.cpp$'
 )
 
 $files = Get-ChildItem -Path (Join-Path $EdenSrc 'video_core') -Recurse -Filter *.cpp -File |
@@ -104,6 +105,12 @@ $common = @(
 )
 
 Write-Host "objects: $($files.Count) translation units"
+$flagsPath = Join-Path $ObjRoot 'compile-flags.txt'
+$flagsText = $common -join "`n"
+$flagsChanged = -not (Test-Path $flagsPath) -or (Get-Content $flagsPath -Raw) -ne $flagsText
+$hostAdapterRoot = Join-Path $Root 'd3-android\gpu\host'
+$hostHeaderTime = (Get-ChildItem $hostAdapterRoot -Filter *.h -File |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
 
 $results = $files | ForEach-Object -Parallel {
     $cc  = $using:Clang
@@ -111,7 +118,8 @@ $results = $files | ForEach-Object -Parallel {
     $rel = ($src.Substring(3) -replace '[\\/:]', '__') -replace '\.cpp$', '.o'
     $obj = Join-Path $using:ObjRoot $rel
     New-Item -ItemType Directory -Force -Path (Split-Path $obj) | Out-Null
-    if ((Test-Path $obj) -and (Get-Item $obj).LastWriteTime -gt (Get-Item $src).LastWriteTime) {
+    if (-not $using:flagsChanged -and (Test-Path $obj) -and (Get-Item $obj).LastWriteTime -gt (Get-Item $src).LastWriteTime -and
+        (-not $src.StartsWith($using:hostAdapterRoot) -or (Get-Item $obj).LastWriteTime -gt $using:hostHeaderTime)) {
         [pscustomobject]@{ Src = $src; Obj = $obj; Ok = $true; Cached = $true; Err = '' }
         return
     }
@@ -129,6 +137,7 @@ if ($failed.Count) {
     $failed | Select-Object -First 15 Src, Err | Format-Table -AutoSize -Wrap
     throw "$($failed.Count) translation units failed"
 }
+[System.IO.File]::WriteAllText($flagsPath, $flagsText)
 
 $objs = $built | ForEach-Object { $_.Obj }
 # 300+ object paths overflow the Windows command line, so hand llvm-ar a

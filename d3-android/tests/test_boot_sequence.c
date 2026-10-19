@@ -101,7 +101,10 @@ int main(void) {
     CHECK(sdk_ctor_calls == D3_SDK_INIT_ARRAYSZ / 8);
     CHECK(main_ctor_calls == D3_MAIN_INIT_ARRAYSZ / 8);
     CHECK(main_calls == 1 && order_errors == 0);
-    CHECK(g_guest_tp == g_host_tp && g_guest_x18 == g_host_x18);
+    uint64_t restored_tp, restored_x18;
+    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(restored_tp));
+    __asm__ volatile("mov %0, x18" : "=r"(restored_x18));
+    CHECK(restored_tp == g_host_tp && restored_x18 == g_host_x18);
     CHECK(munmap(image, size) == 0);
     puts("PASS: DT_INIT owns SDK/main constructors once; nnMain follows both modules");
     return 0;

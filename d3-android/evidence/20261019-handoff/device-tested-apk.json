@@ -1,0 +1,41 @@
+{
+  "package": "com.d3mobile.host.recovery",
+  "driver_hooks": [
+    {
+      "name": "libhook_impl.so",
+      "sha256": "80124f8ea402db122351e0bcc4f18dc2189902eb0d318bdeadac7075211d9148"
+    },
+    {
+      "name": "libmain_hook.so",
+      "sha256": "d623d62d74b5fc15d33076c9a82f3cbd8bb1023edd5de7a8224691d377f5a394"
+    },
+    {
+      "name": "libfile_redirect_hook.so",
+      "sha256": "ba21a16f336b8205c2fbc520b9308cff94b4696d517791faffd582c3b5749685"
+    },
+    {
+      "name": "libgsl_alloc_hook.so",
+      "sha256": "d40e4f45676a267780ab6d0713d0c5e76c4be4f864ddc2300edc19acfd51b140"
+    }
+  ],
+  "label": "D3HOST Recovery",
+  "main_class": "com.d3mobile.host.MainActivity",
+  "abi": "arm64-v8a",
+  "min_sdk": 34,
+  "target_sdk": 36,
+  "apk": "d3host-recovery-debug.apk",
+  "apk_sha256": "fd88b9d2b7d778e6d3f64820c79fb3b278849bb0b9f024d9483c638520632cf3",
+  "host_so": {
+    "path": "D:\\workspace\\Diablo\\d3-android\\build\\host-touch-audio\\libd3host.so",
+    "sha256": "e5d995bc582826ea04cb6856f0ff92d31d0035e5eb40cfc1dfa01d5b667e7538",
+    "size": 16032912
+  },
+  "guest_so": {
+    "path": "D:\\workspace\\Diablo\\recovery\\d3host-20261016-huRwPN\\extracted\\lib\\arm64-v8a\\libd3guest.so",
+    "sha256": "dd050ef63cbaeaaeae9f7c842b26456a05d7482aaf9b91103a9bf0e0188625a2",
+    "size": 33227200
+  },
+  "signed": true,
+  "signing_keystore": "local-debug.keystore",
+  "signing_key_alias": "androiddebugkey"
+}

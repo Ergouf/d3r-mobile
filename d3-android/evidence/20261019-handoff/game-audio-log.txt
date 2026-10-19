@@ -1,0 +1,707 @@
+--------- beginning of main
+10-19 17:39:07.197  5330  5330 I d3gpu   : cache-scan: enabled=1
+10-19 17:39:07.197  5330  5330 I d3gpu   : render scale=1.0x (Eden render targets)
+10-19 17:39:07.204  5330  5330 I d3gpu   : system Vulkan loader selected
+10-19 17:39:07.756  5330  5330 I d3gpu   : renderer: Vulkan::RendererVulkan ready (vendor=Qualcomm)
+10-19 17:39:07.772  5330  5330 I d3gpu   : channel: allocated and initialised (0xb400006f5d510078)
+10-19 17:39:07.772  5330  5386 I d3gpu   : probe: device memory backing=0x6b80000000 virtual=0x54e9800000
+10-19 17:39:07.781  5330  5386 I d3gpu   : vk: driver=Qualcomm devices=1 surface=0x0
+10-19 17:39:07.813  5330  5386 I d3gpu   : CPU write watch: disabled
+10-19 17:39:07.875  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x500000000 cpu=0x552a1e2000 size=0x1000
+10-19 17:39:07.875  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x500010000 cpu=0x552a1e2000 size=0x1000
+10-19 17:39:07.876  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x400000000 cpu=0x552a1f0000 size=0x10000
+10-19 17:39:07.876  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x500020000 cpu=0x552a1f0000 size=0x10000
+10-19 17:39:07.917  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x500030000 cpu=0x5576000000 size=0x4000000
+10-19 17:39:07.919  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x504030000 cpu=0x5576000000 size=0x4000000
+10-19 17:39:07.960  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x508030000 cpu=0x557c000000 size=0x4000000
+10-19 17:39:07.961  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x50c030000 cpu=0x557c000000 size=0x4000000
+10-19 17:39:07.998  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x510030000 cpu=0x5582000000 size=0x4000000
+10-19 17:39:08.000  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x514030000 cpu=0x5582000000 size=0x4000000
+10-19 17:39:08.033  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x518030000 cpu=0x5588000000 size=0x4000000
+10-19 17:39:08.035  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x51c030000 cpu=0x5588000000 size=0x4000000
+10-19 17:39:08.063  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x520030000 cpu=0x558e000000 size=0x4000000
+10-19 17:39:08.065  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x524030000 cpu=0x558e000000 size=0x4000000
+10-19 17:39:08.091  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x528030000 cpu=0x5594000000 size=0x4000000
+10-19 17:39:08.093  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x52c030000 cpu=0x5594000000 size=0x4000000
+10-19 17:39:08.120  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x530030000 cpu=0x559a000000 size=0x4000000
+10-19 17:39:08.121  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x534030000 cpu=0x559a000000 size=0x4000000
+10-19 17:39:08.148  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x538030000 cpu=0x55a0000000 size=0x4000000
+10-19 17:39:08.150  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x53c030000 cpu=0x55a0000000 size=0x4000000
+10-19 17:39:08.176  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x540030000 cpu=0x55a6000000 size=0x4000000
+10-19 17:39:08.178  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x544030000 cpu=0x55a6000000 size=0x4000000
+10-19 17:39:08.203  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x548030000 cpu=0x55ac000000 size=0x4000000
+10-19 17:39:08.204  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x54c030000 cpu=0x55ac000000 size=0x4000000
+10-19 17:39:08.230  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x550030000 cpu=0x55b2000000 size=0x4000000
+10-19 17:39:08.231  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x554030000 cpu=0x55b2000000 size=0x4000000
+10-19 17:39:08.257  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x558030000 cpu=0x55b8000000 size=0x4000000
+10-19 17:39:08.259  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x55c030000 cpu=0x55b8000000 size=0x4000000
+10-19 17:39:08.284  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x560030000 cpu=0x55be000000 size=0x4000000
+10-19 17:39:08.286  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x564030000 cpu=0x55be000000 size=0x4000000
+10-19 17:39:08.311  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x568030000 cpu=0x55c4000000 size=0x4000000
+10-19 17:39:08.312  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x56c030000 cpu=0x55c4000000 size=0x4000000
+10-19 17:39:08.337  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x570030000 cpu=0x55ca000000 size=0x4000000
+10-19 17:39:08.338  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x574030000 cpu=0x55ca000000 size=0x4000000
+10-19 17:39:08.365  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x578030000 cpu=0x55d0000000 size=0x4000000
+10-19 17:39:08.366  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x57c030000 cpu=0x55d0000000 size=0x4000000
+10-19 17:39:08.394  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x580030000 cpu=0x55d6000000 size=0x4000000
+10-19 17:39:08.395  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x584030000 cpu=0x55d6000000 size=0x4000000
+10-19 17:39:08.421  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x588030000 cpu=0x55dc000000 size=0x4000000
+10-19 17:39:08.423  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x58c030000 cpu=0x55dc000000 size=0x4000000
+10-19 17:39:24.530  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590030000 cpu=0x555c000000 size=0x51000
+10-19 17:39:24.530  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590090000 cpu=0x555c000000 size=0x51000
+10-19 17:39:24.530  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5900f0000 cpu=0x555c051000 size=0xa000
+10-19 17:39:24.530  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590100000 cpu=0x555c051000 size=0xa000
+10-19 17:39:24.530  5330  5465 I d3gpu   : nv-channel: allocated 1 bind=2
+10-19 17:39:24.530  5330  5465 I d3gpu   : nv-channel: bound 1 to space=1
+10-19 17:39:24.530  5330  5465 I d3gpu   : nv-channel: initialized 1 bind=2
+10-19 17:39:24.531  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590110000 cpu=0x555c05f000 size=0x10000
+10-19 17:39:24.531  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590120000 cpu=0x555c05f000 size=0x10000
+10-19 17:39:24.531  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590130000 cpu=0x555c06f000 size=0xa000
+10-19 17:39:24.531  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590140000 cpu=0x555c06f000 size=0xa000
+10-19 17:39:24.531  5330  5465 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=3 flags=0x104 first=0x8023f60590110000
+10-19 17:39:24.531  5330  5465 I d3gpu   : nv-submit: submitted channel=1 count=3 syncpoint=1 guest=0 host=0
+10-19 17:39:24.531  5330  5449 I d3gpu   : cache-scan: pages=0 changed=0 us=0 generation=2 write-faults=0 watch-misses=0
+10-19 17:39:24.534  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590150000 cpu=0x555c080000 size=0x640000
+10-19 17:39:24.534  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590790000 cpu=0x555c080000 size=0x640000
+10-19 17:39:24.534  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x590dd0000 cpu=0x555c080000 size=0x640000
+10-19 17:39:24.534  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x590dd0000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.537  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x591410000 cpu=0x555c6c0000 size=0x640000
+10-19 17:39:24.537  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x591a50000 cpu=0x555c6c0000 size=0x640000
+10-19 17:39:24.537  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x592090000 cpu=0x555c6c0000 size=0x640000
+10-19 17:39:24.537  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x592090000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.540  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5926d0000 cpu=0x555cd00000 size=0x640000
+10-19 17:39:24.540  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x592d10000 cpu=0x555cd00000 size=0x640000
+10-19 17:39:24.541  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x593350000 cpu=0x555cd00000 size=0x640000
+10-19 17:39:24.541  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x593350000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.541  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x593990000 cpu=0x555d340000 size=0x10000
+10-19 17:39:24.541  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5939a0000 cpu=0x555d340000 size=0x10000
+10-19 17:39:24.542  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x400010000 cpu=0x5573800000 size=0x1000000
+10-19 17:39:24.542  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5939b0000 cpu=0x5573800000 size=0x1000000
+10-19 17:39:24.548  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5949b0000 cpu=0x555d350000 size=0x8000000
+10-19 17:39:24.551  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x59c9b0000 cpu=0x555d350000 size=0x8000000
+10-19 17:39:24.551  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5a49b0000 cpu=0x555c079000 size=0x3000
+10-19 17:39:24.551  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5a49c0000 cpu=0x555c079000 size=0x3000
+10-19 17:39:24.553  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5a49d0000 cpu=0x5565750000 size=0x2000000
+10-19 17:39:24.554  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5a69d0000 cpu=0x5565750000 size=0x2000000
+10-19 17:39:24.555  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5a89d0000 cpu=0x5567750000 size=0x2000000
+10-19 17:39:24.556  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5aa9d0000 cpu=0x5567750000 size=0x2000000
+10-19 17:39:24.558  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5ac9d0000 cpu=0x5569750000 size=0x2000000
+10-19 17:39:24.558  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5ae9d0000 cpu=0x5569750000 size=0x2000000
+10-19 17:39:24.568  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b09d0000 cpu=0x556b750000 size=0x640000
+10-19 17:39:24.568  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b1010000 cpu=0x556b750000 size=0x640000
+10-19 17:39:24.568  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b1650000 cpu=0x556b750000 size=0x640000
+10-19 17:39:24.568  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b1650000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.568  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b1650000 offset=0 size=0x3c0000 kind=0xdb
+10-19 17:39:24.571  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b1c90000 cpu=0x556bd90000 size=0x640000
+10-19 17:39:24.571  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b22d0000 cpu=0x556bd90000 size=0x640000
+10-19 17:39:24.571  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b2910000 cpu=0x556bd90000 size=0x640000
+10-19 17:39:24.571  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b2910000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.571  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b2910000 offset=0 size=0x3c0000 kind=0xdb
+10-19 17:39:24.574  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b2f50000 cpu=0x556c3d0000 size=0x640000
+10-19 17:39:24.574  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b3590000 cpu=0x556c3d0000 size=0x640000
+10-19 17:39:24.574  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b3bd0000 cpu=0x556c3d0000 size=0x640000
+10-19 17:39:24.574  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b3bd0000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.574  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b3bd0000 offset=0 size=0x3c0000 kind=0xdb
+10-19 17:39:24.575  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b4210000 cpu=0x556ca10000 size=0xd0000
+10-19 17:39:24.575  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b42e0000 cpu=0x556ca10000 size=0xd0000
+10-19 17:39:24.575  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b43b0000 cpu=0x556ca10000 size=0xd0000
+10-19 17:39:24.575  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b43b0000 offset=0 size=0xd0000 kind=0xe9
+10-19 17:39:24.575  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b43b0000 offset=0 size=0xa0000 kind=0xe9
+10-19 17:39:24.576  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b4480000 cpu=0x556cae0000 size=0x190000
+10-19 17:39:24.576  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b4610000 cpu=0x556cae0000 size=0x190000
+10-19 17:39:24.576  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b47a0000 cpu=0x556cae0000 size=0x190000
+10-19 17:39:24.576  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b47a0000 offset=0 size=0x190000 kind=0xdb
+10-19 17:39:24.576  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b47a0000 offset=0 size=0xf0000 kind=0xdb
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b4930000 cpu=0x556cc70000 size=0x640000
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b4f70000 cpu=0x556cc70000 size=0x640000
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b55b0000 cpu=0x556cc70000 size=0x640000
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b55b0000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b55b0000 offset=0 size=0x3c0000 kind=0xdb
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b5bf0000 cpu=0x556d2b0000 size=0xd0000
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b5cc0000 cpu=0x556d2b0000 size=0xd0000
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b5d90000 cpu=0x556d2b0000 size=0xd0000
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b5d90000 offset=0 size=0xd0000 kind=0xe9
+10-19 17:39:24.579  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b5d90000 offset=0 size=0xa0000 kind=0xe9
+10-19 17:39:24.582  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b5e60000 cpu=0x556d380000 size=0x640000
+10-19 17:39:24.582  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b64a0000 cpu=0x556d380000 size=0x640000
+10-19 17:39:24.583  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b6ae0000 cpu=0x556d380000 size=0x640000
+10-19 17:39:24.583  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b6ae0000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.583  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b6ae0000 offset=0 size=0x3c0000 kind=0xdb
+10-19 17:39:24.585  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b7120000 cpu=0x556d9c0000 size=0x640000
+10-19 17:39:24.585  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b7760000 cpu=0x556d9c0000 size=0x640000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b7da0000 cpu=0x556d9c0000 size=0x640000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b7da0000 offset=0 size=0x640000 kind=0xdb
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b7da0000 offset=0 size=0x3c0000 kind=0xdb
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b83e0000 cpu=0x556e000000 size=0x10000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b83f0000 cpu=0x556e000000 size=0x10000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b8400000 cpu=0x556e000000 size=0x10000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b8400000 offset=0 size=0x10000 kind=0xdb
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b8410000 cpu=0x556e010000 size=0x10000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b8420000 cpu=0x556e010000 size=0x10000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b8430000 cpu=0x556e010000 size=0x10000
+10-19 17:39:24.586  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b8430000 offset=0 size=0x10000 kind=0x51
+10-19 17:39:24.589  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b8440000 cpu=0x556e020000 size=0x640000
+10-19 17:39:24.589  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b8a80000 cpu=0x556e020000 size=0x640000
+10-19 17:39:24.589  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b90c0000 cpu=0x556e020000 size=0x640000
+10-19 17:39:24.589  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b90c0000 offset=0 size=0x640000 kind=0x51
+10-19 17:39:24.589  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b90c0000 offset=0 size=0x3c0000 kind=0x51
+10-19 17:39:24.591  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b9700000 cpu=0x556e660000 size=0x400000
+10-19 17:39:24.591  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b9b00000 cpu=0x556e660000 size=0x400000
+10-19 17:39:24.591  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5b9f00000 cpu=0x556e660000 size=0x400000
+10-19 17:39:24.591  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5b9f00000 offset=0 size=0x400000 kind=0xdb
+10-19 17:39:24.596  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5ba300000 cpu=0x556ea60000 size=0x800000
+10-19 17:39:24.596  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bab00000 cpu=0x556ea60000 size=0x800000
+10-19 17:39:24.596  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bb300000 cpu=0x556ea60000 size=0x800000
+10-19 17:39:24.596  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5bb300000 offset=0 size=0x800000 kind=0xe9
+10-19 17:39:24.599  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bbb00000 cpu=0x556f260000 size=0x800000
+10-19 17:39:24.600  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bc300000 cpu=0x556f260000 size=0x800000
+10-19 17:39:24.600  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bcb00000 cpu=0x556f260000 size=0x800000
+10-19 17:39:24.600  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5bcb00000 offset=0 size=0x800000 kind=0xe9
+10-19 17:39:24.602  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bd300000 cpu=0x556fa60000 size=0x400000
+10-19 17:39:24.602  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bd700000 cpu=0x556fa60000 size=0x400000
+10-19 17:39:24.602  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bdb00000 cpu=0x556fa60000 size=0x400000
+10-19 17:39:24.602  5330  5465 I d3gpu   : nv-rekind: space=1 gpu=0x5bdb00000 offset=0 size=0x400000 kind=0x51
+10-19 17:39:24.602  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bdf00000 cpu=0x556fe60000 size=0x90000
+10-19 17:39:24.602  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5bdf90000 cpu=0x556fe60000 size=0x90000
+10-19 17:39:24.602  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5be020000 cpu=0x556fe60000 size=0x90000
+10-19 17:39:24.603  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5be0b0000 cpu=0x556fef0000 size=0x90000
+10-19 17:39:24.603  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5be140000 cpu=0x556fef0000 size=0x90000
+10-19 17:39:24.603  5330  5465 I d3gpu   : nv-map: space=1 gpu=0x5be1d0000 cpu=0x556fef0000 size=0x90000
+10-19 17:39:24.615  5330  5465 I d3audio : open id=0 48000Hz guestChannels=6 stereo PCM16
+10-19 17:39:24.725  5330  5760 I d3audio : play id=0 frames=1152 nonzero=0 queued=3 xruns=0
+10-19 17:39:34.730  5330  5760 I d3audio : play id=0 frames=481344 nonzero=0 queued=3 xruns=0
+10-19 17:39:44.418  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112420
+10-19 17:39:44.418  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=1 host=1
+10-19 17:39:44.418  5330  5449 I d3gpu   : cache-scan: pages=1 changed=1 us=24 generation=3 write-faults=0 watch-misses=0
+10-19 17:39:44.680  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:39:44.682  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112578
+10-19 17:39:44.682  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=3 host=3
+10-19 17:39:44.696  5330  5449 I d3gpu   : cache-scan: pages=16477 changed=2 us=14188 generation=4 write-faults=0 watch-misses=0
+10-19 17:39:44.734  5330  5760 I d3audio : play id=0 frames=961536 nonzero=14489 queued=3 xruns=0
+10-19 17:39:44.770  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:39:44.775  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e05901126d0
+10-19 17:39:44.776  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=5 host=5
+10-19 17:39:44.780  5330  5449 I d3gpu   : cache-scan: pages=17446 changed=3 us=4804 generation=5 write-faults=0 watch-misses=0
+10-19 17:39:44.800  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:39:44.802  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112828
+10-19 17:39:44.802  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=7 host=7
+10-19 17:39:44.806  5330  5449 I d3gpu   : cache-scan: pages=18383 changed=4 us=4291 generation=6 write-faults=0 watch-misses=0
+10-19 17:39:44.827  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:39:44.830  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112980
+10-19 17:39:44.830  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=9 host=9
+10-19 17:39:44.836  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=7 us=5463 generation=7 write-faults=0 watch-misses=0
+10-19 17:39:44.850  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112ad8
+10-19 17:39:44.851  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=11 host=11
+10-19 17:39:44.858  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=3 us=7422 generation=8 write-faults=0 watch-misses=0
+10-19 17:39:44.884  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112c30
+10-19 17:39:44.885  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=13 host=13
+10-19 17:39:44.890  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=5 us=6090 generation=9 write-faults=0 watch-misses=0
+10-19 17:39:44.916  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112d88
+10-19 17:39:44.916  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=15 host=15
+10-19 17:39:44.920  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=3 us=4663 generation=10 write-faults=0 watch-misses=0
+10-19 17:39:44.946  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590112ee0
+10-19 17:39:44.950  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=17 host=17
+10-19 17:39:44.952  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=4 us=6133 generation=11 write-faults=0 watch-misses=0
+10-19 17:39:44.991  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590113038
+10-19 17:39:44.992  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=19 host=19
+10-19 17:39:44.997  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=5 us=5757 generation=12 write-faults=0 watch-misses=0
+10-19 17:39:45.014  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590113190
+10-19 17:39:45.014  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=21 host=21
+10-19 17:39:45.019  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=3 us=5694 generation=13 write-faults=0 watch-misses=0
+10-19 17:39:45.032  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e05901132e8
+10-19 17:39:45.032  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=23 host=23
+10-19 17:39:45.036  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=4 us=4374 generation=14 write-faults=0 watch-misses=0
+10-19 17:39:45.090  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590113468
+10-19 17:39:45.090  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=26 host=26
+10-19 17:39:45.097  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=4 us=6864 generation=15 write-faults=0 watch-misses=0
+10-19 17:39:45.127  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e05901135c0
+10-19 17:39:45.130  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=28 host=28
+10-19 17:39:45.131  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=4 us=3955 generation=16 write-faults=0 watch-misses=0
+10-19 17:39:45.167  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590113718
+10-19 17:39:45.167  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=30 host=30
+10-19 17:39:45.173  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=5 us=5701 generation=17 write-faults=0 watch-misses=0
+10-19 17:39:45.191  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=3 us=4306 generation=18 write-faults=0 watch-misses=0
+10-19 17:39:45.204  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=5 us=8293 generation=19 write-faults=0 watch-misses=0
+10-19 17:39:45.217  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=4 us=8619 generation=20 write-faults=0 watch-misses=0
+10-19 17:39:45.231  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=4 us=6464 generation=21 write-faults=0 watch-misses=0
+10-19 17:39:45.251  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=3 us=5621 generation=22 write-faults=0 watch-misses=0
+10-19 17:39:45.264  5330  5449 I d3gpu   : cache-scan: pages=19319 changed=5 us=5790 generation=23 write-faults=0 watch-misses=0
+10-19 17:39:45.279  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=4 us=7275 generation=24 write-faults=0 watch-misses=0
+10-19 17:39:45.293  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=3 us=6137 generation=25 write-faults=0 watch-misses=0
+10-19 17:39:49.221  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=4 us=8489 generation=257 write-faults=0 watch-misses=0
+10-19 17:39:49.692  5330  5779 I d3gpu   : game frames=283 fps=56.47 interval=5.012s
+10-19 17:39:53.485  5330  5449 I d3gpu   : cache-scan: pages=19318 changed=4 us=8659 generation=513 write-faults=0 watch-misses=0
+10-19 17:39:54.708  5330  5779 I d3gpu   : game frames=584 fps=60.00 interval=5.016s
+10-19 17:39:54.742  5330  5760 I d3audio : play id=0 frames=1441920 nonzero=494857 queued=3 xruns=0
+10-19 17:39:54.975  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:39:57.750  5330  5449 I d3gpu   : cache-scan: pages=20702 changed=14 us=9373 generation=769 write-faults=0 watch-misses=0
+10-19 17:39:59.725  5330  5779 I d3gpu   : game frames=885 fps=60.00 interval=5.017s
+10-19 17:40:02.019  5330  5449 I d3gpu   : cache-scan: pages=20685 changed=5 us=10046 generation=1025 write-faults=0 watch-misses=0
+10-19 17:40:04.741  5330  5779 I d3gpu   : game frames=1186 fps=60.01 interval=5.016s
+10-19 17:40:04.750  5330  5760 I d3audio : play id=0 frames=1922304 nonzero=975241 queued=3 xruns=0
+10-19 17:40:04.941  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e059011dbe0
+10-19 17:40:04.941  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=2498 host=2498
+10-19 17:40:04.975  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:40:06.286  5330  5449 I d3gpu   : cache-scan: pages=20701 changed=36 us=10124 generation=1281 write-faults=0 watch-misses=0
+10-19 17:40:09.756  5330  5779 I d3gpu   : game frames=1487 fps=60.02 interval=5.015s
+10-19 17:40:10.552  5330  5449 I d3gpu   : cache-scan: pages=20700 changed=18 us=11160 generation=1537 write-faults=0 watch-misses=0
+10-19 17:40:14.750  5330  5760 I d3audio : play id=0 frames=2402304 nonzero=1455241 queued=3 xruns=0
+10-19 17:40:14.758  5330  5779 I d3gpu   : game frames=1787 fps=59.98 interval=5.002s
+10-19 17:40:14.816  5330  5449 I d3gpu   : cache-scan: pages=20687 changed=5 us=8755 generation=1793 write-faults=0 watch-misses=0
+10-19 17:40:14.973  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:40:19.085  5330  5449 I d3gpu   : cache-scan: pages=20701 changed=19 us=10214 generation=2049 write-faults=0 watch-misses=0
+10-19 17:40:19.773  5330  5779 I d3gpu   : game frames=2088 fps=60.02 interval=5.015s
+10-19 17:40:23.354  5330  5449 I d3gpu   : cache-scan: pages=20702 changed=30 us=11222 generation=2305 write-faults=0 watch-misses=0
+10-19 17:40:24.758  5330  5760 I d3audio : play id=0 frames=2882688 nonzero=1935273 queued=3 xruns=0
+10-19 17:40:24.774  5330  5779 I d3gpu   : game frames=2388 fps=59.98 interval=5.002s
+10-19 17:40:24.942  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e059011a700
+10-19 17:40:24.945  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=5000 host=5000
+10-19 17:40:24.974  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:40:27.618  5330  5449 I d3gpu   : cache-scan: pages=22747 changed=683 us=8918 generation=2561 write-faults=0 watch-misses=0
+10-19 17:40:29.790  5330  5779 I d3gpu   : game frames=2689 fps=60.01 interval=5.016s
+10-19 17:40:31.883  5330  5449 I d3gpu   : cache-scan: pages=22747 changed=683 us=10129 generation=2817 write-faults=0 watch-misses=0
+10-19 17:40:34.769  5330  5760 I d3audio : play id=0 frames=3363072 nonzero=2341110 queued=3 xruns=0
+10-19 17:40:34.791  5330  5779 I d3gpu   : game frames=2989 fps=59.99 interval=5.001s
+10-19 17:40:34.972  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:40:36.151  5330  5449 I d3gpu   : cache-scan: pages=22747 changed=683 us=10707 generation=3073 write-faults=0 watch-misses=0
+10-19 17:40:39.808  5330  5779 I d3gpu   : game frames=3290 fps=60.00 interval=5.016s
+10-19 17:40:40.416  5330  5449 I d3gpu   : cache-scan: pages=22067 changed=3 us=8386 generation=3329 write-faults=0 watch-misses=0
+10-19 17:40:44.716  5330  5449 I d3gpu   : cache-scan: pages=22735 changed=25 us=11553 generation=3585 write-faults=0 watch-misses=0
+10-19 17:40:44.765  5330  5760 I d3audio : play id=0 frames=3843072 nonzero=2815694 queued=3 xruns=0
+10-19 17:40:44.813  5330  5779 I d3gpu   : game frames=3589 fps=59.73 interval=5.006s
+10-19 17:40:44.958  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e05901171f8
+10-19 17:40:44.960  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=7501 host=7501
+10-19 17:40:44.989  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:40:48.809  5330  5449 I d3gpu   : cache-scan: pages=20691 changed=20 us=11864 generation=3841 write-faults=0 watch-misses=0
+10-19 17:40:49.829  5330  5779 I d3gpu   : game frames=3900 fps=62.00 interval=5.016s
+10-19 17:40:53.107  5330  5449 I d3gpu   : cache-scan: pages=20706 changed=20 us=9384 generation=4097 write-faults=0 watch-misses=0
+10-19 17:40:54.774  5330  5760 I d3audio : play id=0 frames=4323456 nonzero=3296078 queued=3 xruns=0
+10-19 17:40:54.829  5330  5779 I d3gpu   : game frames=4198 fps=59.59 interval=5.000s
+10-19 17:40:54.867  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:40:57.430  5330  5449 I d3gpu   : cache-scan: pages=20689 changed=4 us=12491 generation=4353 write-faults=0 watch-misses=0
+10-19 17:40:59.844  5330  5779 I d3gpu   : game frames=4488 fps=57.84 interval=5.014s
+10-19 17:41:01.868  5330  5449 I d3gpu   : cache-scan: pages=20706 changed=20 us=10367 generation=4609 write-faults=0 watch-misses=0
+10-19 17:41:04.778  5330  5760 I d3audio : play id=0 frames=4803648 nonzero=3776270 queued=3 xruns=0
+10-19 17:41:04.855  5330  5779 I d3gpu   : game frames=4778 fps=57.87 interval=5.011s
+10-19 17:41:05.197  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590113d18
+10-19 17:41:05.197  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=10003 host=10003
+10-19 17:41:05.228  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:41:06.351  5330  5449 I d3gpu   : cache-scan: pages=20706 changed=20 us=9640 generation=4865 write-faults=0 watch-misses=0
+10-19 17:41:09.855  5330  5779 I d3gpu   : game frames=5063 fps=56.99 interval=5.001s
+10-19 17:41:10.885  5330  5449 I d3gpu   : cache-scan: pages=20692 changed=6 us=12349 generation=5121 write-faults=0 watch-misses=0
+10-19 17:41:14.784  5330  5760 I d3audio : play id=0 frames=5283840 nonzero=4255158 queued=3 xruns=0
+10-19 17:41:14.864  5330  5779 I d3gpu   : game frames=5349 fps=57.10 interval=5.009s
+10-19 17:41:15.289  5330  5449 I d3gpu   : cache-scan: pages=22067 changed=3 us=7620 generation=5377 write-faults=0 watch-misses=0
+10-19 17:41:15.712  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:41:19.559  5330  5449 I d3gpu   : cache-scan: pages=22747 changed=683 us=10462 generation=5633 write-faults=0 watch-misses=0
+10-19 17:41:19.880  5330  5779 I d3gpu   : game frames=5650 fps=60.00 interval=5.016s
+10-19 17:41:23.824  5330  5449 I d3gpu   : cache-scan: pages=22067 changed=3 us=8998 generation=5889 write-faults=0 watch-misses=0
+10-19 17:41:24.789  5330  5760 I d3audio : play id=0 frames=5764224 nonzero=4665526 queued=3 xruns=0
+10-19 17:41:24.896  5330  5779 I d3gpu   : game frames=5951 fps=60.02 interval=5.015s
+10-19 17:41:25.681  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=7 flags=0x104 first=0x80004e0590110838
+10-19 17:41:25.681  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=7 syncpoint=1 guest=12505 host=12505
+10-19 17:41:25.712  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:41:28.093  5330  5449 I d3gpu   : cache-scan: pages=22747 changed=682 us=11200 generation=6145 write-faults=0 watch-misses=0
+10-19 17:41:29.897  5330  5779 I d3gpu   : game frames=6251 fps=59.98 interval=5.001s
+10-19 17:41:32.356  5330  5449 I d3gpu   : cache-scan: pages=22747 changed=89 us=9324 generation=6401 write-faults=0 watch-misses=0
+10-19 17:41:34.794  5330  5760 I d3audio : play id=0 frames=6244416 nonzero=5145718 queued=3 xruns=0
+10-19 17:41:34.897  5330  5779 I d3gpu   : game frames=6551 fps=60.00 interval=5.000s
+10-19 17:41:35.711  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:41:36.621  5330  5449 I d3gpu   : cache-scan: pages=22067 changed=3 us=6758 generation=6657 write-faults=0 watch-misses=0
+10-19 17:41:39.912  5330  5779 I d3gpu   : game frames=6852 fps=60.02 interval=5.015s
+10-19 17:41:41.495  5330  5449 I d3gpu   : cache-scan: pages=28438 changed=40 us=12044 generation=6913 write-faults=0 watch-misses=0
+10-19 17:41:44.798  5330  5760 I d3audio : play id=0 frames=6724608 nonzero=5621453 queued=3 xruns=0
+10-19 17:41:44.928  5330  5779 I d3gpu   : game frames=6962 fps=21.93 interval=5.017s
+10-19 17:41:49.651  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=35 us=11434 generation=7169 write-faults=0 watch-misses=0
+10-19 17:41:49.943  5330  5779 I d3gpu   : game frames=7179 fps=43.28 interval=5.014s
+10-19 17:41:50.358  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=8 flags=0x104 first=0x80004e059011c208
+10-19 17:41:50.358  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=8 syncpoint=1 guest=15006 host=15006
+10-19 17:41:50.412  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:41:54.806  5330  5760 I d3audio : play id=0 frames=7204992 nonzero=6101837 queued=3 xruns=0
+10-19 17:41:54.962  5330  5779 I d3gpu   : game frames=7410 fps=46.02 interval=5.019s
+10-19 17:41:55.185  5330  5449 I d3gpu   : cache-scan: pages=22839 changed=29 us=10429 generation=7425 write-faults=0 watch-misses=0
+10-19 17:41:59.964  5330  5779 I d3gpu   : game frames=7668 fps=51.57 interval=5.003s
+10-19 17:42:00.153  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=35 us=10330 generation=7681 write-faults=0 watch-misses=0
+10-19 17:42:02.505  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:42:04.810  5330  5760 I d3audio : play id=0 frames=7685184 nonzero=6582029 queued=3 xruns=0
+10-19 17:42:04.970  5330  5779 I d3gpu   : game frames=7929 fps=52.14 interval=5.005s
+10-19 17:42:05.053  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=46 us=12978 generation=7937 write-faults=0 watch-misses=0
+10-19 17:42:09.974  5330  5779 I d3gpu   : game frames=8189 fps=51.96 interval=5.004s
+10-19 17:42:09.988  5330  5449 I d3gpu   : cache-scan: pages=22843 changed=33 us=11429 generation=8193 write-faults=0 watch-misses=0
+10-19 17:42:14.013  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=8 flags=0x104 first=0x80004e0590118d28
+10-19 17:42:14.013  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=8 syncpoint=1 guest=17508 host=17508
+10-19 17:42:14.071  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:42:14.814  5330  5760 I d3audio : play id=0 frames=8165376 nonzero=7062221 queued=3 xruns=0
+10-19 17:42:14.960  5330  5449 I d3gpu   : cache-scan: pages=22839 changed=44 us=11449 generation=8449 write-faults=0 watch-misses=0
+10-19 17:42:14.984  5330  5779 I d3gpu   : game frames=8447 fps=51.49 interval=5.011s
+10-19 17:42:19.969  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=36 us=9365 generation=8705 write-faults=0 watch-misses=0
+10-19 17:42:19.996  5330  5779 I d3gpu   : game frames=8703 fps=51.08 interval=5.012s
+10-19 17:42:24.822  5330  5760 I d3audio : play id=0 frames=8645760 nonzero=7542605 queued=3 xruns=0
+10-19 17:42:25.003  5330  5779 I d3gpu   : game frames=8949 fps=49.13 interval=5.007s
+10-19 17:42:25.177  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=54 us=12671 generation=8961 write-faults=0 watch-misses=0
+10-19 17:42:26.003  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:42:30.014  5330  5779 I d3gpu   : game frames=9203 fps=50.69 interval=5.011s
+10-19 17:42:30.221  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=37 us=10350 generation=9217 write-faults=0 watch-misses=0
+10-19 17:42:34.830  5330  5760 I d3audio : play id=0 frames=9125952 nonzero=8022797 queued=3 xruns=0
+10-19 17:42:35.016  5330  5779 I d3gpu   : game frames=9457 fps=50.78 interval=5.002s
+10-19 17:42:35.260  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=35 us=11235 generation=9473 write-faults=0 watch-misses=0
+10-19 17:42:37.782  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=8 flags=0x104 first=0x80004e0590115848
+10-19 17:42:37.782  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=8 syncpoint=1 guest=20010 host=20010
+10-19 17:42:37.838  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:42:40.025  5330  5779 I d3gpu   : game frames=9711 fps=50.70 interval=5.010s
+10-19 17:42:40.316  5330  5449 I d3gpu   : cache-scan: pages=22832 changed=22 us=10266 generation=9729 write-faults=0 watch-misses=0
+10-19 17:42:44.830  5330  5760 I d3audio : play id=0 frames=9606144 nonzero=8502989 queued=3 xruns=0
+10-19 17:42:45.027  5330  5779 I d3gpu   : game frames=9938 fps=45.39 interval=5.001s
+10-19 17:42:45.891  5330  5449 I d3gpu   : cache-scan: pages=22820 changed=10 us=12676 generation=9985 write-faults=0 watch-misses=0
+10-19 17:42:50.042  5330  5779 I d3gpu   : game frames=10191 fps=50.45 interval=5.015s
+10-19 17:42:50.218  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:42:50.965  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=38 us=13674 generation=10241 write-faults=0 watch-misses=0
+10-19 17:42:54.839  5330  5760 I d3audio : play id=0 frames=10086528 nonzero=8983373 queued=3 xruns=0
+10-19 17:42:55.054  5330  5779 I d3gpu   : game frames=10442 fps=50.08 interval=5.012s
+10-19 17:42:56.093  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=38 us=12871 generation=10497 write-faults=0 watch-misses=0
+10-19 17:43:00.058  5330  5779 I d3gpu   : game frames=10691 fps=49.76 interval=5.004s
+10-19 17:43:01.235  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=36 us=13890 generation=10753 write-faults=0 watch-misses=0
+10-19 17:43:02.186  5330  5779 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=8 flags=0x104 first=0x80004e0590112368
+10-19 17:43:02.193  5330  5779 I d3gpu   : nv-submit: submitted channel=1 count=8 syncpoint=1 guest=22512 host=22512
+10-19 17:43:02.238  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:43:04.846  5330  5760 I d3audio : play id=0 frames=10566720 nonzero=9463565 queued=3 xruns=0
+10-19 17:43:05.059  5330  5779 I d3gpu   : game frames=10940 fps=49.79 interval=5.001s
+10-19 17:43:06.350  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=37 us=10526 generation=11009 write-faults=0 watch-misses=0
+10-19 17:43:10.072  5330  5779 I d3gpu   : game frames=11192 fps=50.27 interval=5.013s
+10-19 17:43:11.468  5330  5449 I d3gpu   : cache-scan: pages=22840 changed=29 us=9793 generation=11265 write-faults=0 watch-misses=0
+10-19 17:43:14.256  5330  5779 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:43:14.849  5330  5760 I d3audio : play id=0 frames=11046912 nonzero=9943757 queued=3 xruns=0
+10-19 17:43:15.089  5330  5779 I d3gpu   : game frames=11442 fps=49.83 interval=5.017s
+10-19 17:43:16.613  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=40 us=9598 generation=11521 write-faults=0 watch-misses=0
+10-19 17:43:20.108  5330  5779 I d3gpu   : game frames=11693 fps=50.01 interval=5.019s
+10-19 17:43:21.751  5330  5449 I d3gpu   : cache-scan: pages=22847 changed=37 us=11481 generation=11777 write-faults=0 watch-misses=0
+10-19 17:43:24.859  5330  5760 I d3audio : play id=0 frames=11527296 nonzero=10424141 queued=3 xruns=0
+10-19 17:43:34.861  5330  5760 I d3audio : play id=0 frames=12007488 nonzero=10904330 queued=3 xruns=0
+10-19 17:43:35.772  5330  6074 I d3gpu   : game frames=11889 fps=12.51 interval=15.664s
+10-19 17:43:38.209  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=8 flags=0x104 first=0x80004e059011da58
+10-19 17:43:38.209  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=8 syncpoint=1 guest=25013 host=25013
+10-19 17:43:38.540  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:43:39.531  5330  5449 I d3gpu   : cache-scan: pages=17689 changed=4 us=6415 generation=12034 write-faults=0 watch-misses=0
+10-19 17:43:40.775  5330  6074 I d3gpu   : game frames=12069 fps=35.98 interval=5.003s
+10-19 17:43:44.867  5330  5760 I d3audio : play id=0 frames=12487680 nonzero=11384519 queued=3 xruns=0
+10-19 17:43:45.790  5330  6074 I d3gpu   : game frames=12281 fps=42.28 interval=5.015s
+10-19 17:43:45.815  5330  5449 I d3gpu   : cache-scan: pages=17279 changed=4 us=6322 generation=12290 write-faults=0 watch-misses=0
+10-19 17:43:50.801  5330  6074 I d3gpu   : game frames=12436 fps=30.93 interval=5.011s
+10-19 17:43:53.576  5330  5449 I d3gpu   : cache-scan: pages=27756 changed=26 us=8128 generation=12546 write-faults=0 watch-misses=0
+10-19 17:43:54.874  5330  5760 I d3audio : play id=0 frames=12968064 nonzero=11864902 queued=3 xruns=0
+10-19 17:43:55.257  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:43:55.803  5330  6074 I d3gpu   : game frames=12620 fps=36.79 interval=5.002s
+10-19 17:44:00.701  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=35 us=14256 generation=12802 write-faults=0 watch-misses=0
+10-19 17:44:00.818  5330  6074 I d3gpu   : game frames=12798 fps=35.49 interval=5.015s
+10-19 17:44:04.882  5330  5760 I d3audio : play id=0 frames=13448256 nonzero=12345094 queued=3 xruns=0
+10-19 17:44:05.834  5330  6074 I d3gpu   : game frames=12973 fps=34.89 interval=5.016s
+10-19 17:44:08.023  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=26 us=10685 generation=13058 write-faults=0 watch-misses=0
+10-19 17:44:10.841  5330  6074 I d3gpu   : game frames=13147 fps=34.76 interval=5.006s
+10-19 17:44:12.156  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e059011a450
+10-19 17:44:12.156  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=27515 host=27515
+10-19 17:44:12.383  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:44:14.885  5330  5760 I d3audio : play id=0 frames=13928448 nonzero=12825286 queued=3 xruns=0
+10-19 17:44:15.425  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=34 us=16144 generation=13314 write-faults=0 watch-misses=0
+10-19 17:44:15.865  5330  6074 I d3gpu   : game frames=13321 fps=34.63 interval=5.024s
+10-19 17:44:20.888  5330  6074 I d3gpu   : game frames=13494 fps=34.44 interval=5.023s
+10-19 17:44:22.849  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=26 us=9343 generation=13570 write-faults=0 watch-misses=0
+10-19 17:44:24.894  5330  5760 I d3audio : play id=0 frames=14408832 nonzero=13305670 queued=3 xruns=0
+10-19 17:44:25.899  5330  6074 I d3gpu   : game frames=13666 fps=34.33 interval=5.010s
+10-19 17:44:29.937  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:44:30.457  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=29 us=13057 generation=13826 write-faults=0 watch-misses=0
+10-19 17:44:30.903  5330  6074 I d3gpu   : game frames=13833 fps=33.37 interval=5.004s
+10-19 17:44:34.897  5330  5760 I d3audio : play id=0 frames=14889024 nonzero=13785862 queued=3 xruns=0
+10-19 17:44:35.909  5330  6074 I d3gpu   : game frames=14004 fps=34.15 interval=5.007s
+10-19 17:44:37.950  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=26 us=11010 generation=14082 write-faults=0 watch-misses=0
+10-19 17:44:40.932  5330  6074 I d3gpu   : game frames=14175 fps=34.05 interval=5.022s
+10-19 17:44:44.903  5330  5760 I d3audio : play id=0 frames=15369216 nonzero=14266054 queued=3 xruns=0
+10-19 17:44:45.464  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=14282 generation=14338 write-faults=0 watch-misses=0
+10-19 17:44:45.940  5330  6074 I d3gpu   : game frames=14346 fps=34.14 interval=5.009s
+10-19 17:44:47.292  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590116f48
+10-19 17:44:47.292  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=30016 host=30016
+10-19 17:44:47.528  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:44:50.949  5330  6074 I d3gpu   : game frames=14516 fps=33.94 interval=5.009s
+10-19 17:44:52.992  5330  5449 I d3gpu   : cache-scan: pages=27435 changed=25 us=9437 generation=14594 write-faults=0 watch-misses=0
+10-19 17:44:54.910  5330  5760 I d3audio : play id=0 frames=15849600 nonzero=14746438 queued=3 xruns=0
+10-19 17:44:55.956  5330  6074 I d3gpu   : game frames=14685 fps=33.75 interval=5.007s
+10-19 17:45:00.583  5330  5449 I d3gpu   : cache-scan: pages=27433 changed=23 us=10310 generation=14850 write-faults=0 watch-misses=0
+10-19 17:45:00.980  5330  6074 I d3gpu   : game frames=14855 fps=33.84 interval=5.024s
+10-19 17:45:04.913  5330  5760 I d3audio : play id=0 frames=16329792 nonzero=15226630 queued=3 xruns=0
+10-19 17:45:05.271  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:45:05.985  5330  6074 I d3gpu   : game frames=15024 fps=33.77 interval=5.005s
+10-19 17:45:08.136  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=12412 generation=15106 write-faults=0 watch-misses=0
+10-19 17:45:11.009  5330  6074 I d3gpu   : game frames=15194 fps=33.84 interval=5.024s
+10-19 17:45:14.918  5330  5760 I d3audio : play id=0 frames=16809984 nonzero=15706822 queued=3 xruns=0
+10-19 17:45:15.707  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=41 us=13848 generation=15362 write-faults=0 watch-misses=0
+10-19 17:45:16.014  5330  6074 I d3gpu   : game frames=15364 fps=33.96 interval=5.006s
+10-19 17:45:21.040  5330  6074 I d3gpu   : game frames=15533 fps=33.63 interval=5.026s
+10-19 17:45:22.792  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590113a68
+10-19 17:45:22.792  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=32518 host=32518
+10-19 17:45:23.020  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:45:23.295  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=28 us=13060 generation=15618 write-faults=0 watch-misses=0
+10-19 17:45:24.926  5330  5760 I d3audio : play id=0 frames=17290368 nonzero=16187206 queued=3 xruns=0
+10-19 17:45:26.052  5330  6074 I d3gpu   : game frames=15702 fps=33.72 interval=5.012s
+10-19 17:45:30.874  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=9022 generation=15874 write-faults=0 watch-misses=0
+10-19 17:45:31.069  5330  6074 I d3gpu   : game frames=15872 fps=33.89 interval=5.017s
+10-19 17:45:34.929  5330  5760 I d3audio : play id=0 frames=17770560 nonzero=16667398 queued=3 xruns=0
+10-19 17:45:36.082  5330  6074 I d3gpu   : game frames=16041 fps=33.71 interval=5.013s
+10-19 17:45:38.470  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=9018 generation=16130 write-faults=0 watch-misses=0
+10-19 17:45:40.810  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:45:41.105  5330  6074 I d3gpu   : game frames=16210 fps=33.64 interval=5.023s
+10-19 17:45:44.936  5330  5760 I d3audio : play id=0 frames=18250752 nonzero=17147590 queued=3 xruns=0
+10-19 17:45:46.096  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=9376 generation=16386 write-faults=0 watch-misses=0
+10-19 17:45:46.111  5330  6074 I d3gpu   : game frames=16378 fps=33.56 interval=5.006s
+10-19 17:45:51.131  5330  6074 I d3gpu   : game frames=16543 fps=32.87 interval=5.020s
+10-19 17:45:53.853  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=24 us=11500 generation=16642 write-faults=0 watch-misses=0
+10-19 17:45:54.941  5330  5760 I d3audio : play id=0 frames=18731136 nonzero=17627974 queued=3 xruns=0
+10-19 17:45:56.136  5330  6074 I d3gpu   : game frames=16710 fps=33.37 interval=5.005s
+10-19 17:45:58.572  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590110588
+10-19 17:45:58.572  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=35020 host=35020
+10-19 17:45:58.814  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:46:01.138  5330  6074 I d3gpu   : game frames=16878 fps=33.59 interval=5.002s
+10-19 17:46:01.476  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=24 us=13047 generation=16898 write-faults=0 watch-misses=0
+10-19 17:46:04.952  5330  5760 I d3audio : play id=0 frames=19211328 nonzero=18108166 queued=3 xruns=0
+10-19 17:46:06.161  5330  6074 I d3gpu   : game frames=17047 fps=33.64 interval=5.024s
+10-19 17:46:09.091  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=9350 generation=17154 write-faults=0 watch-misses=0
+10-19 17:46:11.173  5330  6074 I d3gpu   : game frames=17215 fps=33.52 interval=5.011s
+10-19 17:46:14.956  5330  5760 I d3audio : play id=0 frames=19691520 nonzero=18588358 queued=3 xruns=0
+10-19 17:46:16.177  5330  6074 I d3gpu   : game frames=17384 fps=33.77 interval=5.004s
+10-19 17:46:16.651  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:46:16.704  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=12730 generation=17410 write-faults=0 watch-misses=0
+10-19 17:46:21.187  5330  6074 I d3gpu   : game frames=17551 fps=33.33 interval=5.010s
+10-19 17:46:24.343  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=10876 generation=17666 write-faults=0 watch-misses=0
+10-19 17:46:24.962  5330  5760 I d3audio : play id=0 frames=20171904 nonzero=19068742 queued=3 xruns=0
+10-19 17:46:26.221  5330  6074 I d3gpu   : game frames=17720 fps=33.57 interval=5.034s
+10-19 17:46:31.246  5330  6074 I d3gpu   : game frames=17887 fps=33.23 interval=5.025s
+10-19 17:46:32.034  5330  5449 I d3gpu   : cache-scan: pages=27429 changed=17 us=10148 generation=17922 write-faults=0 watch-misses=0
+10-19 17:46:34.356  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e059011c0b0
+10-19 17:46:34.356  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=37521 host=37521
+10-19 17:46:34.590  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:46:34.965  5330  5760 I d3audio : play id=0 frames=20652096 nonzero=19548934 queued=3 xruns=0
+10-19 17:46:36.269  5330  6074 I d3gpu   : game frames=18056 fps=33.64 interval=5.023s
+10-19 17:46:39.674  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=12024 generation=18178 write-faults=0 watch-misses=0
+10-19 17:46:41.279  5330  6074 I d3gpu   : game frames=18223 fps=33.34 interval=5.010s
+10-19 17:46:44.972  5330  5760 I d3audio : play id=0 frames=21132288 nonzero=20029126 queued=3 xruns=0
+10-19 17:46:46.287  5330  6074 I d3gpu   : game frames=18390 fps=33.35 interval=5.008s
+10-19 17:46:47.339  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=24 us=14123 generation=18434 write-faults=0 watch-misses=0
+10-19 17:46:51.290  5330  6074 I d3gpu   : game frames=18557 fps=33.38 interval=5.003s
+10-19 17:46:52.588  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:46:54.979  5330  5760 I d3audio : play id=0 frames=21612672 nonzero=20509510 queued=3 xruns=0
+10-19 17:46:55.017  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=24 us=10797 generation=18690 write-faults=0 watch-misses=0
+10-19 17:46:56.316  5330  6074 I d3gpu   : game frames=18725 fps=33.42 interval=5.026s
+10-19 17:47:01.328  5330  6074 I d3gpu   : game frames=18892 fps=33.31 interval=5.013s
+10-19 17:47:02.686  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=34 us=9823 generation=18946 write-faults=0 watch-misses=0
+10-19 17:47:04.982  5330  5760 I d3audio : play id=0 frames=22092864 nonzero=20989702 queued=3 xruns=0
+10-19 17:47:06.345  5330  6074 I d3gpu   : game frames=19060 fps=33.49 interval=5.017s
+10-19 17:47:10.306  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590118bd0
+10-19 17:47:10.306  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=40023 host=40023
+10-19 17:47:10.348  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=10914 generation=19202 write-faults=0 watch-misses=0
+10-19 17:47:10.539  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:47:11.349  5330  6074 I d3gpu   : game frames=19227 fps=33.38 interval=5.003s
+10-19 17:47:14.985  5330  5760 I d3audio : play id=0 frames=22573056 nonzero=21469894 queued=3 xruns=0
+10-19 17:47:16.368  5330  6074 I d3gpu   : game frames=19395 fps=33.47 interval=5.019s
+10-19 17:47:18.000  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=11625 generation=19458 write-faults=0 watch-misses=0
+10-19 17:47:21.370  5330  6074 I d3gpu   : game frames=19561 fps=33.19 interval=5.002s
+10-19 17:47:24.998  5330  5760 I d3audio : play id=0 frames=23053440 nonzero=21950278 queued=3 xruns=0
+10-19 17:47:25.722  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=13178 generation=19714 write-faults=0 watch-misses=0
+10-19 17:47:26.375  5330  6074 I d3gpu   : game frames=19727 fps=33.17 interval=5.005s
+10-19 17:47:28.568  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:47:31.390  5330  6074 I d3gpu   : game frames=19894 fps=33.30 interval=5.015s
+10-19 17:47:33.422  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=10971 generation=19970 write-faults=0 watch-misses=0
+10-19 17:47:35.002  5330  5760 I d3audio : play id=0 frames=23533632 nonzero=22430470 queued=3 xruns=0
+10-19 17:47:36.415  5330  6074 I d3gpu   : game frames=20061 fps=33.23 interval=5.025s
+10-19 17:47:41.153  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=14790 generation=20226 write-faults=0 watch-misses=0
+10-19 17:47:41.442  5330  6074 I d3gpu   : game frames=20225 fps=32.63 interval=5.027s
+10-19 17:47:45.006  5330  5760 I d3audio : play id=0 frames=24013824 nonzero=22910662 queued=3 xruns=0
+10-19 17:47:46.449  5330  6074 I d3gpu   : game frames=20391 fps=33.15 interval=5.007s
+10-19 17:47:46.479  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e05901156f0
+10-19 17:47:46.479  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=42525 host=42525
+10-19 17:47:46.714  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:47:48.923  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=24 us=12989 generation=20482 write-faults=0 watch-misses=0
+10-19 17:47:51.451  5330  6074 I d3gpu   : game frames=20557 fps=33.19 interval=5.002s
+10-19 17:47:55.019  5330  5760 I d3audio : play id=0 frames=24494400 nonzero=23391238 queued=3 xruns=0
+10-19 17:47:56.478  5330  6074 I d3gpu   : game frames=20724 fps=33.22 interval=5.027s
+10-19 17:47:56.641  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=24 us=12649 generation=20738 write-faults=0 watch-misses=0
+10-19 17:48:01.505  5330  6074 I d3gpu   : game frames=20890 fps=33.02 interval=5.028s
+10-19 17:48:04.370  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=11312 generation=20994 write-faults=0 watch-misses=0
+10-19 17:48:04.812  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:48:05.018  5330  5760 I d3audio : play id=0 frames=24974400 nonzero=23871238 queued=3 xruns=0
+10-19 17:48:06.508  5330  6074 I d3gpu   : game frames=21048 fps=31.58 interval=5.003s
+10-19 17:48:11.517  5330  6074 I d3gpu   : game frames=21214 fps=33.14 interval=5.009s
+10-19 17:48:12.348  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=25 us=9136 generation=21250 write-faults=0 watch-misses=0
+10-19 17:48:15.022  5330  5760 I d3audio : play id=0 frames=25454592 nonzero=24351430 queued=3 xruns=0
+10-19 17:48:16.535  5330  6074 I d3gpu   : game frames=21380 fps=33.08 interval=5.018s
+10-19 17:48:20.071  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=26 us=14689 generation=21506 write-faults=0 watch-misses=0
+10-19 17:48:21.550  5330  6074 I d3gpu   : game frames=21547 fps=33.30 interval=5.014s
+10-19 17:48:22.925  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590112210
+10-19 17:48:22.926  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=45027 host=45027
+10-19 17:48:23.162  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:48:25.030  5330  5760 I d3audio : play id=0 frames=25934976 nonzero=24831814 queued=3 xruns=0
+10-19 17:48:26.568  5330  6074 I d3gpu   : game frames=21713 fps=33.08 interval=5.018s
+10-19 17:48:27.808  5330  5449 I d3gpu   : cache-scan: pages=27434 changed=29 us=14674 generation=21762 write-faults=0 watch-misses=0
+10-19 17:48:31.578  5330  6074 I d3gpu   : game frames=21878 fps=32.93 interval=5.010s
+10-19 17:48:35.034  5330  5760 I d3audio : play id=0 frames=26415168 nonzero=25312006 queued=3 xruns=0
+10-19 17:48:35.570  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=24 us=11814 generation=22018 write-faults=0 watch-misses=0
+10-19 17:48:36.589  5330  6074 I d3gpu   : game frames=22043 fps=32.93 interval=5.011s
+10-19 17:48:41.375  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:48:41.589  5330  6074 I d3gpu   : game frames=22207 fps=32.80 interval=5.000s
+10-19 17:48:43.362  5330  5449 I d3gpu   : cache-scan: pages=27452 changed=24 us=8984 generation=22274 write-faults=0 watch-misses=0
+10-19 17:48:45.038  5330  5760 I d3audio : play id=0 frames=26895360 nonzero=25792198 queued=3 xruns=0
+10-19 17:48:46.598  5330  6074 I d3gpu   : game frames=22372 fps=32.94 interval=5.008s
+10-19 17:48:51.090  5330  5449 I d3gpu   : cache-scan: pages=27436 changed=35 us=12883 generation=22530 write-faults=0 watch-misses=0
+10-19 17:48:51.618  5330  6074 I d3gpu   : game frames=22539 fps=33.26 interval=5.021s
+10-19 17:48:55.045  5330  5760 I d3audio : play id=0 frames=27375744 nonzero=26272582 queued=3 xruns=0
+10-19 17:48:56.620  5330  6074 I d3gpu   : game frames=22679 fps=27.99 interval=5.002s
+10-19 17:49:00.538  5330  5449 I d3gpu   : cache-scan: pages=27590 changed=26 us=10801 generation=22786 write-faults=0 watch-misses=0
+10-19 17:49:01.255  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=13 flags=0x104 first=0x80004e059011dd38
+10-19 17:49:01.260  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=13 syncpoint=1 guest=47528 host=47528
+10-19 17:49:01.562  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:49:01.635  5330  6074 I d3gpu   : game frames=22802 fps=24.52 interval=5.015s
+10-19 17:49:05.050  5330  5760 I d3audio : play id=0 frames=27855936 nonzero=26752774 queued=3 xruns=0
+10-19 17:49:06.662  5330  6074 I d3gpu   : game frames=22926 fps=24.67 interval=5.026s
+10-19 17:49:10.717  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=26 us=13585 generation=23042 write-faults=0 watch-misses=0
+10-19 17:49:11.685  5330  6074 I d3gpu   : game frames=23064 fps=27.47 interval=5.024s
+10-19 17:49:15.058  5330  5760 I d3audio : play id=0 frames=28336320 nonzero=27233158 queued=3 xruns=0
+10-19 17:49:16.690  5330  6074 I d3gpu   : game frames=23222 fps=31.57 interval=5.005s
+10-19 17:49:18.846  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=39 us=14836 generation=23298 write-faults=0 watch-misses=0
+10-19 17:49:21.697  5330  6074 I d3gpu   : game frames=23380 fps=31.56 interval=5.007s
+10-19 17:49:22.320  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:49:25.065  5330  5760 I d3audio : play id=0 frames=28816704 nonzero=27713542 queued=3 xruns=0
+10-19 17:49:26.704  5330  6074 I d3gpu   : game frames=23539 fps=31.75 interval=5.008s
+10-19 17:49:26.905  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=26 us=11663 generation=23554 write-faults=0 watch-misses=0
+10-19 17:49:31.732  5330  6074 I d3gpu   : game frames=23700 fps=32.02 interval=5.028s
+10-19 17:49:34.930  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=26 us=11212 generation=23810 write-faults=0 watch-misses=0
+10-19 17:49:35.065  5330  5760 I d3audio : play id=0 frames=29296704 nonzero=28193542 queued=3 xruns=0
+10-19 17:49:36.752  5330  6074 I d3gpu   : game frames=23860 fps=31.87 interval=5.020s
+10-19 17:49:40.882  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e059011a858
+10-19 17:49:40.882  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=50030 host=50030
+10-19 17:49:41.125  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:49:41.773  5330  6074 I d3gpu   : game frames=24021 fps=32.06 interval=5.021s
+10-19 17:49:42.932  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=27 us=14833 generation=24066 write-faults=0 watch-misses=0
+10-19 17:49:45.070  5330  5760 I d3audio : play id=0 frames=29776896 nonzero=28673734 queued=3 xruns=0
+10-19 17:49:46.783  5330  6074 I d3gpu   : game frames=24175 fps=30.74 interval=5.010s
+10-19 17:49:51.132  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=27 us=11647 generation=24322 write-faults=0 watch-misses=0
+10-19 17:49:51.810  5330  6074 I d3gpu   : game frames=24335 fps=31.83 interval=5.027s
+10-19 17:49:55.077  5330  5760 I d3audio : play id=0 frames=30257280 nonzero=29154118 queued=3 xruns=0
+10-19 17:49:56.833  5330  6074 I d3gpu   : game frames=24495 fps=31.85 interval=5.023s
+10-19 17:49:59.178  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=27 us=12101 generation=24578 write-faults=0 watch-misses=0
+10-19 17:50:00.141  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:50:01.852  5330  6074 I d3gpu   : game frames=24655 fps=31.88 interval=5.018s
+10-19 17:50:05.082  5330  5760 I d3audio : play id=0 frames=30737472 nonzero=29634310 queued=3 xruns=0
+10-19 17:50:06.877  5330  6074 I d3gpu   : game frames=24817 fps=32.24 interval=5.025s
+10-19 17:50:07.151  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=26 us=12291 generation=24834 write-faults=0 watch-misses=0
+10-19 17:50:11.888  5330  6074 I d3gpu   : game frames=24976 fps=31.73 interval=5.011s
+10-19 17:50:15.085  5330  5760 I d3audio : play id=0 frames=31217664 nonzero=30114502 queued=3 xruns=0
+10-19 17:50:15.192  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=26 us=11509 generation=25090 write-faults=0 watch-misses=0
+10-19 17:50:16.910  5330  6074 I d3gpu   : game frames=25136 fps=31.86 interval=5.022s
+10-19 17:50:18.653  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590117378
+10-19 17:50:18.653  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=52532 host=52532
+10-19 17:50:18.914  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:50:21.929  5330  6074 I d3gpu   : game frames=25291 fps=30.89 interval=5.019s
+10-19 17:50:23.410  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=45 us=14106 generation=25346 write-faults=0 watch-misses=0
+10-19 17:50:25.097  5330  5760 I d3audio : play id=0 frames=31698048 nonzero=30594886 queued=3 xruns=0
+10-19 17:50:26.961  5330  6074 I d3gpu   : game frames=25451 fps=31.80 interval=5.032s
+10-19 17:50:31.408  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=27 us=14246 generation=25602 write-faults=0 watch-misses=0
+10-19 17:50:31.985  5330  6074 I d3gpu   : game frames=25612 fps=32.05 interval=5.024s
+10-19 17:50:35.098  5330  5760 I d3audio : play id=0 frames=32178240 nonzero=31075078 queued=3 xruns=0
+10-19 17:50:36.991  5330  6074 I d3gpu   : game frames=25771 fps=31.76 interval=5.007s
+10-19 17:50:37.905  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:50:39.455  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=27 us=11383 generation=25858 write-faults=0 watch-misses=0
+10-19 17:50:41.992  5330  6074 I d3gpu   : game frames=25930 fps=31.80 interval=5.001s
+10-19 17:50:45.103  5330  5760 I d3audio : play id=0 frames=32658432 nonzero=31555270 queued=3 xruns=0
+10-19 17:50:47.000  5330  6074 I d3gpu   : game frames=26090 fps=31.95 interval=5.008s
+10-19 17:50:47.483  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=27 us=9386 generation=26114 write-faults=0 watch-misses=0
+10-19 17:50:52.005  5330  6074 I d3gpu   : game frames=26249 fps=31.76 interval=5.006s
+10-19 17:50:55.113  5330  5760 I d3audio : play id=0 frames=33138816 nonzero=32035654 queued=3 xruns=0
+10-19 17:50:55.543  5330  5449 I d3gpu   : cache-scan: pages=28626 changed=9 us=9432 generation=26370 write-faults=0 watch-misses=0
+10-19 17:50:56.508  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590113e70
+10-19 17:50:56.508  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=55033 host=55033
+10-19 17:50:56.756  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:50:57.015  5330  6074 I d3gpu   : game frames=26408 fps=31.74 interval=5.009s
+10-19 17:51:02.037  5330  6074 I d3gpu   : game frames=26568 fps=31.86 interval=5.022s
+10-19 17:51:03.585  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=45 us=15645 generation=26626 write-faults=0 watch-misses=0
+10-19 17:51:05.122  5330  5760 I d3audio : play id=0 frames=33619072 nonzero=32515910 queued=3 xruns=0
+10-19 17:51:07.054  5330  6074 I d3gpu   : game frames=26729 fps=32.09 interval=5.017s
+10-19 17:51:11.584  5330  5449 I d3gpu   : cache-scan: pages=28643 changed=27 us=11559 generation=26882 write-faults=0 watch-misses=0
+10-19 17:51:12.078  5330  6074 I d3gpu   : game frames=26889 fps=31.85 interval=5.024s
+10-19 17:51:15.125  5330  5760 I d3audio : play id=0 frames=34099264 nonzero=32996102 queued=3 xruns=0
+10-19 17:51:15.568  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:51:17.107  5330  6074 I d3gpu   : game frames=27031 fps=28.24 interval=5.029s
+10-19 17:51:21.265  5330  5449 I d3gpu   : cache-scan: pages=29350 changed=33 us=14732 generation=27138 write-faults=0 watch-misses=0
+10-19 17:51:22.110  5330  6074 I d3gpu   : game frames=27152 fps=24.18 interval=5.004s
+10-19 17:51:25.339  5330  5760 I d3audio : play id=0 frames=34579456 nonzero=33476294 queued=3 xruns=0
+10-19 17:51:27.131  5330  6074 I d3gpu   : game frames=27274 fps=24.30 interval=5.021s
+10-19 17:51:31.021  5330  5449 I d3gpu   : cache-scan: pages=29469 changed=29 us=9872 generation=27394 write-faults=0 watch-misses=0
+10-19 17:51:32.142  5330  6074 I d3gpu   : game frames=27419 fps=28.94 interval=5.010s
+10-19 17:51:35.347  5330  5760 I d3audio : play id=0 frames=35059840 nonzero=33956678 queued=3 xruns=0
+10-19 17:51:37.169  5330  6074 I d3gpu   : game frames=27570 fps=30.03 interval=5.028s
+10-19 17:51:37.903  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590110990
+10-19 17:51:37.903  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=57535 host=57535
+10-19 17:51:38.166  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:51:39.550  5330  5449 I d3gpu   : cache-scan: pages=29453 changed=13 us=10782 generation=27650 write-faults=0 watch-misses=0
+10-19 17:51:42.173  5330  6074 I d3gpu   : game frames=27722 fps=30.38 interval=5.004s
+10-19 17:51:45.350  5330  5760 I d3audio : play id=0 frames=35540032 nonzero=34436870 queued=3 xruns=0
+10-19 17:51:47.189  5330  6074 I d3gpu   : game frames=27873 fps=30.10 interval=5.016s
+10-19 17:51:48.011  5330  5449 I d3gpu   : cache-scan: pages=29456 changed=16 us=15869 generation=27906 write-faults=0 watch-misses=0
+10-19 17:51:52.191  5330  6074 I d3gpu   : game frames=28024 fps=30.19 interval=5.001s
+10-19 17:51:55.354  5330  5760 I d3audio : play id=0 frames=36020224 nonzero=34917062 queued=3 xruns=0
+10-19 17:51:56.444  5330  5449 I d3gpu   : cache-scan: pages=29468 changed=28 us=9968 generation=28162 write-faults=0 watch-misses=0
+10-19 17:51:57.198  5330  6074 I d3gpu   : game frames=28177 fps=30.56 interval=5.007s
+10-19 17:51:57.951  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:52:02.210  5330  6074 I d3gpu   : game frames=28329 fps=30.33 interval=5.012s
+10-19 17:52:04.886  5330  5449 I d3gpu   : cache-scan: pages=29467 changed=27 us=14757 generation=28418 write-faults=0 watch-misses=0
+10-19 17:52:05.362  5330  5760 I d3audio : play id=0 frames=36500608 nonzero=35397446 queued=3 xruns=0
+10-19 17:52:07.228  5330  6074 I d3gpu   : game frames=28481 fps=30.29 interval=5.019s
+10-19 17:52:12.255  5330  6074 I d3gpu   : game frames=28633 fps=30.24 interval=5.026s
+10-19 17:52:13.318  5330  5449 I d3gpu   : cache-scan: pages=29469 changed=46 us=16329 generation=28674 write-faults=0 watch-misses=0
+10-19 17:52:15.366  5330  5760 I d3audio : play id=0 frames=36980800 nonzero=35877638 queued=3 xruns=0
+10-19 17:52:17.260  5330  6074 I d3gpu   : game frames=28784 fps=30.17 interval=5.005s
+10-19 17:52:17.523  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e059011c4e0
+10-19 17:52:17.523  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=60037 host=60037
+10-19 17:52:17.782  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:52:21.830  5330  5449 I d3gpu   : cache-scan: pages=29458 changed=18 us=14456 generation=28930 write-faults=0 watch-misses=0
+10-19 17:52:22.273  5330  6074 I d3gpu   : game frames=28935 fps=30.12 interval=5.013s
+10-19 17:52:25.370  5330  5760 I d3audio : play id=0 frames=37460992 nonzero=36357830 queued=3 xruns=0
+10-19 17:52:27.286  5330  6074 I d3gpu   : game frames=29087 fps=30.32 interval=5.013s
+10-19 17:52:30.301  5330  5449 I d3gpu   : cache-scan: pages=29469 changed=29 us=15302 generation=29186 write-faults=0 watch-misses=0
+10-19 17:52:32.287  5330  6074 I d3gpu   : game frames=29237 fps=29.99 interval=5.001s
+10-19 17:52:35.378  5330  5760 I d3audio : play id=0 frames=37941376 nonzero=36838214 queued=3 xruns=0
+10-19 17:52:37.311  5330  6074 I d3gpu   : game frames=29390 fps=30.45 interval=5.024s
+10-19 17:52:37.656  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:52:38.752  5330  5449 I d3gpu   : cache-scan: pages=29455 changed=15 us=15499 generation=29442 write-faults=0 watch-misses=0
+10-19 17:52:42.331  5330  6074 I d3gpu   : game frames=29543 fps=30.48 interval=5.020s
+10-19 17:52:45.384  5330  5760 I d3audio : play id=0 frames=38421568 nonzero=37318406 queued=3 xruns=0
+10-19 17:52:47.150  5330  5449 I d3gpu   : cache-scan: pages=29469 changed=30 us=15161 generation=29698 write-faults=0 watch-misses=0
+10-19 17:52:47.333  5330  6074 I d3gpu   : game frames=29695 fps=30.39 interval=5.002s
+10-19 17:52:52.361  5330  6074 I d3gpu   : game frames=29848 fps=30.43 interval=5.028s
+10-19 17:52:55.386  5330  5760 I d3audio : play id=0 frames=38901760 nonzero=37798598 queued=3 xruns=0
+10-19 17:52:55.551  5330  5449 I d3gpu   : cache-scan: pages=29469 changed=29 us=16271 generation=29954 write-faults=0 watch-misses=0
+10-19 17:52:57.107  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590118fd8
+10-19 17:52:57.107  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=62538 host=62538
+10-19 17:52:57.371  5330  6074 I d3gpu   : game frames=30000 fps=30.34 interval=5.010s
+10-19 17:52:57.371  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:53:02.387  5330  6074 I d3gpu   : game frames=30149 fps=29.71 interval=5.016s
+10-19 17:53:04.126  5330  5449 I d3gpu   : cache-scan: pages=29469 changed=46 us=15155 generation=30210 write-faults=0 watch-misses=0
+10-19 17:53:05.394  5330  5760 I d3audio : play id=0 frames=39382144 nonzero=38278982 queued=3 xruns=0
+10-19 17:53:07.389  5330  6074 I d3gpu   : game frames=30301 fps=30.39 interval=5.002s
+10-19 17:53:12.419  5330  6074 I d3gpu   : game frames=30454 fps=30.42 interval=5.030s
+10-19 17:53:12.529  5330  5449 I d3gpu   : cache-scan: pages=29469 changed=29 us=11478 generation=30466 write-faults=0 watch-misses=0
+10-19 17:53:15.398  5330  5760 I d3audio : play id=0 frames=39862336 nonzero=38759174 queued=3 xruns=0
+10-19 17:53:17.244  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:53:17.421  5330  6074 I d3gpu   : game frames=30605 fps=30.19 interval=5.001s
+10-19 17:53:22.204  5330  5449 I d3gpu   : cache-scan: pages=29989 changed=32 us=15156 generation=30722 write-faults=0 watch-misses=0
+10-19 17:53:22.435  5330  6074 I d3gpu   : game frames=30720 fps=22.93 interval=5.015s
+10-19 17:53:25.402  5330  5760 I d3audio : play id=0 frames=40342528 nonzero=39239366 queued=3 xruns=0
+10-19 17:53:27.463  5330  6074 I d3gpu   : game frames=30854 fps=26.65 interval=5.028s
+10-19 17:53:32.470  5330  6074 I d3gpu   : game frames=30963 fps=21.77 interval=5.007s
+10-19 17:53:32.778  5330  5449 I d3gpu   : cache-scan: pages=31132 changed=35 us=18874 generation=30978 write-faults=0 watch-misses=0
+10-19 17:53:35.411  5330  5760 I d3audio : play id=0 frames=40822912 nonzero=39719750 queued=3 xruns=0
+10-19 17:53:37.493  5330  6074 I d3gpu   : game frames=31068 fps=20.90 interval=5.023s
+10-19 17:53:42.516  5330  6074 I d3gpu   : game frames=31175 fps=21.30 interval=5.023s
+10-19 17:53:43.241  5330  6074 I d3gpu   : nv-submit: dispatch channel=1 bind=2 count=12 flags=0x104 first=0x80004e0590115af8
+10-19 17:53:43.241  5330  6074 I d3gpu   : nv-submit: submitted channel=1 count=12 syncpoint=1 guest=65040 host=65040
+10-19 17:53:43.575  5330  6074 I d3gpu   : guest-present: composited 1600x900 stride=1600 nvmap=26 cpu=0x555c080000 device=0x48087000 fences=1
+10-19 17:53:44.782  5330  5449 I d3gpu   : cache-scan: pages=29977 changed=35 us=12440 generation=31234 write-faults=0 watch-misses=0
+10-19 17:53:45.416  5330  5760 I d3audio : play id=0 frames=41303104 nonzero=40199942 queued=3 xruns=0
+10-19 17:53:47.531  5330  6074 I d3gpu   : game frames=31285 fps=21.93 interval=5.016s
+10-19 17:53:52.545  5330  6074 I d3gpu   : game frames=31392 fps=21.34 interval=5.014s

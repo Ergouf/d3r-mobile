@@ -1,0 +1,3 @@
+10-19 17:05:06.304 32369 32415 I D3Host  : t32415: sig 11 CPU write-watch kernel interceptor installed
+10-19 17:05:06.375 32369 32415 I d3gpu   : CPU write watch: enabled
+10-19 17:06:58.430 32369 32497 E D3Host  : critical section 0x6b1738f938 wait failed: 0xe401

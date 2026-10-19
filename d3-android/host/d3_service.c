@@ -1,7 +1,10 @@
 #define _GNU_SOURCE
+#include <pthread.h>
 
 #include "d3_service.h"
 #include "d3_service_names.h"
+#include "d3_audio.h"
+#include "d3_content.h"
 
 #include <android/log.h>
 #include <errno.h>
@@ -13,6 +16,7 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -25,6 +29,10 @@
 #define CMIF_OUT 0x4F434653u
 #define MESSAGE_BYTES 0x100
 #define MESSAGE_WORDS (MESSAGE_BYTES / 4)
+#include "d3_nvdrv.h"
+#ifdef D3_WITH_GPU
+#include "../gpu/host/gpu_bridge.h"
+#endif
 
 /* Horizon result encoding: module in bits 0..8, description in bits 9..21.
    nn::Result treats any non zero value as a failure (nnResultIsFailure). */
@@ -33,7 +41,8 @@
 enum {
     PORT_NONE = 0, PORT_SM, PORT_FSP, PORT_LM, PORT_LOGGER, PORT_OFFLINE,
     PORT_UNKNOWN, PORT_SET, PORT_TIME, PORT_TIME_ZONE, PORT_NVDRV, PORT_VI_MGR, PORT_VI_APP,
-    PORT_HID, PORT_AOC, PORT_ACCOUNT
+    PORT_HID, PORT_AOC, PORT_ACCOUNT, PORT_HID_APPLET_RESOURCE, PORT_APM, PORT_APM_SESSION,
+    PORT_BINDER, PORT_AUDOUT, PORT_AUDIO_OUT, PORT_AUDIN, PORT_FRIEND, PORT_HID_VIBRATION
 };
 
 #define HANDLE_SLOTS 0x400
@@ -46,9 +55,11 @@ static int g_log_tried;
 static uint32_t g_loud;
 static uint32_t g_replies;
 static uint32_t g_quiet;
-static uint32_t g_last_result;
+static _Thread_local uint32_t g_last_result;
 static uint64_t g_last_signature;
 static uint32_t g_last_repeats;
+static uint32_t g_cmif_traces;
+static uint32_t g_nifm_poll_logs;
 
 /* Keep the device log from growing without limit: a long run appends a lot. */
 #define LOG_MAX_BYTES (64u * 1024u * 1024u)
@@ -191,6 +202,11 @@ int d3_handle_close(uint32_t handle) {
         return 1;
     if (g_obj[index].kind == D3_OBJ_SESSION)
         domain_close_session(handle);
+    if (g_obj[index].kind == D3_OBJ_SESSION && g_obj[index].arg == PORT_AUDIO_OUT) {
+        unsigned audio_id = 0;
+        if (sscanf(g_obj[index].name, "audio-out-%u", &audio_id) == 1)
+            d3_audio_close(audio_id);
+    }
     if (g_obj[index].kind == D3_OBJ_EVENT) {
         extern void d3_event_on_close(uint32_t handle);
         d3_event_on_close(handle);
@@ -215,6 +231,12 @@ void d3_handle_dump(void) {
 /* -------------------------------------------------------------------- ports */
 
 static int port_kind(const char *name) {
+    if (strcmp(name, "friend:u") == 0)
+        return PORT_FRIEND;
+    if (strcmp(name, "audin:u") == 0)
+        return PORT_AUDIN;
+    if (strcmp(name, "audout:u") == 0)
+        return PORT_AUDOUT;
     if (strcmp(name, "sm:") == 0)
         return PORT_SM;
     if (strcmp(name, "fsp-srv") == 0)
@@ -225,10 +247,16 @@ static int port_kind(const char *name) {
         return PORT_SET;
     if (strcmp(name, "nvdrv") == 0)
         return PORT_NVDRV;
+    if (strcmp(name, "dispdrv") == 0)
+        return PORT_BINDER;
     if (strcmp(name, "hid") == 0)
         return PORT_HID;
     if (strcmp(name, "aoc:u") == 0)
         return PORT_AOC;
+    if (strcmp(name, "apm") == 0)
+        return PORT_APM;
+    if (strcmp(name, "apm-session") == 0)
+        return PORT_APM_SESSION;
     /* The engine asks for "acc:u0", not "account": nn::account maps on to the
        acc:uN ports, so both spellings have to select the account service. */
     if (strncmp(name, "account", 7) == 0 || strncmp(name, "acc:", 4) == 0)
@@ -256,9 +284,30 @@ static int port_kind(const char *name) {
 #define D3_IF_VI_APP 0x10005
 #define D3_IF_ACCOUNT 0x10006
 #define D3_IF_NIFM 0x10009
+#define D3_IF_HID 0x1000a
+#define D3_IF_HID_APPLET_RESOURCE 0x1000b
+#define D3_IF_SAVE_FILESYSTEM 0x1000c
+#define D3_IF_APM_SESSION 0x10010
+#define D3_IF_NIFM_REQUEST 0x1000f
+#define D3_IF_NFP_MANAGER 0x10011
+#define D3_IF_NFP_USER 0x10012
+#define D3_IF_BINDER 0x10013
+#define D3_IF_AUDOUT 0x10014
+#define D3_IF_AUDIO_OUT 0x10015
+#define D3_IF_AUDIN 0x10016
+#define D3_IF_FRIEND_CREATOR 0x10017
+#define D3_IF_FRIEND 0x10018
+#define D3_IF_FRIEND_NOTIFICATION 0x10019
+#define D3_IF_HID_VIBRATION 0x1001a
 
 /* Which interface object id 1 of a converted session stands for. */
 static int port_iface(const char *name) {
+    if (strcmp(name, "friend:u") == 0)
+        return D3_IF_FRIEND_CREATOR;
+    if (strcmp(name, "audin:u") == 0)
+        return D3_IF_AUDIN;
+    if (strcmp(name, "audout:u") == 0)
+        return D3_IF_AUDOUT;
     if (strcmp(name, "sm:") == 0)
         return D3_IF_SM;
     if (strcmp(name, "appletOE") == 0)
@@ -275,18 +324,28 @@ static int port_iface(const char *name) {
         return D3_IF_LOGGER;
     if (strcmp(name, "apm") == 0)
         return D3_IF_APM;
+    if (strcmp(name, "apm-session") == 0)
+        return D3_IF_APM_SESSION;
     if (strcmp(name, "time:u") == 0)
         return D3_IF_TIME;
     if (strcmp(name, "ITimeZoneService") == 0)
         return D3_IF_TIME_ZONE;
+    if (strcmp(name, "hid") == 0)
+        return D3_IF_HID;
+    if (strcmp(name, "hid-applet") == 0)
+        return D3_IF_HID_APPLET_RESOURCE;
     if (strcmp(name, "nvdrv") == 0)
         return D3_IF_NVDRV;
+    if (strcmp(name, "dispdrv") == 0)
+        return D3_IF_BINDER;
     if (strncmp(name, "vi:", 3) == 0)
         return D3_IF_VI_MANAGER;
     if (strncmp(name, "account", 7) == 0 || strncmp(name, "acc:", 4) == 0)
         return D3_IF_ACCOUNT;
     if (strncmp(name, "nifm:", 5) == 0)
         return D3_IF_NIFM;
+    if (strcmp(name, "nfp:user") == 0)
+        return D3_IF_NFP_MANAGER;
     return D3_IF_NONE;
 }
 
@@ -315,6 +374,7 @@ typedef struct {
     uint32_t domain_command;/* 1 = SendMessage, 2 = CloseVirtualHandle */
     uint32_t domain_object;
     size_t magic;           /* word index of the CMIF payload */
+    size_t data_end;
     uint32_t command;
     size_t payload;         /* where a reply must put its CMIF payload */
     size_t handle_slot_out;
@@ -371,6 +431,7 @@ static int message_parse(Message *m, uint64_t address) {
         return -1;
     }
     const size_t raw_end = index + raw_words;
+    m->data_end = raw_end;
     m->frame = (index + 3u) & ~(size_t)3u;
     m->domain = 0;
     m->domain_command = 0;
@@ -405,6 +466,7 @@ static int message_parse(Message *m, uint64_t address) {
             return -1;
         }
         m->magic = m->frame + 4;
+        m->data_end = m->magic + data_bytes / 4u;
         m->domain = 1;
         m->domain_command = 1;
         m->domain_object = m->w[m->frame + 1];
@@ -419,26 +481,62 @@ static int message_parse(Message *m, uint64_t address) {
     return 0;
 }
 
+/* Full plain-word dump of one request/reply: the capped per-request logging in
+   send_sync cannot show a late request (the loud counter runs out long before the
+   boot stops), and a request the host cannot place needs its raw shape. */
+static void dump_message(const char *why, const Message *m, uint32_t handle) {
+    slog("%s handle=%#x name=%s kind=%d arg=%#" PRIx64 " domain_key=%#x", why, handle,
+         d3_handle_name(handle), d3_handle_kind(handle), d3_handle_arg(handle),
+         d3_handle_domain_key(handle));
+    slog("%s parse type=%u special=%d pid=%d copy=%u move=%u handle_slot=%zu desc_slot=%zu "
+         "frame=%zu magic=%zu domain=%d dcmd=%u dobj=%u command=%u payload=%zu",
+         why, m->type, m->has_special, m->has_pid, m->copy_handles, m->move_handles,
+         m->handle_slot, m->descriptor_slot, m->frame, m->magic, m->domain, m->domain_command,
+         m->domain_object, m->command, m->payload);
+    for (size_t base = 0; base + 4 <= 16; base += 4)
+        slog("%s w%zu: %#x %#x %#x %#x", why, base, m->w[base], m->w[base + 1], m->w[base + 2],
+             m->w[base + 3]);
+}
+
+/* Read a message the parser took for a domain SendMessage as the plain CMIF
+   request its payload really is: the parser only needs the domain shape, so a
+   request that carries handle words between the HIPC header and the CMIF magic
+   lands there too, and the object id it reports is then just another header word.
+   The CMIF payload, its magic and its command sit at frame + 4 either way. */
+static int message_plain_at(Message *m) {
+    const size_t magic = m->frame + 4;
+    const uint32_t counts = m->w[0] >> 16;
+    const size_t statics = counts & 0xfu;
+    const size_t sends = (counts >> 4) & 0xfu;
+    const size_t receives = (counts >> 8) & 0xfu;
+    const size_t exchanges = (counts >> 12) & 0xfu;
+    const size_t index =
+        m->descriptor_slot + 2u * statics + 3u * (sends + receives + exchanges);
+    const size_t raw_end = index + (m->w[1] & 0x3ffu);
+    if (magic + 9u > MESSAGE_WORDS || magic + 4u > raw_end || m->w[magic] != CMIF_IN)
+        return -1;
+    m->magic = magic;
+    m->domain = 0;
+    m->domain_command = 0;
+    m->domain_object = 0;
+    m->command = m->w[magic + 2];
+    return 0;
+}
+
 static void message_write(const Message *m) {
     memcpy((void *)(uintptr_t)m->address, m->w, MESSAGE_BYTES);
 }
 
 /* Replies describe their own handle/header shape; request buffer descriptors
-   are consumed server-side and must not appear in the reply header.
-   A reply handle lives in one of two special-header categories.  nn::sf's
-   generic CMIF client processors read the copy-handle slot (bits 1..4), while
-   nn::sm's GetService reply path reads the move-handle slot (bits 5..8); both
-   start at word 3 when the reply carries a single handle, so only the count
-   field differs. */
+   are consumed server-side and must not appear in the reply header. */
 enum { REPLY_COPY_HANDLE = 0, REPLY_MOVE_HANDLE = 1 };
 
 static void reply_prepare_handle(Message *m, uint32_t handles, uint32_t params, int domain,
                                  int category) {
     const uint32_t tag = m->w[0] & 0xffffu;
     const uint32_t token = m->w[m->magic + 3];
-    const bool special = m->has_special || handles != 0;
-    const bool pid = special && m->has_pid;
-    const size_t slot = 2 + (special ? 1u : 0u) + (pid ? 2u : 0u);
+    const bool special = handles != 0;
+    const size_t slot = 2 + (special ? 1u : 0u);
     const size_t end = slot + handles;
     const size_t frame = (end + 3u) & ~(size_t)3u;
     const size_t payload = frame + (domain ? 4u : 0u);
@@ -447,8 +545,7 @@ static void reply_prepare_handle(Message *m, uint32_t handles, uint32_t params, 
     m->w[0] = tag;
     m->w[1] = (special ? 0x80000000u : 0u) | (uint32_t)(payload + 4 + params);
     if (special)
-        m->w[2] = (pid ? 1u : 0u) |
-                  ((handles & 0xfu) << (category == REPLY_MOVE_HANDLE ? 5 : 1));
+        m->w[2] = (handles & 0xfu) << (category == REPLY_MOVE_HANDLE ? 5 : 1);
     m->w[payload] = CMIF_OUT;
     m->w[payload + 1] = 1;
     m->w[payload + 2] = 0;
@@ -463,9 +560,12 @@ static void reply_prepare(Message *m, uint32_t handles, uint32_t params, int dom
     reply_prepare_handle(m, handles, params, domain, REPLY_COPY_HANDLE);
 }
 
+static _Thread_local int g_dump_port;
+
 static void reply_send(Message *m) {
     if (g_replies < 6) {
-        g_replies++;
+        if (g_replies < 6)
+            g_replies++;
         slog("cmif-out magic=+%#zx words+0: %#x %#x %#x %#x %#x %#x %#x %#x %#x %#x %#x %#x "
              "%#x %#x %#x %#x",
              m->payload * 4, m->w[0], m->w[1], m->w[2], m->w[3], m->w[4], m->w[5], m->w[6], m->w[7],
@@ -476,14 +576,33 @@ static void reply_send(Message *m) {
     message_write(m);
 }
 
+static _Thread_local uint64_t g_current_buffer;
+
+uint32_t d3_service_last_result(void) {
+    return g_last_result;
+}
+
+uint64_t d3_service_current_buffer(void) {
+    return g_current_buffer;
+}
+
 static void reply_result(Message *m, uint32_t result) {
     reply_prepare(m, 0, 1, 0);
     m->w[m->payload + 2] = result;
     reply_send(m);
 }
 
-/* A session or shared-memory handle leaves the server as a move handle: the
-   client's sm/hipc path reads it from the move-handle slot. */
+static void reply_service_result(Message *message, uint32_t result) {
+    reply_prepare(message, 0, 0, message->domain);
+    message->w[message->payload + 2] = result;
+    reply_send(message);
+}
+
+static int message_arguments(const Message *message, size_t bytes) {
+    const size_t start = message->magic + 4u;
+    return start <= message->data_end && bytes <= (message->data_end - start) * 4u;
+}
+
 static void reply_handle(Message *m, uint32_t handle) {
     reply_prepare_handle(m, 1, 1, 0, REPLY_MOVE_HANDLE);
     m->w[m->handle_slot_out] = handle;
@@ -551,7 +670,7 @@ static void unsupported_reply(Message *m, int kind) {
 /* Set while a handler answers a command nobody implemented.  The svc dispatcher
    reads it once the handler returns and walks the guest stack then, because the
    call site's frame pointers are still live in the title's stack. */
-static int g_trace_request;
+static _Thread_local int g_trace_request;
 
 static void reply_unsupported(const Message *m, const char *port, uint32_t command, int kind) {
     g_trace_request = 1;
@@ -567,6 +686,9 @@ static void reply_unsupported(const Message *m, const char *port, uint32_t comma
 /* Log an unimplemented service command that the domain layer reached. */
 static void unsupported_command(Message *m, int iface, uint32_t command) {
     g_trace_request = 1;
+    static unsigned missing_reports;
+    if (missing_reports++ < 64)
+        slog("unsupported iface=%d command=%u (%s)", iface, command, command_name(iface, command));
     if (g_loud < 4096) {
         g_loud++;
         slog("unimplemented %s cmd=%#x (%s) args=%#x %#x %#x %#x", iface_name(iface), command,
@@ -800,7 +922,14 @@ static uint32_t set_write_language_codes(Message *m, size_t wants) {
         codes[index] = set_language_code(index);
     struct iovec local = { codes, (size_t)needed };
     struct iovec remote = { (void *)(uintptr_t)address, (size_t)needed };
-    if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != (ssize_t)needed) {
+#ifdef D3_WITH_GPU
+    d3_gpu_begin_cpu_write(address, needed);
+#endif
+    const ssize_t wrote = process_vm_writev(getpid(), &local, 1, &remote, 1, 0);
+#ifdef D3_WITH_GPU
+    d3_gpu_end_cpu_write();
+#endif
+    if (wrote != (ssize_t)needed) {
         slog("set cmd=%u: cannot write language codes to %#" PRIx64 " errno=%d", m->command,
              address, errno);
         return D3_RESULT(120, 1);
@@ -882,6 +1011,8 @@ typedef struct {
     uint32_t event;   /* ICommonStateGetter event handle handed to the guest */
     int out_of_focus_suspending; /* ISelfController::SetOutOfFocusSuspendingEnabled */
     int initialized; /* a service object the guest has been told is ready */
+    uint64_t request_key;
+    uint32_t inputs[4], input_count, output_storage, interactive_storage;
 } DomainObject;
 
 static DomainObject g_domain[DOMAIN_SLOTS];
@@ -907,12 +1038,16 @@ static uint32_t domain_add(uint32_t session, int iface) {
         if (object->used)
             continue;
         object->used = 1;
+        object->arg = 0;
+        object->event = 0;
         object->session = d3_handle_domain_key(session);
         object->iface = iface;
         object->pending =
             iface == D3_IF_COMMON_STATE_GETTER ? D3_APPLET_MESSAGE_FOCUS_CHANGED : 0u;
         object->out_of_focus_suspending = 0;
         object->initialized = 0;
+        object->request_key = 0;
+        object->input_count = object->output_storage = object->interactive_storage = 0;
         return index + 1;
     }
     slog("domain table is full");
@@ -926,11 +1061,27 @@ static int domain_iface(uint32_t session, uint32_t id) {
     return object->used && object->session == d3_handle_domain_key(session) ? object->iface : D3_IF_NONE;
 }
 
+/* Whether the session holds any domain object at all.  ConvertCurrentObjectToDomain
+   registers the session's root object, so a session without one was never
+   converted and cannot be addressed by an object id. */
+static int domain_any(uint32_t session) {
+    const uint32_t key = d3_handle_domain_key(session);
+    for (uint32_t index = 0; index < DOMAIN_SLOTS; index++) {
+        if (g_domain[index].used && g_domain[index].session == key)
+            return 1;
+    }
+    return 0;
+}
+
 static void domain_close(uint32_t session, uint32_t id) {
     if (id == 0 || id > DOMAIN_SLOTS)
         return;
     DomainObject *object = &g_domain[id - 1];
     if (object->used && object->session == d3_handle_domain_key(session)) {
+        if (object->iface == D3_IF_AUDIO_OUT)
+            d3_audio_close((unsigned)object->arg);
+        if (object->iface == D3_IF_SAVE_FILESYSTEM)
+            close((int)object->arg);
         object->used = 0;
         object->iface = D3_IF_NONE;
         object->pending = 0;
@@ -1020,36 +1171,88 @@ static void domain_set_initialized(uint32_t session, uint32_t id, int initialize
    content/GPU path, and nn::aoc turns a failed reply into AbortImpl("this == NULL").
    No DLC is mounted here, so every query reports an empty list. */
 static void reply_handle(Message *m, uint32_t handle);
+static int message_buffer(const Message *m, uint64_t *address, size_t *size);
+static int message_io_buffer(const Message *message, int output, size_t wanted,
+                             uint64_t *address, size_t *size);
+static int guest_read(void *dst, uint64_t address, size_t size);
+static int guest_write(uint64_t address, const void *src, size_t size);
+static const uint64_t g_local_user[2] = {UINT64_C(0x4433484f53545531), UINT64_C(0x4c4f43414c555345)};
+#define D3_IF_ACCOUNT_MANAGER 0x1000d
 
 /* nn::account::Initialize tolerates exactly one failure code (0x2C7C, the
    "account service not initialised" result: it compares w0 & 0x3FFFFF against it)
    and aborts on anything else.  Answering every account command with that code lets
    the engine continue its start-up instead of asserting. */
 static void account_command(Message *m, uint32_t command, uint32_t session) {
-    (void)session;
     /* Low frequency and on the start-up path, so every call is worth a line even
        after the general command logging has been turned off. */
     slog("account cmd=%u%s", command, m->domain ? " (domain)" : "");
+    if ((command == 1 || command == 101) && !message_arguments(m, 16)) {
+        reply_service_result(m, D3_RESULT(124, 20));
+        return;
+    }
     switch (command) {
+    case 0:
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = 1;
+        reply_send(m);
+        return;
+    case 1: {
+        uint64_t user[2];
+        memcpy(user, &m->w[m->magic + 4], sizeof user);
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = memcmp(user, g_local_user, sizeof user) == 0;
+        reply_send(m);
+        return;
+    }
+    case 2:
+    case 3:
+    case 141: {
+        uint64_t address;
+        size_t size;
+        uint64_t users[16] = {0};
+        memcpy(users, g_local_user, sizeof g_local_user);
+        if (!message_io_buffer(m, 1, 0, &address, &size) || size < sizeof g_local_user ||
+            size > sizeof users || !guest_write(address, users, size)) {
+            reply_service_result(m, D3_RESULT(124, 20));
+            return;
+        }
+        reply_service_result(m, 0);
+        return;
+    }
+    case 4:
+    case 51:
+    case 52:
+        reply_prepare(m, 0, 4, m->domain);
+        memcpy(&m->w[m->payload + 4], g_local_user, sizeof g_local_user);
+        reply_send(m);
+        return;
+    case 101: {
+        uint64_t user[2];
+        memcpy(user, &m->w[m->magic + 4], sizeof user);
+        if (memcmp(user, g_local_user, sizeof user) != 0) {
+            reply_service_result(m, D3_RESULT(124, 20));
+            return;
+        }
+        const uint32_t object = domain_add(session, D3_IF_ACCOUNT_MANAGER);
+        if (object)
+            reply_domain_object(m, object);
+        else
+            reply_service_result(m, D3_RESULT(21, 7));
+        return;
+    }
     case 100: /* InitializeApplicationInfo */
     case 140: /* InitializeApplicationInfoRestricted */
     case 160: /* InitializeApplicationInfoV2 */
         /* The title owns the game, so every initialisation flavour succeeds. */
         slog("account cmd=%u (initialise application info) -> ok", command);
-        reply_domain(m, 0, 1);
+        reply_service_result(m, 0);
         return;
+    case 50: /* IsUserRegistrationRequestPermitted: this offline host has one local user. */
     case 150: /* IsUserAccountSwitchLocked(Out<bool>) */
         /* Nothing here locks the account, and the SDK aborts on a failure. */
-        slog("account cmd=150 IsUserAccountSwitchLocked -> false");
-        reply_prepare(m, 0, 2, 1);
-        m->w[m->payload + 4] = 0;
-        reply_send(m);
-        return;
-    case 141: /* ListQualifiedUsers(OutArray<Uid>) */
-        /* An empty array: no parental control stands between the user and the
-           title, which is what the engine wants to hear. */
-        slog("account cmd=141 ListQualifiedUsers -> 0 users");
-        reply_prepare(m, 0, 2, 1);
+        slog("account cmd=%u -> false", command);
+        reply_prepare(m, 0, 1, m->domain);
         m->w[m->payload + 4] = 0;
         reply_send(m);
         return;
@@ -1074,20 +1277,57 @@ static void account_command(Message *m, uint32_t command, uint32_t session) {
    profile before it decides which online features to use; a tablet with no
    wireless association is a normal answer (one zeroed profile), and the reply
    shapes below only have to stay well formed. */
-static void nifm_command(Message *m, uint32_t command, uint32_t session) {
-    (void)session;
+#define D3_IF_NIFM_GENERAL 0x1000e
+static uint64_t g_nifm_request_key;
+
+static void nifm_command(Message *message, uint32_t command, uint32_t session) {
+    if (command != 4 && command != 5) {
+        unsupported_command(message, D3_IF_NIFM, command);
+        return;
+    }
+    const uint32_t object = domain_add(session, D3_IF_NIFM_GENERAL);
+    if (!object) {
+        reply_service_result(message, D3_RESULT(21, 7));
+        return;
+    }
+    slog("nifm CreateGeneralService -> object %u", object);
+    reply_domain_object(message, object);
+}
+
+static void nifm_general_command(Message *m, uint32_t command, uint32_t session) {
     switch (command) {
+    case 4: {
+        if (!message_arguments(m, 4)) {
+            reply_service_result(m, D3_RESULT(110, 112));
+            break;
+        }
+        const uint32_t object = domain_add(session, D3_IF_NIFM_REQUEST);
+        if (!object) {
+            reply_service_result(m, D3_RESULT(21, 7));
+            break;
+        }
+        g_domain[object - 1].arg = 1;
+        g_domain[object - 1].event = 0;
+        g_domain[object - 1].request_key = ++g_nifm_request_key;
+        g_domain[object - 1].pending = 0;
+        slog("nifm CreateRequest -> object %u (offline)", object);
+        reply_domain_object(m, object);
+        break;
+    }
     case 1: /* GetClientId(Out<u64>) */
-        reply_prepare(m, 0, 2, 1);
+        reply_prepare(m, 0, 2, m->domain);
         m->w[m->payload + 4] = 1; /* the SDK rejects a zero client id */
         m->w[m->payload + 5] = 0;
         reply_send(m);
         break;
-    case 5: /* GetCurrentNetworkProfile(Out<NetworkProfile>) */
-    case 6: /* EnumerateNetworkInterfaces */
-    case 7: /* EnumerateNetworkProfiles */
-        slog("nifm cmd=%u -> ok (no profile)", command);
-        reply_domain(m, 0, 1);
+    case 12:
+    case 17:
+    case 21:
+    case 22:
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = 0;
+        slog("nifm general cmd=%u -> offline", command);
+        reply_send(m);
         break;
     default:
         unsupported_command(m, D3_IF_NIFM, command);
@@ -1095,36 +1335,246 @@ static void nifm_command(Message *m, uint32_t command, uint32_t session) {
     }
 }
 
+static void nifm_request_command(Message *message, uint32_t command) {
+    DomainObject *object = &g_domain[message->domain_object - 1];
+    extern void d3_event_set(uint32_t handle, int signaled);
+    if (g_nifm_poll_logs < 32) {
+        g_nifm_poll_logs++;
+        slog("nifm request cmd=%u state=%" PRIu64, command, object->arg);
+    }
+    switch (command) {
+    case 0:
+        reply_prepare(message, 0, 1, message->domain);
+        message->w[message->payload + 4] = (uint32_t)object->arg;
+        reply_send(message);
+        break;
+    case 1:
+        reply_service_result(message, D3_RESULT(110, 1111));
+        break;
+    case 2: {
+        const uint32_t state_event = d3_handle_alloc(D3_OBJ_EVENT, "nifm-state", object->request_key);
+        const uint32_t change_event = d3_handle_alloc(D3_OBJ_EVENT, "nifm-change", object->request_key);
+        if (!state_event || !change_event) {
+            if (state_event)
+                d3_handle_close(state_event);
+            if (change_event)
+                d3_handle_close(change_event);
+            reply_service_result(message, D3_RESULT(21, 7));
+            break;
+        }
+        if (object->pending)
+            d3_event_set(state_event, 1);
+        reply_prepare_handle(message, 2, 0, message->domain, REPLY_COPY_HANDLE);
+        message->w[message->handle_slot_out] = state_event;
+        message->w[message->handle_slot_out + 1] = change_event;
+        reply_send(message);
+        break;
+    }
+    case 3:
+    case 4:
+        object->arg = 1;
+        object->pending = 1;
+        for (uint32_t index = 0; index < HANDLE_SLOTS; index++) {
+            if (g_obj[index].kind == D3_OBJ_EVENT && g_obj[index].arg == object->request_key &&
+                strcmp(g_obj[index].name, "nifm-state") == 0)
+                d3_event_set(D3_HANDLE_FIRST + index, 1);
+        }
+        reply_service_result(message, 0);
+        break;
+    case 6:
+    case 11:
+        if (!message_arguments(message, 4)) {
+            reply_service_result(message, D3_RESULT(110, 112));
+            break;
+        }
+        if (command == 6)
+            object->initialized = (int)message->w[message->magic + 4];
+        else
+            object->out_of_focus_suspending = message->w[message->magic + 4] != 0;
+        reply_service_result(message, 0);
+        break;
+    default:
+        unsupported_command(message, D3_IF_NIFM_REQUEST, command);
+        break;
+    }
+}
+
+static uint32_t g_apm_configurations[2] = {0x20003, 0x20003};
+
+static void nfp_manager_command(Message *message, uint32_t command, uint32_t session) {
+    if (command != 0 || !message->domain) {
+        unsupported_command(message, D3_IF_NFP_MANAGER, command);
+        return;
+    }
+    const uint32_t object = domain_add(session, D3_IF_NFP_USER);
+    if (!object) {
+        reply_service_result(message, D3_RESULT(21, 7));
+        return;
+    }
+    slog("nfp CreateUserInterface -> object %u (no NFC devices)", object);
+    reply_domain_object(message, object);
+}
+
+static void nfp_user_command(Message *message) {
+    DomainObject *object = &g_domain[message->domain_object - 1];
+    switch (message->command) {
+    case 0:
+        object->initialized = 1;
+        slog("nfp Initialize -> initialized without NFC devices");
+        reply_service_result(message, 0);
+        break;
+    case 1:
+        object->initialized = 0;
+        reply_service_result(message, 0);
+        break;
+    case 2: {
+        uint64_t address;
+        size_t size;
+        if (!object->initialized) {
+            reply_service_result(message, D3_RESULT(115, 77));
+            break;
+        }
+        if (!message_io_buffer(message, 1, 0, &address, &size) || size < 8) {
+            reply_service_result(message, D3_RESULT(115, 65));
+            break;
+        }
+        reply_prepare(message, 0, 1, message->domain);
+        message->w[message->payload + 4] = 0;
+        reply_send(message);
+        break;
+    }
+    case 19:
+        reply_prepare(message, 0, 1, message->domain);
+        message->w[message->payload + 4] = object->initialized != 0;
+        reply_send(message);
+        break;
+    case 23: {
+        const uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "nfp-availability", 0);
+        if (event)
+            reply_domain_handle(message, event);
+        else
+            reply_service_result(message, D3_RESULT(21, 7));
+        break;
+    }
+    default:
+        unsupported_command(message, D3_IF_NFP_USER, message->command);
+        break;
+    }
+}
+
+static void apm_command(Message *message, uint32_t command, uint32_t session) {
+    if (command == 0) {
+        if (message->domain) {
+            const uint32_t object = domain_add(session, D3_IF_APM_SESSION);
+            if (object)
+                reply_domain_object(message, object);
+            else
+                reply_service_result(message, D3_RESULT(21, 7));
+        } else {
+            const uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "apm-session", PORT_APM_SESSION);
+            if (handle)
+                reply_handle(message, handle);
+            else
+                reply_service_result(message, D3_RESULT(21, 7));
+        }
+        slog("apm OpenSession");
+    } else if (command == 1 || command == 6) {
+        reply_prepare(message, 0, 1, message->domain);
+        message->w[message->payload + 4] = 0;
+        reply_send(message);
+    } else {
+        unsupported_command(message, D3_IF_APM, command);
+    }
+}
+
+static void apm_session_command(Message *message, uint32_t command) {
+    if ((command != 0 && command != 1) || !message_arguments(message, command == 0 ? 8 : 4)) {
+        unsupported_command(message, D3_IF_APM_SESSION, command);
+        return;
+    }
+    const uint32_t mode = message->w[message->magic + 4];
+    if (mode > 1) {
+        reply_service_result(message, D3_RESULT(128, 1));
+        return;
+    }
+    if (command == 0) {
+        g_apm_configurations[mode] = message->w[message->magic + 5];
+        slog("apm requested performance mode=%u config=%#x", mode, g_apm_configurations[mode]);
+        reply_service_result(message, 0);
+    } else {
+        reply_prepare(message, 0, 1, message->domain);
+        message->w[message->payload + 4] = g_apm_configurations[mode];
+        reply_send(message);
+    }
+}
+
 static void aoc_command(Message *m, uint32_t command, uint32_t session) {
+    static unsigned log_count;
+    const int log_request = log_count++ < 16;
     (void)session;
     switch (command) {
-    case 0: /* CountAddOnContent */
-        slog("aoc::CountAddOnContent -> 0");
-        reply_prepare(m, 0, 1, 0);
-        m->w[m->payload + 4] = 0;
+    case 0:
+    case 2: {
+        unsigned ids[64];
+        const size_t count = d3_content_addon_ids(ids, 64);
+        if (log_request) slog("aoc::CountAddOnContent -> %zu", count);
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = (uint32_t)count;
         reply_send(m);
         break;
-    case 1: /* ListAddOnContent(offset, count, Out<count>, Out<buffer>) */
-        slog("aoc::ListAddOnContent -> 0 entries");
-        reply_prepare(m, 0, 2, 0);
-        m->w[m->payload + 4] = 0;
-        m->w[m->payload + 5] = 0;
+    }
+    case 1:
+    case 3: {
+        unsigned ids[64];
+        const size_t installed = d3_content_addon_ids(ids, 64);
+        const uint32_t offset = m->w[m->magic + 4], capacity = m->w[m->magic + 5];
+        if (installed && (!message_arguments(m, 8) || offset > installed)) {
+            reply_service_result(m, D3_RESULT(128, 2)); break;
+        }
+        size_t count = offset < installed ? installed - offset : 0;
+        if (count > capacity) count = capacity;
+        uint64_t address; size_t bytes;
+        if (count && (!message_io_buffer(m, 1, 0, &address, &bytes) ||
+                      count > bytes / sizeof(unsigned) || !guest_write(address, ids + offset, count * sizeof(unsigned)))) {
+            reply_service_result(m, D3_RESULT(2, 120)); break;
+        }
+        if (log_request) slog("aoc::ListAddOnContent -> %zu entries", count);
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = (uint32_t)count;
         reply_send(m);
         break;
-    case 2: { /* GetAddOnContentListChangedEvent */
+    }
+    case 6:
+    case 7: {
+        char root[512];
+        const unsigned index = m->w[m->magic + 4];
+        reply_service_result(m, message_arguments(m, 4) && d3_content_addon_root(index, root, sizeof root)
+                                  ? 0 : D3_RESULT(2, 1002));
+        break;
+    }
+    case 4:
+    case 5: {
+        const uint64_t base_id = 0x01001b300b9bf000ull;
+        reply_prepare(m, 0, 2, m->domain);
+        memcpy(&m->w[m->payload + 4], &base_id, sizeof base_id);
+        reply_send(m);
+        break;
+    }
+    case 8:
+    case 10: {
         uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "aoc-event", 0);
-        slog("aoc::GetAddOnContentListChangedEvent -> %#x", event);
+        if (log_request) slog("aoc::GetAddOnContentListChangedEvent -> %#x", event);
         if (event == 0) {
             reply_result(m, D3_RESULT(21, 7));
             break;
         }
-        reply_handle(m, event);
+        reply_prepare_handle(m, 1, 0, m->domain, REPLY_COPY_HANDLE);
+        m->w[m->handle_slot_out] = event;
+        reply_send(m);
         break;
     }
     default:
-        slog("aoc cmd=%u -> ok (stub)", command);
-        reply_prepare(m, 0, 4, 0);
-        reply_send(m);
+        reply_unsupported(m, "aoc:u", command, PORT_AOC);
         break;
     }
 }
@@ -1145,6 +1595,7 @@ static void pctl_command(Message *m, uint32_t command, uint32_t session) {
         /* Factory 0 returns a ready object; factory 1 returns one the guest then
            initializes (child command 1). */
         domain_set_initialized(session, object, preinitialized);
+        g_domain[object - 1].arg = 0;
         slog("IParentalControlService factory cmd=%u pid_reserved=%#" PRIx32 "/%#" PRIx32
              " -> object %u (initialized %d)",
              command, pid_reserved, pid_high, object, preinitialized);
@@ -1166,6 +1617,11 @@ static void pctl_service_command(Message *m, uint32_t command, uint32_t session)
         domain_set_initialized(session, m->domain_object, 1);
         slog("IParentalControlService::Initialize -> object %u ready", m->domain_object);
         reply_domain(m, 0, 1);
+        break;
+    case 1001:
+        g_domain[m->domain_object - 1].arg = 1;
+        slog("IParentalControlService::CheckFreeCommunicationPermission -> unrestricted local policy");
+        reply_service_result(m, 0);
         break;
     default:
         unsupported_command(m, D3_IF_PCTL_SERVICE, command);
@@ -1230,19 +1686,31 @@ static void application_proxy_command(Message *m, uint32_t command, uint32_t ses
    hands out.  The boot path asks for the system language and the display version
    as soon as it has the interface, and reports the terminate result when it
    stops, so those three are implemented and everything else is logged by name. */
+static void application_pop_launch_parameter(Message *message, uint32_t session);
+
 static void application_functions_command(Message *m, uint32_t command, uint32_t session) {
-    (void)session;
     switch (command) {
+    case 20: { /* EnsureSaveData for the local user's account storage. */
+        uint64_t user[2];
+        if (!message_arguments(m, sizeof user)) { reply_service_result(m, D3_RESULT(2, 1)); break; }
+        memcpy(user, &m->w[m->magic + 4], sizeof user);
+        if (memcmp(user, g_local_user, sizeof user) != 0) { reply_service_result(m, D3_RESULT(124, 20)); break; }
+        char directory[512];
+        snprintf(directory, sizeof directory, "%s/saves", D3_DATA_ROOT);
+        uint32_t result = 0;
+        if (mkdir(directory, 0700) != 0 && errno != EEXIST) result = D3_RESULT(2, 1002);
+        snprintf(directory, sizeof directory,
+                "%s/saves/1-%016" PRIx64 "-%016" PRIx64 "-%016" PRIx64 "-%016" PRIx64 "-%08x",
+                D3_DATA_ROOT, UINT64_C(0), user[0], user[1], UINT64_C(0), 1u);
+        if (!result && mkdir(directory, 0700) != 0 && errno != EEXIST) result = D3_RESULT(2, 1002);
+        slog("EnsureSaveData directory=%s result=%#x", directory, result);
+        reply_prepare(m, 0, 2, m->domain);
+        m->w[m->payload + 2] = result;
+        reply_send(m);
+        break;
+    }
     case 1: /* PopLaunchParameter (Out<SharedPointer<IStorage>>, LaunchParameterKind) */
-        /* The boot path asks for the user-channel launch parameter right after
-           nn::account::Initialize.  No launcher handed this process a parameter,
-           which is exactly what a library-applet-free home-menu launch looks like,
-           so answer the way the system does then (AM/128, description 2,
-           "no data in channel") instead of "unsupported": the SDK's own wrapper
-           aborts on an unexpected module ("this == NULL!" at sdk+0x90420) and the
-           engine never gets to handle the empty channel itself. */
-        slog("IApplicationFunctions::PopLaunchParameter -> no data in channel");
-        reply_domain(m, D3_RESULT(128, 2), 1);
+        application_pop_launch_parameter(m, session);
         break;
     case 21: { /* GetDesiredLanguage (Out<settings::LanguageCode>) */
         slog("IApplicationFunctions::GetDesiredLanguage -> en-US");
@@ -1255,6 +1723,16 @@ static void application_functions_command(Message *m, uint32_t command, uint32_t
     case 22: /* SetTerminateResult (u32), nothing comes back */
         reply_domain(m, 0, 1);
         break;
+    case 40: {
+        DomainObject *object = &g_domain[m->domain_object - 1];
+        const uint32_t became_running = !object->initialized;
+        object->initialized = 1;
+        slog("IApplicationFunctions::NotifyRunning -> running (transition=%u)", became_running);
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = became_running;
+        reply_send(m);
+        break;
+    }
     case 23: { /* GetDisplayVersion (Out<oe::DisplayVersion>, 0x10 bytes) */
         static const char version[0x10] = D3_DISPLAY_VERSION;
         slog("IApplicationFunctions::GetDisplayVersion -> %s", version);
@@ -1613,9 +2091,151 @@ static int message_path(const Message *m, char *out, size_t size) {
     return -1;
 }
 
+static uint32_t g_fs_access_log_mode;
+static int g_fs_auto_create = 1;
+static int message_buffer(const Message *m, uint64_t *address, size_t *size);
+static int guest_read(void *dst, uint64_t address, size_t size);
+
+static uint32_t save_filesystem_open(Message *message, uint32_t session) {
+    const size_t start = message->magic + 6u;
+    if (!message_arguments(message, 72))
+        return D3_RESULT(2, 1);
+    uint64_t attributes[8];
+    memcpy(attributes, &message->w[start], sizeof attributes);
+    const uint32_t space = message->w[message->magic + 4u] & 0xffu;
+    const uint8_t type = (uint8_t)attributes[4];
+    const int automatic = g_fs_auto_create &&
+        (type == 4 || type == 5 || (space == 1 && (type == 1 || type == 3) &&
+                                  attributes[0] == 0 && attributes[3] == 0));
+    char directory[512];
+    const int length = snprintf(directory, sizeof directory,
+                                "%s/saves/%u-%016" PRIx64 "-%016" PRIx64 "-%016" PRIx64
+                                "-%016" PRIx64 "-%08" PRIx32,
+                                D3_DATA_ROOT, space, attributes[0], attributes[1], attributes[2],
+                                attributes[3], (uint32_t)attributes[4]);
+    if (length < 0 || (size_t)length >= sizeof directory)
+        return D3_RESULT(2, 1);
+    if (automatic) {
+        char parent[512];
+        snprintf(parent, sizeof parent, "%s/saves", D3_DATA_ROOT);
+        if (mkdir(parent, 0700) != 0 && errno != EEXIST)
+            return D3_RESULT(2, 1002);
+        if (mkdir(directory, 0700) != 0 && errno != EEXIST)
+            return D3_RESULT(2, 1002);
+    }
+    const int descriptor = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0)
+        return D3_RESULT(2, 1002);
+    const uint32_t object = domain_add(session, D3_IF_SAVE_FILESYSTEM);
+    if (object == 0) {
+        close(descriptor);
+        return D3_RESULT(21, 7);
+    }
+    g_domain[object - 1].arg = (uint64_t)descriptor;
+    slog("fsp-srv OpenSaveDataFileSystem space=%u type=%u auto=%d directory=%s -> object %u",
+         space, type, automatic, directory, object);
+    reply_domain_object(message, object);
+    return 0;
+}
+
+#include "d3_save_ops.inc"
+
+static void save_filesystem_command(Message *message, uint32_t command) {
+    const int root = (int)g_domain[message->domain_object - 1u].arg;
+    if (command <= 3 || command == 5 || command == 6) {
+        reply_service_result(message, save_mutate(message, root, command));
+        return;
+    }
+    if (command == 10) {
+        const uint32_t result = fsync(root) == 0 ? 0 : D3_RESULT(2, 1002);
+        reply_domain(message, result, 0);
+        return;
+    }
+    if (command == 11 || command == 12) {
+        struct statvfs space;
+        if (fstatvfs(root, &space) != 0) {
+            reply_domain(message, D3_RESULT(2, 1002), 0);
+            return;
+        }
+        const uint64_t bytes = (uint64_t)(command == 11 ? space.f_bavail : space.f_blocks) *
+                               space.f_frsize;
+        reply_prepare(message, 0, 2, 1);
+        memcpy(&message->w[message->payload + 4], &bytes, sizeof bytes);
+        reply_send(message);
+        return;
+    }
+    if (command == 7) {
+        uint64_t address = 0;
+        size_t size = 0;
+        char path[0x301];
+        if (!message_buffer(message, &address, &size) || size > sizeof path || size == 0 ||
+            !guest_read(path, address, size) || memchr(path, 0, size) == NULL) {
+            reply_domain(message, D3_RESULT(2, 1), 0);
+            return;
+        }
+        char *name = path;
+        while (*name == '/')
+            name++;
+        int parent = dup(root);
+        if (parent < 0) {
+            reply_domain(message, D3_RESULT(2, 1002), 0);
+            return;
+        }
+        uint32_t result = 0;
+        struct stat entry;
+        char *part = name;
+        for (;;) {
+            char *separator = strchr(part, '/');
+            if (separator)
+                *separator = 0;
+            if (strcmp(part, "..") == 0 || strchr(part, '\\') != NULL) {
+                result = D3_RESULT(2, 1);
+                break;
+            }
+            if (!separator) {
+                if (fstatat(parent, *part ? part : ".", &entry, AT_SYMLINK_NOFOLLOW) != 0 ||
+                    (!S_ISREG(entry.st_mode) && !S_ISDIR(entry.st_mode)))
+                    result = D3_RESULT(2, 1);
+                break;
+            }
+            const int next = openat(parent, *part ? part : ".",
+                                    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+            if (next < 0) {
+                result = D3_RESULT(2, 1);
+                break;
+            }
+            close(parent);
+            parent = next;
+            part = separator + 1;
+        }
+        close(parent);
+        reply_prepare(message, 0, result ? 0 : 1, 1);
+        message->w[message->payload + 2] = result;
+        if (result == 0)
+            message->w[message->payload + 4] = S_ISDIR(entry.st_mode) ? 0 : 1;
+        reply_send(message);
+        return;
+    }
+    unsupported_command(message, D3_IF_SAVE_FILESYSTEM, command);
+}
+
 static void fsp_srv_command(Message *m, uint32_t command, uint32_t session) {
     slog("fsp-srv command %u", command);
     switch (command) {
+    case 51: {
+        const uint32_t result = save_filesystem_open(m, session);
+        if (result != 0)
+            reply_domain(m, result, 0);
+        break;
+    }
+    case 1003:
+        g_fs_auto_create = 0;
+        reply_domain(m, 0, 0);
+        break;
+    case 1004:
+        g_fs_access_log_mode = m->w[m->magic + 4];
+        reply_domain(m, 0, 0);
+        break;
     case 1: { /* OpenFile(path, mode) -> an IFile domain object */
         char path[256];
         int file = message_path(m, path, sizeof path) == 0 ? host_file_open(path) : -1;
@@ -1636,14 +2256,17 @@ static void fsp_srv_command(Message *m, uint32_t command, uint32_t session) {
         break;
     }
     case 1005:
-    case 1011: { /* free/total space query: report a roomy card, which is what
-                    nn::fs::QueryMountRomCacheSize sizes the romfs cache from */
-        uint64_t size = 0x40000000ull;
-        reply_prepare(m, 0, 4, 1);
-        memcpy(&m->w[m->payload + 4], &size, sizeof size);
+        reply_prepare(m, 0, 1, 1);
+        m->w[m->payload + 4] = g_fs_access_log_mode;
+        slog("fsp-srv GetGlobalAccessLogMode -> None");
         reply_send(m);
         break;
-    }
+    case 1011:
+        reply_prepare(m, 0, 2, 1);
+        m->w[m->payload + 4] = 2;
+        m->w[m->payload + 5] = 0;
+        reply_send(m);
+        break;
     default:
         /* The IFileSystem command set is not recovered yet.  A success reply
            without the out object nn::fs expects only reaches an assertion, so
@@ -1695,74 +2318,99 @@ static void file_command(Message *m, uint32_t command, uint32_t session) {
 /* nv::nvdrv::INvDrvServices (the private "nvdrv" port).  Device fds are only
    bookkeeping for now: the ioctls that would configure a channel are accepted
    so the SDK can finish graphics initialisation and reveal what it asks for. */
-static uint32_t nvdrv_next_fd = 0x100;
 static uint32_t g_nvdrv_ioctls;
 
 /* A service command may arrive on a plain session or on a domain object; the
    reply shape differs, so route through one helper. */
 static void reply_ok(Message *m, uint32_t params) {
-    if (m->domain)
-        reply_domain(m, 0, params);
-    else
-        reply_result(m, 0);
+    reply_prepare(m, 0, params, m->domain);
+    reply_send(m);
 }
 
 static void nvdrv_command(Message *m, uint32_t command, uint32_t session) {
-    (void)session;
     switch (command) {
     case 0: { /* Open(path, Out<fd>) */
-        /* The path usually arrives through a mapped buffer, so the request words
-           hold a guest pointer rather than the text itself. */
-        const size_t limit = m->magic + 8u < MESSAGE_WORDS ? m->magic + 8u : MESSAGE_WORDS;
-        for (size_t index = 0; index < limit; index++) {
-            const uint64_t word = m->w[index];
-            if (word < 0x1000 || word > 0x7fffffffffull)
-                continue;
-            /* Not every word that looks like a pointer is one: handle values such
-               as 0x1006 sit above any sane low-address check and fault on read. */
-            char raw[64];
-            struct iovec local = { raw, sizeof raw };
-            struct iovec remote = { (void *)(uintptr_t)word, sizeof raw };
-            if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != (ssize_t)sizeof raw)
-                continue;
-            char sample[64];
-            size_t used = 0;
-            for (; used + 1 < sizeof sample; used++) {
-                const char c = raw[used];
-                if (c < 0x20 || c >= 0x7f)
-                    break;
-                sample[used] = c;
-            }
-            sample[used] = 0;
-            if (used >= 4)
-                slog("nvdrv::Open path? \"%s\" (word %zu)", sample, index);
-        }
-        uint32_t fd = nvdrv_next_fd++;
-        slog("nvdrv::Open -> fd %u", fd);
-        reply_prepare(m, 0, 2, 1);
+        uint64_t address;
+        size_t size;
+        char path[64] = {0};
+        uint32_t fd = UINT32_MAX;
+        uint32_t result = 4;
+        if (message_io_buffer(m, 0, 0, &address, &size) && size < sizeof path &&
+            guest_read(path, address, size))
+            result = d3_nv_open(d3_handle_domain_key(session), path, &fd);
+        slog("nvdrv::Open %s -> fd %u result=%#x", path, fd, result);
+        reply_prepare(m, 0, 2, m->domain);
         m->w[m->payload + 4] = fd;
+        m->w[m->payload + 5] = result;
         reply_send(m);
         break;
     }
     case 1: /* Ioctl */
     case 11: /* Ioctl2 */
-    case 12: /* Ioctl3 */
+    case 12: { /* Ioctl3 */
         /* The ioctl arguments are what the GPU bring-up has to answer, so every
            call reports the command, the fd and the whole raw payload (buffer
            descriptors included) until the set of commands is known. */
         if (g_nvdrv_ioctls < 80) {
             g_nvdrv_ioctls++;
             slog("nvdrv::Ioctl#%u cmd=%#x fd=%u args=%#x %#x %#x %#x %#x %#x %#x %#x %#x",
-                 g_nvdrv_ioctls, m->w[m->magic + 4], m->w[m->magic + 5], m->w[m->magic + 6],
+                 g_nvdrv_ioctls, m->w[m->magic + 5], m->w[m->magic + 4], m->w[m->magic + 6],
                  m->w[m->magic + 7], m->w[m->magic + 8], m->w[m->magic + 9],
                  m->w[m->magic + 10], m->w[m->magic + 11], m->w[m->magic + 12],
                  m->w[m->magic + 13], m->w[m->magic + 14]);
         }
-        reply_ok(m, 1);
+        const uint32_t descriptor = m->w[m->magic + 4];
+        const uint32_t ioctl = m->w[m->magic + 5];
+        const size_t length = (ioctl >> 16u) & 0x3fffu;
+        uint32_t parameters[4096] = {0};
+        uint32_t inline_output[4096] __attribute__((aligned(16))) = {0};
+        uint64_t input_address = 0, output_address = 0, inline_address = 0;
+        size_t input_size = 0, output_size = 0, inline_size = 0;
+        message_io_buffer(m, 0, 0, &input_address, &input_size);
+        message_io_buffer(m, 1, 0, &output_address, &output_size);
+        if (command == 12)
+            message_io_buffer(m, 1, 1, &inline_address, &inline_size);
+        if (command == 11)
+            message_io_buffer(m, 0, 1, &inline_address, &inline_size);
+        uint32_t result = 10;
+        if (length <= sizeof parameters && inline_size <= sizeof inline_output &&
+            (!(ioctl & 0x40000000u) || (input_size >= length &&
+              guest_read(parameters, input_address, length))) &&
+            (!(ioctl & 0x80000000u) || output_size >= length)) {
+            if (command == 11 && ioctl == 0xc018481bu) {
+                if (length == 24 && guest_read(inline_output, inline_address, inline_size))
+                    result = d3_nv_submit(d3_handle_domain_key(session), descriptor, parameters,
+                                          (const uint64_t *)inline_output, inline_size);
+            } else {
+                result = d3_nv_ioctl(d3_handle_domain_key(session), descriptor, ioctl,
+                                     parameters, length, inline_output, inline_size);
+            }
+            if (ioctl == 0xc0200104u)
+                slog("nvmap alloc handle=%#x heap=%#x flags=%#x align=%#x kind=%#x address=%#x%08x",
+                     parameters[0], parameters[1], parameters[2], parameters[3], parameters[4],
+                     parameters[7], parameters[6]);
+            if (!result && (ioctl & 0x80000000u) &&
+                (!guest_write(output_address, parameters, length) ||
+                 (command == 12 && inline_size && !guest_write(inline_address, inline_output, inline_size))))
+                result = 9;
+        }
+        if (result || g_nvdrv_ioctls++ < 32) slog("nvdrv ioctl=%#x fd=%u in=%zu out=%zu inline=%zu -> %#x", ioctl, descriptor,
+             input_size, output_size, inline_size, result);
+        if (result)
+            slog("nvdrv failure words=%#x %#x %#x %#x %#x %#x %#x %#x", parameters[0], parameters[1],
+                 parameters[2], parameters[3], parameters[4], parameters[5], parameters[6], parameters[7]);
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = result;
+        reply_send(m);
         break;
-    case 2: /* Close */
-        reply_ok(m, 1);
+    }
+    case 2: { /* Close */
+        const uint32_t result = d3_nv_close(d3_handle_domain_key(session), m->w[m->magic + 4]);
+        reply_prepare(m, 0, 1, m->domain);
+        m->w[m->payload + 4] = result;
+        reply_send(m);
         break;
+    }
     case 3: /* Initialize */
         slog("nvdrv::Initialize -> ok");
         reply_ok(m, 1);
@@ -1797,6 +2445,289 @@ static void reply_u64(Message *m, uint64_t value) {
     reply_send(m);
 }
 
+static pthread_mutex_t g_vi_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int64_t g_vi_refs[2];
+static uint32_t g_vi_api;
+static uint32_t g_vi_buffer_count = 3;
+static uint32_t g_vi_width = 1280;
+static uint32_t g_vi_height = 720;
+static uint32_t g_vi_format = 1;
+
+typedef struct {
+    uint32_t data[91];
+    uint64_t address;
+    uint64_t size;
+    int populated;
+    int dequeued;
+    int requested;
+} ViBuffer;
+
+static ViBuffer g_vi_buffers[64];
+
+static void vi_release_buffer(ViBuffer *buffer) {
+    if (buffer->populated) {
+#ifdef D3_WITH_GPU
+        d3_gpu_release_framebuffer(buffer->address, buffer->size);
+#endif
+        d3_nv_buffer_unpin(buffer->data[11]);
+    }
+    memset(buffer, 0, sizeof *buffer);
+}
+
+static void vi_update_events(void) {
+    extern void d3_event_set(uint32_t handle, int signaled);
+    int available = 0;
+    for (size_t index = 0; index < g_vi_buffer_count; index++)
+        available |= g_vi_buffers[index].populated && !g_vi_buffers[index].dequeued;
+    for (size_t index = 0; index < HANDLE_SLOTS; index++) {
+        if (g_obj[index].kind == D3_OBJ_EVENT &&
+            strcmp(g_obj[index].name, "vi-buffer-available") == 0)
+            d3_event_set(D3_HANDLE_FIRST + (uint32_t)index, available);
+    }
+}
+
+static void binder_command(Message *message, uint32_t command) {
+    if (!message_arguments(message, command == 1 ? 12 : 8) ||
+        message->w[message->magic + 4] != 1) {
+        reply_result(message, D3_RESULT(114, 1));
+        return;
+    }
+    const uint32_t *arguments = &message->w[message->magic + 4];
+    if (command == 1) {
+        const int32_t change = (int32_t)arguments[1];
+        const uint32_t type = arguments[2];
+        pthread_mutex_lock(&g_vi_mutex);
+        const int valid = type < 2 && g_vi_refs[type] + change >= 0 &&
+                          g_vi_refs[type] + change <= INT32_MAX;
+        if (valid)
+            g_vi_refs[type] += change;
+        pthread_mutex_unlock(&g_vi_mutex);
+        if (valid)
+            reply_ok(message, 0);
+        else
+            reply_result(message, D3_RESULT(114, 1));
+        return;
+    }
+    if (command == 2) {
+        if (arguments[1] != 0xf) {
+            reply_result(message, D3_RESULT(114, 1));
+            return;
+        }
+        const uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "vi-buffer-available", 1);
+        if (!event) {
+            reply_result(message, D3_RESULT(21, 7));
+            return;
+        }
+        pthread_mutex_lock(&g_vi_mutex);
+        vi_update_events();
+        pthread_mutex_unlock(&g_vi_mutex);
+        reply_prepare_handle(message, 1, 0, 0, REPLY_COPY_HANDLE);
+        message->w[message->handle_slot_out] = event;
+        reply_send(message);
+        return;
+    }
+    if (command != 0 && command != 3) {
+        reply_result(message, D3_RESULT(120, 1));
+        return;
+    }
+    uint64_t input = 0, output = 0;
+    size_t input_size = 0, output_size = 0;
+    const uint32_t transaction = arguments[1];
+    if (!message_arguments(message, 12) ||
+        !message_io_buffer(message, 0, 0, &input, &input_size) || input_size < 24 ||
+        !message_io_buffer(message, 1, 0, &output, &output_size) || output_size < 20) {
+        reply_result(message, D3_RESULT(114, 1));
+        return;
+    }
+    const uint32_t *parcel = (const uint32_t *)(uintptr_t)input;
+    const uint64_t data_offset = parcel[1], data_size = parcel[0];
+    if ((data_offset & 3u) || data_offset > input_size || data_size > input_size - data_offset ||
+        data_size < 8) {
+        reply_result(message, D3_RESULT(114, 1));
+        return;
+    }
+    const uint32_t *data = (const uint32_t *)((uintptr_t)input + data_offset);
+    const uint64_t token_bytes = ((uint64_t)data[1] + 1u) * 2u;
+    const uint64_t argument_offset = (8u + token_bytes + 3u) & ~3ull;
+    if (argument_offset > data_size) {
+        reply_result(message, D3_RESULT(114, 1));
+        return;
+    }
+    static const char interface_name[] = "android.gui.IGraphicBufferProducer";
+    const uint16_t *token = (const uint16_t *)(data + 2);
+    if (data[1] != sizeof interface_name - 1u) {
+        reply_result(message, D3_RESULT(114, 1));
+        return;
+    }
+    for (size_t index = 0; index < sizeof interface_name; index++) {
+        if (token[index] != (uint8_t)interface_name[index]) {
+            reply_result(message, D3_RESULT(114, 1));
+            return;
+        }
+    }
+    const uint32_t *values = (const uint32_t *)((const uint8_t *)data + argument_offset);
+    const size_t value_count = (data_size - argument_offset) / 4u;
+    uint32_t response[128] = {4, 16, 0, 20};
+    int32_t status = -38;
+    size_t result_count = 0;
+    const size_t required_size = transaction == 1 ? 396u : transaction == 3 ? 72u :
+                                 transaction == 10 || transaction == 7 ? 36u :
+                                 transaction == 9 ? 24u : 20u;
+    if (output_size < required_size) {
+        reply_result(message, D3_RESULT(114, 1));
+        return;
+    }
+    pthread_mutex_lock(&g_vi_mutex);
+    if (transaction == 9 && value_count >= 1) {
+        status = 0;
+        result_count = 1;
+        switch (values[0]) {
+        case 0: case 6: response[4] = g_vi_width; break;
+        case 1: case 7: response[4] = g_vi_height; break;
+        case 2: response[4] = g_vi_format; break;
+        case 3: response[4] = 1; break;
+        case 4: response[4] = 1; break;
+        case 5: response[4] = 0; break;
+        case 8: case 9: case 10: case 11: case 12: response[4] = 0; break;
+        default: status = -22; break;
+        }
+    } else if (transaction == 10 && value_count >= 3) {
+        result_count = 4;
+        response[4] = g_vi_width;
+        response[5] = g_vi_height;
+        if (values[0] || !values[1] || values[1] > 4 || g_vi_api)
+            status = -22;
+        else {
+            g_vi_api = values[1];
+            status = 0;
+        }
+    } else if (transaction == 11 && value_count >= 1) {
+        if (g_vi_api != values[0])
+            status = -22;
+        else {
+            g_vi_api = 0;
+            for (size_t index = 0; index < 64; index++) {
+                vi_release_buffer(&g_vi_buffers[index]);
+            }
+            status = 0;
+        }
+    } else if (transaction == 2 && value_count >= 1) {
+        int busy = 0;
+        for (size_t index = 0; index < 64; index++)
+            busy |= g_vi_buffers[index].dequeued;
+        if (values[0] > 64 || busy)
+            status = -22;
+        else {
+            g_vi_buffer_count = values[0] ? values[0] : 3;
+            status = 0;
+        }
+    } else if (transaction == 14 && value_count >= 2) {
+        const uint32_t slot = values[0];
+        status = -22;
+        if (slot < 64 && !g_vi_buffers[slot].dequeued) {
+            if (values[1] == 0) {
+                vi_release_buffer(&g_vi_buffers[slot]);
+                status = 0;
+            } else if (value_count >= 95 && values[2] == 364 && values[3] == 0) {
+                const uint32_t *description = values + 4;
+                uint64_t address = 0, size = 0;
+                if (description[1] && description[1] <= 8192 && description[2] &&
+                    description[2] <= 8192 && description[3] >= description[1] &&
+                    d3_nv_buffer_pin(description[11], &address, &size) == 0) {
+                    int valid = description[30] < size;
+#ifdef D3_WITH_GPU
+                    if (valid)
+                        valid = d3_gpu_import_framebuffer(address, size) == 0;
+#endif
+                    if (valid) {
+                        vi_release_buffer(&g_vi_buffers[slot]);
+                        g_vi_buffers[slot] = (ViBuffer){.address = address, .size = size, .populated = 1};
+                        memcpy(g_vi_buffers[slot].data, description, 364);
+                        g_vi_width = description[1];
+                        g_vi_height = description[2];
+                        g_vi_format = description[4];
+                        if (g_vi_buffer_count <= slot)
+                            g_vi_buffer_count = slot + 1;
+                        status = 0;
+                        slog("vi preallocated slot=%u %ux%u stride=%u nvmap=%u offset=%#x format=%u",
+                             slot, description[1], description[2], description[3], description[11],
+                             description[30], description[18]);
+                    } else {
+                        d3_nv_buffer_unpin(description[11]);
+                    }
+                }
+            }
+        }
+    } else if (transaction == 3 && value_count >= 5) {
+        result_count = 13;
+        response[4] = UINT32_MAX;
+        response[5] = 1;
+        response[6] = 36;
+        for (size_t index = 0; index < 4; index++)
+            response[9 + index * 2] = UINT32_MAX;
+        status = g_vi_api ? -11 : -19;
+        for (uint32_t index = 0; g_vi_api && index < g_vi_buffer_count; index++) {
+            ViBuffer *buffer = &g_vi_buffers[index];
+            if (!buffer->populated || buffer->dequeued ||
+                (values[1] && values[1] != buffer->data[1]) ||
+                (values[2] && values[2] != buffer->data[2]) ||
+                (values[3] && values[3] != buffer->data[4]) ||
+                (values[4] & buffer->data[5]) != values[4])
+                continue;
+            buffer->dequeued = 1;
+            response[4] = index;
+            status = buffer->requested ? 0 : 1;
+            break;
+        }
+    } else if (transaction == 1 && value_count >= 1) {
+        status = -22;
+        result_count = 1;
+        if (values[0] < 64 && g_vi_buffers[values[0]].populated &&
+            g_vi_buffers[values[0]].dequeued) {
+            ViBuffer *buffer = &g_vi_buffers[values[0]];
+            response[4] = 1;
+            response[5] = 364;
+            memcpy(response + 7, buffer->data, 364);
+            result_count = 94;
+            buffer->requested = 1;
+            status = 0;
+        }
+    } else if (transaction == 8 && value_count >= 12) {
+        status = -22;
+        if (values[0] < 64 && g_vi_buffers[values[0]].dequeued &&
+            values[1] == 36 && values[2] == 0 && values[3] == 0) {
+            g_vi_buffers[values[0]].dequeued = 0;
+            status = 0;
+        }
+    } else if (transaction == 7 && value_count >= 24) {
+        result_count = 4;
+        response[4] = g_vi_width;
+        response[5] = g_vi_height;
+        status = -22;
+        if (values[0] < 64 && g_vi_buffers[values[0]].populated &&
+            g_vi_buffers[values[0]].dequeued && g_vi_buffers[values[0]].requested &&
+            values[1] == 84 && values[2] == 0 && values[15] <= 4) {
+            status = -38;
+#ifdef D3_WITH_GPU
+            ViBuffer *buffer = &g_vi_buffers[values[0]];
+            status = d3_gpu_present_guest(buffer->address, buffer->size, buffer->data, values + 3);
+            if (status == 0)
+                buffer->dequeued = 0;
+#endif
+        }
+    }
+    vi_update_events();
+    pthread_mutex_unlock(&g_vi_mutex);
+    response[0] = (uint32_t)(result_count + 1u) * 4u;
+    response[3] = 16u + response[0];
+    response[4 + result_count] = (uint32_t)status;
+    memcpy((void *)(uintptr_t)output, response, response[3]);
+    static unsigned binder_logs;
+    if (status || binder_logs++ < 32) slog("binder transact=%u arguments=%zu first=%#x status=%d", transaction, value_count,
+         value_count ? values[0] : 0, status);
+    reply_ok(message, 0);
+}
+
 static void vi_app_command(Message *m, uint32_t command, uint32_t session) {
     (void)session;
     switch (command) {
@@ -1805,7 +2736,8 @@ static void vi_app_command(Message *m, uint32_t command, uint32_t session) {
     case 102: /* GetManagerDisplayService */
     case 103: /* GetIndirectDisplayTransactionService */
     {
-        uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "vi-sub", PORT_VI_APP);
+        uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, command == 100 ? "dispdrv" : "vi-sub",
+                                         command == 100 ? PORT_BINDER : PORT_VI_APP);
         slog("IApplicationDisplayService cmd=%u -> session %#x", command, handle);
         if (handle == 0)
             reply_result(m, D3_RESULT(21, 7));
@@ -1825,29 +2757,24 @@ static void vi_app_command(Message *m, uint32_t command, uint32_t session) {
     case 1020: /* CloseDisplay */
         reply_ok(m, 1);
         break;
-    case 2012: { /* CreateStrayLayer (this SDK numbers it 2012, not 2030).  The
-                    reply carries a layer id plus a parcel holding the layer's
-                    native window object. */
-        if (m->recv_buffer_count >= 1 && m->recv_buffer_slot + 3 <= MESSAGE_WORDS) {
-            const uint32_t *word = &m->w[m->recv_buffer_slot];
-            const uint64_t size = map_descriptor_size(word);
-            const uint64_t address = map_descriptor_address(word);
-            if (size >= 0x20 && address != 0) {
-                /* Parcel header {data_size, data_offset, objects_size, objects_offset}
-                   followed by one native-window object. */
-                uint32_t window = d3_handle_alloc(D3_OBJ_EVENT, "layer-window", 0);
-                uint32_t parcel[8] = {0u, 0u, 4u, 0x10u, window, 0u, 0u, 0u};
-                memcpy((void *)(uintptr_t)address, parcel, sizeof parcel);
-                slog("CreateStrayLayer parcel -> %#" PRIx64 " size %#" PRIx64 " window %#x", address,
-                     size, window);
-            } else {
-                slog("CreateStrayLayer: no usable receive buffer (size %#" PRIx64 ")", size);
-            }
-        } else {
-            slog("CreateStrayLayer: no receive descriptor");
+    case 2012:
+    case 2030:
+    case 2020: {
+        uint64_t address = 0;
+        size_t size = 0;
+        const uint32_t parcel[15] = {
+            0x28, 0x10, 4, 0x38, 2, 1, 1, 0, 0, 0, 0x70736964, 0x00767264, 0, 0, 0
+        };
+        if (!message_io_buffer(m, 1, 0, &address, &size) || size < sizeof parcel) {
+            reply_result(m, D3_RESULT(114, 1));
+            break;
         }
-        slog("IApplicationDisplayService::CreateStrayLayer -> layer 1");
-        reply_u64(m, 1);
+        memcpy((void *)(uintptr_t)address, parcel, sizeof parcel);
+        slog("vi layer cmd=%u -> producer=1 parcel=%zu", command, sizeof parcel);
+        reply_prepare(m, 0, command == 2020 ? 4 : 6, m->domain ? 1 : 0);
+        const uint64_t values[2] = {command == 2020 ? sizeof parcel : 1, sizeof parcel};
+        memcpy(&m->w[m->payload + 4], values, command == 2020 ? 8 : 16);
+        reply_send(m);
         break;
     }
     case 1102: /* GetDisplayResolution -> width, height */
@@ -1876,14 +2803,10 @@ static void vi_app_command(Message *m, uint32_t command, uint32_t session) {
 #define D3_HID_SHARED_MEMORY_SIZE (256u * 1024u)
 #define D3_HID_ARUID 1u
 
-/* The Npad section of that block, from the layout the title's own hid client
-   reads (npad at 0x9A00, one 0x5000 entry per npad id, NpadInternalState first).
-   Player 1 is reported as a wired FullKey pad and as handheld: the engine's
-   start-up loop launches the Controller applet until *some* pad exists, and with
-   no joy-cons attached a handheld console reports exactly this pair. */
+/* The Npad section uses a 0x5000 entry per id, starting at 0x9A00. */
 #define D3_HID_NPAD_BASE 0x9A00u
 #define D3_HID_NPAD_ENTRY 0x5000u
-#define D3_HID_STYLE_TAG 0x0u     /* NpadStyleTag: FullKey | Handheld */
+#define D3_HID_STYLE_TAG 0x0u
 #define D3_HID_STYLE_FULLKEY 0x1u
 #define D3_HID_STYLE_HANDHELD 0x2u
 #define D3_HID_ASSIGNMENT 0x4u    /* NpadJoyAssignmentMode::Dual */
@@ -1892,6 +2815,64 @@ static void vi_app_command(Message *m, uint32_t command, uint32_t session) {
 #define D3_HID_LIFO_STATES 17u
 #define D3_HID_LIFO_ENTRY 0x30u   /* AtomicStorage<NPadGenericState> */
 #define D3_HID_CONNECTION 0x28u   /* NPadGenericState::connection_status */
+
+static pthread_mutex_t g_hid_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t g_hid_base;
+static uint64_t g_hid_mapping;
+static uint64_t g_hid_sample = 1;
+
+static int32_t hid_axis(int32_t value) {
+    return value < -32767 ? -32767 : value > 32767 ? 32767 : value;
+}
+
+/* Publish a fresh sample even while a button is held. The SDK reads the atomic
+   sampling number before and after copying the slot, then reads the tail. */
+void d3_hid_update(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) {
+    pthread_mutex_lock(&g_hid_mutex);
+    static uint64_t last_buttons;
+    if (last_buttons != buttons) {
+        __android_log_print(ANDROID_LOG_INFO, "d3input", "buttons=%#llx sample=%llu mapping=%#llx",
+            (unsigned long long)buttons, (unsigned long long)g_hid_sample, (unsigned long long)g_hid_mapping);
+        last_buttons = buttons;
+    }
+    if (g_hid_base) {
+        uint8_t *lifo = (uint8_t *)(uintptr_t)(g_hid_base + D3_HID_NPAD_BASE + D3_HID_FULLKEY_LIFO);
+        uint64_t *header = (uint64_t *)lifo;
+        const uint64_t tail = (header[2] + 1) % D3_HID_LIFO_STATES;
+        uint8_t *entry = lifo + 0x20 + tail * D3_HID_LIFO_ENTRY;
+        const uint64_t sample = ++g_hid_sample;
+        int32_t axes[4] = {hid_axis(lx), hid_axis(ly), hid_axis(rx), hid_axis(ry)};
+        if (axes[0] < -16383) buttons |= 1ULL << 16;
+        if (axes[1] >  16383) buttons |= 1ULL << 17;
+        if (axes[0] >  16383) buttons |= 1ULL << 18;
+        if (axes[1] < -16383) buttons |= 1ULL << 19;
+        if (axes[2] < -16383) buttons |= 1ULL << 20;
+        if (axes[3] >  16383) buttons |= 1ULL << 21;
+        if (axes[2] >  16383) buttons |= 1ULL << 22;
+        if (axes[3] < -16383) buttons |= 1ULL << 23;
+        __atomic_store_n((uint64_t *)entry, 0, __ATOMIC_RELEASE);
+        memcpy(entry + 8, &sample, 8);
+        memcpy(entry + 16, &buttons, 8);
+        memcpy(entry + 24, axes, sizeof axes);
+        const uint32_t connected = 3;
+        memcpy(entry + D3_HID_CONNECTION, &connected, sizeof connected);
+        __atomic_store_n((uint64_t *)entry, sample, __ATOMIC_RELEASE);
+        header[0] = sample;
+        header[3] = header[3] < D3_HID_LIFO_STATES ? header[3] + 1 : D3_HID_LIFO_STATES;
+        __atomic_store_n(header + 2, tail, __ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&g_hid_mutex);
+}
+
+void d3_hid_unmap(uint64_t address) {
+    pthread_mutex_lock(&g_hid_mutex);
+    if (g_hid_mapping == address) {
+        if (g_hid_base != g_hid_mapping)
+            munmap((void *)(uintptr_t)g_hid_base, D3_HID_SHARED_MEMORY_SIZE);
+        g_hid_base = g_hid_mapping = 0;
+    }
+    pthread_mutex_unlock(&g_hid_mutex);
+}
 
 static void hid_seed_lifo(uint8_t *lifo) {
     /* Lifo header: timestamp, total buffer count, tail index, live count.  One
@@ -1908,45 +2889,74 @@ static void hid_seed_lifo(uint8_t *lifo) {
 
 /* The title maps the hid block itself; this fills in the one pad it must see. */
 void d3_hid_seed(uint64_t base) {
-    uint8_t *block = (uint8_t *)(uintptr_t)(base + D3_HID_NPAD_BASE);
-    uint32_t style = D3_HID_STYLE_FULLKEY | D3_HID_STYLE_HANDHELD;
+    d3_hid_map(base, base);
+}
+
+void d3_hid_map(uint64_t base, uint64_t writable_alias) {
+    pthread_mutex_lock(&g_hid_mutex);
+    if (g_hid_base && g_hid_base != g_hid_mapping)
+        munmap((void *)(uintptr_t)g_hid_base, D3_HID_SHARED_MEMORY_SIZE);
+    uint8_t *block = (uint8_t *)(uintptr_t)(writable_alias + D3_HID_NPAD_BASE);
+    uint32_t style = D3_HID_STYLE_FULLKEY;
     uint32_t assignment = 0; /* NpadJoyAssignmentMode::Dual */
     uint32_t color_ok = 0;   /* ColorAttribute::Ok */
     memcpy(block + D3_HID_STYLE_TAG, &style, sizeof style);
     memcpy(block + D3_HID_ASSIGNMENT, &assignment, sizeof assignment);
     memcpy(block + 0x8, &color_ok, sizeof color_ok);
     hid_seed_lifo(block + D3_HID_FULLKEY_LIFO);
-    hid_seed_lifo(block + D3_HID_HANDHELD_LIFO);
-    slog("hid: seeded npad 0 (FullKey|Handheld) at %#" PRIx64, base + D3_HID_NPAD_BASE);
+    g_hid_base = writable_alias;
+    g_hid_mapping = base;
+    g_hid_sample = 1;
+    pthread_mutex_unlock(&g_hid_mutex);
+    slog("hid: seeded npad 0 (FullKey) at %#" PRIx64, base + D3_HID_NPAD_BASE);
+}
+
+static void hid_applet_resource_command(Message *m, uint32_t command) {
+    if (command != 0) {
+        unsupported_command(m, D3_IF_HID_APPLET_RESOURCE, command);
+        return;
+    }
+    const uint32_t handle =
+        d3_handle_alloc(D3_OBJ_SHARED_MEM, "hid-shmem", D3_HID_SHARED_MEMORY_SIZE);
+    if (handle == 0) {
+        if (m->domain)
+            reply_domain(m, D3_RESULT(21, 7), 1);
+        else
+            reply_result(m, D3_RESULT(21, 7));
+        return;
+    }
+    slog("hid::IAppletResource::GetSharedMemoryHandle -> %#x", handle);
+    reply_prepare_handle(m, 1, 0, m->domain, REPLY_COPY_HANDLE);
+    m->w[m->handle_slot_out] = handle;
+    reply_send(m);
 }
 
 static void hid_command(Message *m, uint32_t command, uint32_t session) {
-    (void)session;
     /* The styles the title registered with SetSupportedNpadStyleSet. */
     static uint32_t g_hid_style;
     switch (command) {
-    case 0: { /* CreateAppletResource(u64 process_id, Out<u64> aruid, Out<CopyHandle>) */
-        uint32_t handle =
-            d3_handle_alloc(D3_OBJ_SHARED_MEM, "hid-shmem", D3_HID_SHARED_MEMORY_SIZE);
-        if (handle == 0) {
-            reply_result(m, D3_RESULT(21, 7));
-            break;
-        }
-        /* The title keeps using the id it asked for: the client side compares the
-           returned applet resource user id with the one it passed and aborts with
-           HID/1 when they differ. */
+    case 0: {
+        g_trace_request = 1;
         const uint64_t aruid = (uint64_t)m->w[m->magic + 4] | ((uint64_t)m->w[m->magic + 5] << 32);
-        slog("hid::CreateAppletResource pid=%#" PRIx64 " -> aruid %#" PRIx64 " shared memory %#x",
-             aruid, aruid, handle);
-        /* nn::sf's Hipc2ClientCoreProcessor validates the reply's handle category:
-           a shared memory the client maps itself has to arrive as a copy handle,
-           otherwise the processor fails with HID/1 before it ever maps the block
-           (that is the abort at sdk+0x25d614). */
-        reply_prepare_handle(m, 1, 2, 0, REPLY_COPY_HANDLE);
-        m->w[m->handle_slot_out] = handle;
-        m->w[m->payload + 4] = (uint32_t)aruid;
-        m->w[m->payload + 5] = (uint32_t)(aruid >> 32);
-        reply_send(m);
+        if (m->domain) {
+            const uint32_t object = domain_add(session, D3_IF_HID_APPLET_RESOURCE);
+            slog("hid::CreateAppletResource aruid=%#" PRIx64 " -> object %u", aruid, object);
+            if (object == 0)
+                reply_domain(m, D3_RESULT(21, 7), 1);
+            else
+                reply_domain_object(m, object);
+        } else {
+            const uint32_t handle =
+                d3_handle_alloc(D3_OBJ_SESSION, "hid-applet", PORT_HID_APPLET_RESOURCE);
+            slog("hid::CreateAppletResource aruid=%#" PRIx64 " -> session %#x", aruid, handle);
+            if (handle == 0) {
+                reply_result(m, D3_RESULT(21, 7));
+            } else {
+                reply_prepare_handle(m, 1, 0, 0, REPLY_MOVE_HANDLE);
+                m->w[m->handle_slot_out] = handle;
+                reply_send(m);
+            }
+        }
         break;
     }
     case 100: /* SetSupportedNpadStyleSet(u64 aruid, u32 style_set) */
@@ -1983,6 +2993,26 @@ static void hid_command(Message *m, uint32_t command, uint32_t session) {
             reply_handle(m, event);
         break;
     }
+    case 203: { /* CreateActiveVibrationDeviceList must return a real interface. */
+        if (m->domain) {
+            uint32_t object = domain_add(session, D3_IF_HID_VIBRATION);
+            if (object) reply_domain_object(m, object);
+            else reply_service_result(m, D3_RESULT(21, 7));
+        } else {
+            uint32_t handle = d3_handle_alloc(D3_OBJ_SESSION, "hid-vibration", PORT_HID_VIBRATION);
+            if (handle) reply_handle(m, handle);
+            else reply_service_result(m, D3_RESULT(21, 7));
+        }
+        break;
+    }
+    case 200: /* No emulated vibration motor. */
+    case 202:
+    case 205:
+    case 208:
+    case 211:
+        reply_prepare(m, 0, command == 202 ? 4 : 2, m->domain);
+        reply_send(m);
+        break;
     default:
         /* nn::hid treats a failed call as fatal, and the boot only needs the
            server to exist: acknowledge, leaving the out parameters zeroed. */
@@ -2081,51 +3111,111 @@ static HostStorage *storage_of(uint64_t id) {
 
 /* The first buffer descriptor of a request: X descriptors come first (two
    words), then A/B/W (three words).  A storage accessor copies through it. */
+static int message_io_buffer(const Message *message, int output, size_t wanted,
+                             uint64_t *address, size_t *size) {
+    const uint32_t counts = message->w[0] >> 16;
+    const size_t statics = counts & 15u;
+    const size_t sends = (counts >> 4u) & 15u;
+    const size_t receives = (counts >> 8u) & 15u;
+    const size_t exchanges = (counts >> 12u) & 15u;
+    const size_t mapped = message->descriptor_slot + statics * 2u;
+    const size_t mapped_end = mapped + (sends + receives + exchanges) * 3u;
+    const size_t raw = message->w[1] & 0x3ffu;
+    const uint32_t mode = (message->w[1] >> 10u) & 15u;
+    const size_t pointers = mode < 2 ? 0 : mode == 2 ? 1 : mode - 2;
+    *address = 0;
+    *size = 0;
+    if (mapped_end > MESSAGE_WORDS || raw > MESSAGE_WORDS - mapped_end ||
+        pointers > (MESSAGE_WORDS - mapped_end - raw) / 2u)
+        return 0;
+    for (size_t category = 0; category < 3; category++) {
+        const size_t count = category == 0 ? (output ? 0 : statics) :
+                             category == 1 ? (output ? receives + exchanges : sends) :
+                             (output ? pointers : 0);
+        for (size_t index = 0; index < count; index++) {
+            uint64_t candidate;
+            uint64_t bytes;
+            if (category == 0) {
+                const size_t slot = message->descriptor_slot + index * 2u;
+                const uint32_t flags = message->w[slot];
+                candidate = message->w[slot + 1] | ((uint64_t)((flags >> 12u) & 15u) << 32u) |
+                            ((uint64_t)((flags >> 6u) & 7u) << 36u);
+                bytes = flags >> 16u;
+            } else if (category == 1) {
+                const size_t slot = mapped + ((output ? sends : 0) + index) * 3u;
+                const uint32_t flags = message->w[slot + 2];
+                candidate = message->w[slot + 1] | ((uint64_t)((flags >> 28u) & 15u) << 32u) |
+                            ((uint64_t)((flags >> 2u) & 7u) << 36u);
+                bytes = message->w[slot] | ((uint64_t)((flags >> 24u) & 15u) << 32u);
+            } else {
+                const size_t slot = mapped_end + raw + index * 2u;
+                candidate = message->w[slot] | ((uint64_t)(message->w[slot + 1] & 0xffffu) << 32u);
+                bytes = message->w[slot + 1] >> 16u;
+            }
+            if (!candidate || !bytes)
+                continue;
+            if (wanted-- == 0) {
+                *address = candidate;
+                *size = (size_t)bytes;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int message_buffer(const Message *m, uint64_t *address, size_t *size) {
     const size_t slot = m->descriptor_slot;
     const uint32_t counts = m->w[0] >> 16;
     const size_t statics = counts & 0xfu;
     const size_t sends = (counts >> 4) & 0xfu;
+    const size_t receives = (counts >> 8) & 0xfu;
+    const size_t exchanges = (counts >> 12) & 0xfu;
     *address = 0;
     *size = 0;
-    if (statics && slot + 1u < MESSAGE_WORDS) {
-        const uint32_t low = m->w[slot];
-        const uint32_t high = m->w[slot + 1];
+    for (size_t index = 0; index < statics; index++) {
+        const size_t descriptor = slot + 2u * index;
+        if (descriptor + 1u >= MESSAGE_WORDS)
+            return 0;
+        const uint32_t low = m->w[descriptor];
+        const uint32_t high = m->w[descriptor + 1];
         *size = (low >> 16) & 0xffffu;
         *address = (uint64_t)high | ((uint64_t)((low >> 12) & 0xfu) << 32) |
                    ((uint64_t)((low >> 6) & 0x7u) << 36);
-        if (*address)
+        if (*address && *size)
             return 1;
     }
-    if (sends && slot + 2u < MESSAGE_WORDS) {
-        const uint32_t size_low = m->w[slot];
-        const uint32_t addr_low = m->w[slot + 1];
-        const uint32_t flags = m->w[slot + 2];
+    const size_t mapped_slot = slot + 2u * statics;
+    const size_t mapped_count = sends + receives + exchanges;
+    for (size_t index = 0; index < mapped_count; index++) {
+        const size_t descriptor = mapped_slot + 3u * index;
+        if (descriptor + 2u >= MESSAGE_WORDS)
+            return 0;
+        const uint32_t size_low = m->w[descriptor];
+        const uint32_t addr_low = m->w[descriptor + 1];
+        const uint32_t flags = m->w[descriptor + 2];
         *size = (uint64_t)size_low | ((uint64_t)((flags >> 24) & 0xfu) << 32);
         *address = (uint64_t)addr_low | ((uint64_t)((flags >> 28) & 0xfu) << 32) |
                    ((uint64_t)((flags >> 2) & 0x7u) << 36);
-        if (*address)
+        if (*address && *size)
             return 1;
     }
-    /* nn::sf's CMIF client appends the buffer descriptor to the raw data instead
-       of describing it in the header: for the applet storages the three words
-       after the payload are {size, address, flags}. */
-    const size_t fence = m->magic + 10u;
-    if (fence < MESSAGE_WORDS) {
-        const uint32_t size_low = m->w[m->magic + 6];
-        const uint32_t addr_low = m->w[m->magic + 7];
-        const uint32_t flags = m->w[m->magic + 8];
-        const uint64_t trailing_size = (uint64_t)size_low | ((uint64_t)((flags >> 24) & 0xfu) << 32);
-        const uint64_t trailing_address = (uint64_t)addr_low |
-                                          ((uint64_t)((flags >> 28) & 0xfu) << 32) |
-                                          ((uint64_t)((flags >> 2) & 0x7u) << 36);
-        if (trailing_address >= 0x10000u && trailing_address < 0x8000000000ull &&
-            trailing_size > 0 && trailing_size <= 0x100000u) {
-            *address = trailing_address;
-            *size = (size_t)trailing_size;
+    const uint32_t receive_mode = (m->w[1] >> 10) & 0xfu;
+    const size_t receive_count = receive_mode < 2 ? 0 : receive_mode == 2 ? 1 : receive_mode - 2;
+    const size_t receive_slot = mapped_slot + 3u * mapped_count + (m->w[1] & 0x3ffu);
+    if (receive_slot > MESSAGE_WORDS || receive_count > (MESSAGE_WORDS - receive_slot) / 2u)
+        return 0;
+    for (size_t index = 0; index < receive_count; index++) {
+        const size_t descriptor = receive_slot + 2u * index;
+        const uint32_t low = m->w[descriptor];
+        const uint32_t high = m->w[descriptor + 1];
+        *address = (uint64_t)low | ((uint64_t)(high & 0xffffu) << 32);
+        *size = high >> 16;
+        if (*address && *size)
             return 1;
-        }
     }
+    *address = 0;
+    *size = 0;
     return 0;
 }
 
@@ -2144,8 +3234,35 @@ static uint32_t storage_object(uint32_t session, int iface, uint64_t size) {
     return object;
 }
 
+static void application_pop_launch_parameter(Message *message, uint32_t session) {
+    static int consumed;
+    if (!message_arguments(message, 4)) {
+        reply_service_result(message, D3_RESULT(128, 1));
+        return;
+    }
+    const uint32_t kind = message->w[message->magic + 4];
+    if (kind != 2 || consumed) {
+        reply_service_result(message, D3_RESULT(128, 2));
+        return;
+    }
+    const uint32_t object = storage_object(session, D3_IF_STORAGE, 0x88);
+    if (!object) {
+        reply_service_result(message, D3_RESULT(21, 7));
+        return;
+    }
+    HostStorage *storage = storage_of(g_domain[object - 1].arg);
+    const uint32_t header[2] = {0xc79497ca, 1};
+    memcpy(storage->data, header, sizeof header);
+    memcpy(storage->data + 8, g_local_user, sizeof g_local_user);
+    consumed = 1;
+    slog("IApplicationFunctions::PopLaunchParameter -> local preselected user object %u", object);
+    reply_domain_object(message, object);
+}
+
 /* ILibraryAppletCreator (the object IApplicationProxy::GetLibraryAppletCreator
    hands out, iface 18). */
+#include "d3_keyboard_service.inc"
+
 static void library_applet_creator_command(Message *m, uint32_t command, uint32_t session) {
     switch (command) {
     case 0:   /* CreateLibraryApplet(AppletId, LibraryAppletMode) */
@@ -2171,6 +3288,19 @@ static void library_applet_creator_command(Message *m, uint32_t command, uint32_
         m->w[m->payload + 4] = 0;
         reply_send(m);
         break;
+    case 11: { /* CreateTransferMemoryStorage(bool writable, s64 size, CopyHandle) */
+        uint64_t size = 0;
+        if (message_arguments(m, 16)) memcpy(&size, &m->w[m->magic + 6], 8);
+        const uint32_t handle = m->copy_handles ? m->w[m->handle_slot] : 0;
+        const uint64_t address = d3_handle_kind(handle) == D3_OBJ_TRANSFER_MEM ? d3_handle_arg(handle) : 0;
+        uint32_t object = size && size <= STORAGE_MAX_BYTES && address ? storage_object(session, D3_IF_STORAGE, size) : 0;
+        if (object && !guest_read(storage_of(g_domain[object - 1].arg)->data, address, (size_t)size)) {
+            domain_close(session, object); object = 0;
+        }
+        if (object) reply_domain_object(m, object);
+        else reply_service_result(m, D3_RESULT(21, 7));
+        break;
+    }
     case 10: { /* CreateStorage(u64 size, Out<SharedPointer<IStorage>>) */
         const uint64_t size = (uint64_t)m->w[m->magic + 4] |
                               ((uint64_t)m->w[m->magic + 5] << 32);
@@ -2200,24 +3330,29 @@ static void library_applet_accessor_command(Message *m, uint32_t command, uint32
     case 0: { /* GetAppletStateChangedEvent(Out<CopyHandle>) */
         extern void d3_event_set(uint32_t handle, int signaled);
         const uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "applet-state", 0);
+        if (object && object->arg == 0x11) d3_handle_set_arg(event, 1);
         if (object)
             object->event = event;
-        d3_event_set(event, 1);
+        d3_event_set(event, object && object->arg == 0x11 ? object->initialized : 1);
         slog("ILibraryAppletAccessor::GetAppletStateChangedEvent -> %#x", event);
         reply_domain_handle(m, event);
         break;
     }
     case 1: /* IsCompleted(Out<bool>) */
         reply_prepare(m, 0, 2, 1);
-        m->w[m->payload + 4] = 1;
+        m->w[m->payload + 4] = object && object->arg == 0x11 ? object->initialized : 1;
         reply_send(m);
         break;
     case 10: { /* Start */
         extern void d3_event_set(uint32_t handle, int signaled);
         slog("ILibraryAppletAccessor::Start applet=%#x", object ? (uint32_t)object->arg : 0u);
         if (object) {
-            object->initialized = 1;
-            d3_event_set(object->event, 1);
+            if (object->arg == 0x11 && keyboard_start(object) != 0) {
+                reply_service_result(m, D3_RESULT(128, 1));
+                break;
+            }
+            if (object->arg != 0x11) object->initialized = 1;
+            d3_event_set(object->event, object->initialized);
         }
         /* The applet is finished the moment it starts, so the next one may be
            launched right away. */
@@ -2244,12 +3379,60 @@ static void library_applet_accessor_command(Message *m, uint32_t command, uint32
         break;
     case 100: /* PushInData(SharedPointer<IStorage>) */
     case 103: /* PushInteractiveInData */
+        if (object && object->arg == 0x11 && command == 103) {
+            uint32_t input = m->w[m->magic + 4];
+            HostStorage *check = input && input <= DOMAIN_SLOTS && domain_iface(session, input) == D3_IF_STORAGE
+                ? storage_of(g_domain[input - 1].arg) : NULL;
+            if (!check || check->size < 4) { reply_service_result(m, D3_RESULT(128, 1)); break; }
+            uint32_t result = keyboard_u32(check->data, 0);
+            object->interactive_storage = 0;
+            if (result == 0) {
+                object->initialized = 1;
+                extern void d3_event_set(uint32_t, int);
+                d3_event_set(object->event, 1);
+            } else if (keyboard_start(object) != 0) {
+                reply_service_result(m, D3_RESULT(128, 1)); break;
+            }
+            slog("keyboard text check result=%u completed=%d", result, object->initialized);
+        }
+        if (object && object->arg == 0x11 && command == 100 && object->input_count < 4) {
+            uint32_t input = m->w[m->magic + 4];
+            if (input && input <= DOMAIN_SLOTS && domain_iface(session, input) == D3_IF_STORAGE)
+                object->inputs[object->input_count++] = (uint32_t)g_domain[input - 1].arg;
+        }
         slog("ILibraryAppletAccessor cmd %u (in data) args=%#x %#x %#x %#x", command,
              m->w[m->magic + 4], m->w[m->magic + 5], m->w[m->magic + 6], m->w[m->magic + 7]);
         reply_domain(m, 0, 1);
         break;
     case 101: /* PopOutData(Out<SharedPointer<IStorage>>) */
     case 104: { /* PopInteractiveOutData */
+        if (object && object->arg == 0x10) {
+            const uint32_t out = storage_object(session, D3_IF_STORAGE, 0x18);
+            if (!out) { reply_service_result(m, D3_RESULT(21, 7)); break; }
+            HostStorage *storage = storage_of(g_domain[out - 1].arg);
+            memcpy(storage->data + 8, g_local_user, sizeof g_local_user);
+            reply_domain_object(m, out);
+            break;
+        }
+        if (object && (object->arg == 0x13 || object->arg == 0x14 || object->arg == 0x17)) {
+            const uint32_t out = storage_object(session, D3_IF_STORAGE, 0x1010);
+            if (!out) { reply_service_result(m, D3_RESULT(21, 7)); break; }
+            HostStorage *storage = storage_of(g_domain[out - 1].arg);
+            const uint32_t exit_requested = 2;
+            memcpy(storage->data, &exit_requested, 4);
+            slog("offline web applet unavailable: returning ExitRequested");
+            reply_domain_object(m, out);
+            break;
+        }
+        if (object && object->arg == 0x11) {
+            uint32_t id = command == 104 ? object->interactive_storage : object->output_storage;
+            uint32_t out = id ? domain_add(session, D3_IF_STORAGE) : 0;
+            if (out) {
+                g_domain[out - 1].arg = id;
+                reply_domain_object(m, out);
+            } else reply_service_result(m, D3_RESULT(128, 2));
+            break;
+        }
         /* The Controller applet hands the title a ControllerSupportResultInfo
            (0xC bytes): the player count, the npad id the user chose and whether
            the configuration was accepted.  Reporting "one player, player 1,
@@ -2284,8 +3467,11 @@ static void library_applet_accessor_command(Message *m, uint32_t command, uint32
     case 106: { /* GetPopInteractiveOutDataEvent */
         extern void d3_event_set(uint32_t handle, int signaled);
         const uint32_t event = d3_handle_alloc(D3_OBJ_EVENT, "applet-out-data", 0);
-        d3_event_set(event, 1);
-        slog("ILibraryAppletAccessor cmd %u (out data event) -> %#x", command, event);
+        if (object && object->arg == 0x11) d3_handle_set_arg(event, 1);
+        d3_event_set(event, object && object->arg == 0x11
+            ? (command == 106 ? object->interactive_storage != 0 : object->initialized) : 1);
+        slog("ILibraryAppletAccessor cmd %u (out data event) -> %#x completed=%d interactive=%u", command, event,
+            object ? object->initialized : -1, object ? object->interactive_storage : 0);
         reply_domain_handle(m, event);
         break;
     }
@@ -2346,7 +3532,14 @@ static int guest_read(void *dst, uint64_t address, size_t size) {
 static int guest_write(uint64_t address, const void *src, size_t size) {
     struct iovec local = {(void *)src, size};
     struct iovec remote = {(void *)(uintptr_t)address, size};
-    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)size;
+#ifdef D3_WITH_GPU
+    d3_gpu_begin_cpu_write(address, size);
+#endif
+    const ssize_t wrote = process_vm_writev(getpid(), &local, 1, &remote, 1, 0);
+#ifdef D3_WITH_GPU
+    d3_gpu_end_cpu_write();
+#endif
+    return wrote == (ssize_t)size;
 }
 
 static void storage_accessor_command(Message *m, uint32_t command) {
@@ -2414,6 +3607,14 @@ static void storage_accessor_command(Message *m, uint32_t command) {
     }
 }
 
+#include "d3_audio_service.inc"
+#include "d3_friend_service.inc"
+
+static void hid_vibration_command(Message *m, uint32_t command) {
+    if (command == 0) reply_service_result(m, 0); /* Register a virtual device with no motor. */
+    else unsupported_command(m, D3_IF_HID_VIBRATION, command);
+}
+
 static void domain_command(Message *m, uint32_t handle) {
     const char *name = d3_handle_name(handle);
     if (m->domain_command == 2) { /* CloseVirtualHandle */
@@ -2435,6 +3636,29 @@ static void domain_command(Message *m, uint32_t handle) {
              m->w[m->magic + 7]);
     }
     switch (iface) {
+    case D3_IF_HID_VIBRATION:
+        hid_vibration_command(m, m->command);
+        break;
+    case D3_IF_FRIEND_CREATOR:
+    case D3_IF_FRIEND:
+    case D3_IF_FRIEND_NOTIFICATION:
+        friend_command(m, m->command, handle, iface);
+        break;
+    case D3_IF_AUDIN:
+        audin_command(m, m->command);
+        break;
+    case D3_IF_AUDOUT:
+        audout_command(m, m->command, handle);
+        break;
+    case D3_IF_AUDIO_OUT:
+        audio_out_command(m, m->command, handle);
+        break;
+    case D3_IF_ACCOUNT_MANAGER:
+        if (m->command == 0)
+            reply_domain(m, D3_RESULT(124, 200), 1);
+        else
+            unsupported_command(m, iface, m->command);
+        break;
     case D3_IF_TIME:
         time_service_command(m, m->command, handle);
         break;
@@ -2471,6 +3695,9 @@ static void domain_command(Message *m, uint32_t handle) {
     case D3_IF_FSP_SRV:
         fsp_srv_command(m, m->command, handle);
         break;
+    case D3_IF_SAVE_FILESYSTEM:
+        save_filesystem_command(m, m->command);
+        break;
     case D3_IF_FILE:
         file_command(m, m->command, handle);
         break;
@@ -2483,14 +3710,41 @@ static void domain_command(Message *m, uint32_t handle) {
     case D3_IF_VI_APP:
         vi_app_command(m, m->command, handle);
         break;
+    case D3_IF_BINDER:
+        binder_command(m, m->command);
+        break;
     case D3_IF_AOC:
         aoc_command(m, m->command, handle);
         break;
     case D3_IF_ACCOUNT:
         account_command(m, m->command, handle);
         break;
+    case D3_IF_HID:
+        hid_command(m, m->command, handle);
+        break;
+    case D3_IF_HID_APPLET_RESOURCE:
+        hid_applet_resource_command(m, m->command);
+        break;
     case D3_IF_NIFM:
         nifm_command(m, m->command, handle);
+        break;
+    case D3_IF_NIFM_GENERAL:
+        nifm_general_command(m, m->command, handle);
+        break;
+    case D3_IF_NIFM_REQUEST:
+        nifm_request_command(m, m->command);
+        break;
+    case D3_IF_APM:
+        apm_command(m, m->command, handle);
+        break;
+    case D3_IF_APM_SESSION:
+        apm_session_command(m, m->command);
+        break;
+    case D3_IF_NFP_MANAGER:
+        nfp_manager_command(m, m->command, handle);
+        break;
+    case D3_IF_NFP_USER:
+        nfp_user_command(m);
         break;
     case D3_IF_LIBRARY_APPLET_CREATOR:
         library_applet_creator_command(m, m->command, handle);
@@ -2507,7 +3761,9 @@ static void domain_command(Message *m, uint32_t handle) {
         break;
     case D3_IF_NONE:
         slog("domain %s has no object %u (iface %d)", name, m->domain_object, iface);
+        dump_message("no-object", m, handle);
         reply_domain(m, D3_RESULT(121, 1), 1);
+        dump_message("no-object-out", m, handle);
         break;
     default:
         /* An interface the host knows by name but has not implemented yet. */
@@ -2545,9 +3801,24 @@ static void repeat_guard(const Message *m, uint32_t handle) {
 
 static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const char *which) {
     const char *name = d3_handle_name(handle);
+    g_current_buffer = buffer;
+    d3_watch_global(0xc9bba8u, name);
     int kind = d3_handle_kind(handle);
     if (kind != D3_OBJ_SESSION) {
-        slog("SendSyncRequest on handle %#x (%s) kind %d", handle, name, kind);
+        /* A request on a handle the host never handed out means the guest built
+           the handle itself; its frame chain says which stub did, and the handle
+           table says what the host had actually allocated by then. */
+        slog("SendSyncRequest on handle %#x (%s) kind %d buffer %#" PRIx64, handle, name, kind,
+             buffer);
+        const uint32_t *words = (const uint32_t *)(uintptr_t)buffer;
+        if (buffer)
+            d3_service_dump("bad-handle", buffer, words, 0x40);
+        d3_trace_guest(which, saved);
+        /* nn::hid's applet resource path (sdk+0x250300) reaches its second call
+           through this global; its object carries the handle the guest then
+           sends to. */
+        d3_dump_sdk_global(0xc9bba8u);
+        d3_handle_dump();
         saved->x[0] = D3_RESULT(11, 1); /* module HIPC, "invalid handle" */
         return;
     }
@@ -2570,8 +3841,17 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
         saved->x[0] = D3_RESULT(11, 2);
         return;
     }
-    if (g_loud < 4096) {
-        g_loud++;
+    /* sm: carries the boot's service lookups and is used a handful of times, so
+       its requests are dumped in full whatever the loud counter says. */
+    const int trace_port = (int)d3_handle_arg(handle);
+    const bool trace_sm = trace_port == PORT_SM;
+    static unsigned hid_trace_count;
+    const bool trace_hid = trace_port == PORT_HID && hid_trace_count++ < 32;
+    g_dump_port = trace_port == PORT_HID && !trace_hid ? PORT_NONE : trace_port;
+    if (trace_sm || trace_hid)
+        dump_message(trace_sm ? "sm-in" : "hid-in", &m, handle);
+    if (g_cmif_traces < 64) {
+        g_cmif_traces++;
         slog("cmif port=%s cmd=%u tag=%u magic=+%#zx words0..15=%#x %#x %#x %#x %#x %#x %#x %#x "
              "%#x %#x %#x %#x %#x %#x %#x %#x",
              name, m.command, m.w[0] & 0xffffu, m.magic * 4, m.w[0], m.w[1], m.w[2], m.w[3], m.w[4],
@@ -2580,15 +3860,28 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
         d3_service_dump("cmif-in", buffer, m.w, MESSAGE_BYTES);
         d3_trace_guest(name, saved);
     }
+    /* A session that was never converted owns no object, so a request naming one
+       is really a plain request: answer it in the shape its client reads, not with
+       a domain reply the SDK would take for a wrong result word. */
+    if (m.domain && m.domain_command == 1 && !domain_any(handle)) {
+        const uint32_t object = m.domain_object;
+        if (message_plain_at(&m) == 0)
+            slog("%s object %u on an unconverted session: read as plain cmd=%u", name, object,
+                 m.command);
+    }
     repeat_guard(&m, handle);
     if (message_is_control(&m)) {
         control_command(&m, m.command, handle);
+        if (trace_sm || trace_hid)
+            dump_message(trace_sm ? "sm-out" : "hid-out", &m, handle);
         saved->x[0] = 0;
         return;
     }
     if (m.domain) {
         g_trace_request = 0;
         domain_command(&m, handle);
+        if (trace_sm || trace_hid)
+            dump_message(trace_sm ? "sm-out" : "hid-out", &m, handle);
         if (g_trace_request)
             d3_trace_guest("domain", saved);
         saved->x[0] = 0;
@@ -2597,6 +3890,21 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
     const int port = (int)d3_handle_arg(handle);
     g_trace_request = 0;
     switch (port) {
+    case PORT_HID_VIBRATION:
+        hid_vibration_command(&m, m.command);
+        break;
+    case PORT_FRIEND:
+        friend_command(&m, m.command, handle, D3_IF_FRIEND_CREATOR);
+        break;
+    case PORT_AUDIN:
+        audin_command(&m, m.command);
+        break;
+    case PORT_AUDOUT:
+        audout_command(&m, m.command, handle);
+        break;
+    case PORT_AUDIO_OUT:
+        audio_out_command(&m, m.command, handle);
+        break;
     case PORT_TIME:
         time_service_command(&m, m.command, handle);
         break;
@@ -2627,14 +3935,28 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
     case PORT_VI_APP:
         vi_app_command(&m, m.command, handle);
         break;
+    case PORT_BINDER:
+        binder_command(&m, m.command);
+        break;
     case PORT_HID:
         hid_command(&m, m.command, handle);
+        d3_watch_global(0xc9bba8u, "hid-reply");
+        d3_watch_global(0xc9bb98u, "hid-reply98");
+        break;
+    case PORT_HID_APPLET_RESOURCE:
+        hid_applet_resource_command(&m, m.command);
         break;
     case PORT_AOC:
         aoc_command(&m, m.command, handle);
         break;
     case PORT_ACCOUNT:
         account_command(&m, m.command, handle);
+        break;
+    case PORT_APM:
+        apm_command(&m, m.command, handle);
+        break;
+    case PORT_APM_SESSION:
+        apm_session_command(&m, m.command);
         break;
     default:
         reply_unsupported(&m, name, m.command, (int)d3_handle_arg(handle));
@@ -2643,6 +3965,8 @@ static void send_sync(d3_saved *saved, uint64_t buffer, uint32_t handle, const c
     /* The account port answers with the "not initialised" result for every
        command, so its call sites are the ones worth naming while the boot path
        grows: the title's frame chain says which SDK API asked. */
+    if (trace_sm || trace_hid)
+        dump_message(trace_sm ? "sm-out" : "hid-out", &m, handle);
     if (g_trace_request || port == PORT_ACCOUNT)
         d3_trace_guest(name, saved);
     saved->x[0] = 0;

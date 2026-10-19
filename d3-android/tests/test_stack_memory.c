@@ -22,7 +22,9 @@ static MemInfo inspect_memory(uint64_t address) {
 static int run_tpidrro_regression(void) {
     static const uint64_t lr_sentinel = UINT64_C(0x0000deadbeef0000);
     static const uint64_t nzcv_sentinel = UINT64_C(0xa0000000);
-    const uint64_t tlr = UINT64_C(0x77aa0000cafe);
+    const uint64_t tls = guest_region_alloc();
+    thread_region_assign(tls);
+    const uint64_t tlr = tls + GUEST_TLR_OFFSET;
     const uint32_t targets[] = {0u, 8u, 16u, 17u, 30u};
 
     uint64_t table[5] = {0};
@@ -46,7 +48,7 @@ static int run_tpidrro_regression(void) {
                 frame.saved.q[i][j] = (unsigned char)(i * 16 + j);
 
         g_table = table;
-        on_tpidrro(&frame.saved, dest);
+        on_tpidrro(&frame.saved, dest, tls);
         g_table = saved_table; /* restore before any CHECK can early-return */
 
         CHECK(frame.saved.x[dest] == tlr); /* destination holds exactly TLR */
@@ -64,6 +66,7 @@ static int run_tpidrro_regression(void) {
         CHECK(frame.pair[1] == (dest == 17 ? tlr : 0));
     }
     CHECK(g_table == saved_table);
+    CHECK(munmap((void *)(uintptr_t)tls, GUEST_TLS_SIZE) == 0);
     return 0;
 }
 
@@ -115,7 +118,7 @@ static int run_memory_dump_regression(void) {
 int main(void) {
     g_os_page = (size_t)sysconf(_SC_PAGESIZE);
     CHECK(g_os_page == 0x1000);
-    g_heap_cap = 0x10000;
+    g_heap_cap = 0x100000;
     g_heap_cur = g_heap_cap;
     g_heap = (uint64_t)(uintptr_t)map_pages(g_heap_cap, PROT_READ | PROT_WRITE);
     g_stack_region = (uint64_t)(uintptr_t)map_pages(STACK_REGION_SIZE, PROT_NONE);
@@ -182,6 +185,20 @@ int main(void) {
         output[0] = (unsigned char)round;
         CHECK(stack_map_memory(destination, source, size, 0) == 0);
         CHECK(input[0] == (unsigned char)round);
+    }
+    /* Audio and game workers exceed the old 32-entry stack map limit. */
+    for (unsigned i = 0; i < 96; i++) {
+        const uint64_t src = g_heap + (uint64_t)i * 0x1000;
+        const uint64_t dst = g_stack_region + (uint64_t)i * 0x2000;
+        *(uint64_t *)(uintptr_t)src = i + 100;
+        CHECK(stack_map_memory(dst, src, 0x1000, 1) == 0);
+        CHECK(*(uint64_t *)(uintptr_t)dst == i + 100);
+    }
+    for (unsigned i = 0; i < 96; i++) {
+        const uint64_t src = g_heap + (uint64_t)i * 0x1000;
+        const uint64_t dst = g_stack_region + (uint64_t)i * 0x2000;
+        CHECK(stack_map_memory(dst, src, 0x1000, 0) == 0);
+        CHECK(*(uint64_t *)(uintptr_t)src == i + 100);
     }
     CHECK(run_tpidrro_regression() == 0);
     CHECK(run_memory_dump_regression() == 0);

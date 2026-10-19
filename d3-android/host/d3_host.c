@@ -4,6 +4,10 @@
 #include "d3_sync.h"
 #include "../guest_layout.h"
 #include "guest_relocs.h"
+#include "d3_content.h"
+#ifdef D3_WITH_GPU
+#include "../gpu/host/gpu_bridge.h"
+#endif
 
 #include <android/log.h>
 #include <dlfcn.h>
@@ -13,6 +17,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <dirent.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -281,7 +286,9 @@ static uint64_t tid_map_get(uint64_t tid) {
 }
 
 static uint64_t guest_tlr_for_tp(uint64_t tp) {
-    uint64_t tls = guest_tls_for_tp(tp);
+    uint64_t tls = this_guest_tls();
+    if (!tls)
+        tls = guest_tls_for_tp(tp);
     if (tls && !is_guest_region(tls))
         tls = 0;
     if (!tls) {
@@ -341,7 +348,7 @@ static int g_regions_logged;
 static int g_found_guest;
 static uint32_t g_query_logs;
 
-enum { MAX_FIXED = 40, MAX_REG = 256, MAX_STACK_MAPS = 32 };
+enum { MAX_FIXED = 256, MAX_REG = 2048, MAX_STACK_MAPS = 256 };
 typedef struct {
     uint64_t destination;
     uint64_t source;
@@ -463,7 +470,6 @@ static void dump_index(const char *prefix, uint32_t index, uint64_t value) {
 }
 
 static int safe_read(uint64_t address, void *dst, uint64_t size);
-static int safe_write(uint64_t address, const void *src, uint64_t size);
 
 /* Prints the string a word points at, but only when it really is one: an abort
    records its message as a const char* on the faulting stack. */
@@ -574,13 +580,16 @@ static void raw_sigaction(int signal, const D3SigAction *action, D3SigAction *ol
 }
 
 static struct sigaction g_previous_signals[NSIG];
+#ifdef D3_WITH_GPU
+static int g_write_watch_signal;
+#endif
 /* The kernel slot each forced signal had before install_signal_actions took it
    over: with ART loaded that is libsigchain's trampoline. */
 static D3SigAction g_kernel_signals[NSIG];
 static sig_atomic_t g_signal_reset[NSIG];
 static pthread_once_t g_signal_once = PTHREAD_ONCE_INIT;
 
-static void crash_handler(int sig, siginfo_t *si, void *context);
+extern void crash_handler(int sig, siginfo_t *si, void *context);
 
 /* Hand a signal back to whatever owned the kernel slot before the forcing: ART
    resolves null checks in compiled code (and GC read barriers) by faulting and
@@ -646,14 +655,6 @@ static int safe_read(uint64_t address, void *dst, uint64_t size) {
 
 /* Write into guest memory through the kernel: never trust the pointer (a bad one
    would fault the whole emulator), and report whether it landed. */
-static int safe_write(uint64_t address, const void *src, uint64_t size) {
-    if (!address || !src || size == 0 || size > 4096)
-        return 0;
-    struct iovec local = {(void *)src, (size_t)size};
-    struct iovec remote = {(void *)(uintptr_t)address, (size_t)size};
-    return syscall(SYS_process_vm_writev, getpid(), &local, 1, &remote, 1, 0) == (ssize_t)size;
-}
-
 static void dump_memory_links(uint32_t reg, uint64_t address) {
     uint64_t words[24];
     dump_field("m_register", reg);
@@ -668,6 +669,57 @@ static void dump_memory_links(uint32_t reg, uint64_t address) {
             dump_index("m", i, words[i]);
         address = words[0];
     }
+}
+
+static void dump_resource_cache(uint64_t manager) {
+    uint64_t fields[0x150 / 8];
+    uint64_t dictionary;
+    if (!safe_read(manager + 0x20, &dictionary, sizeof dictionary) ||
+        !safe_read(dictionary, fields, sizeof fields))
+        return;
+    dump_field("cache_dictionary", dictionary);
+    for (uint32_t index = 0; index < sizeof fields / sizeof fields[0]; index++)
+        dump_index("cd", index, fields[index]);
+    const uint32_t highest = (uint32_t)fields[0x108 / 8];
+    const uint64_t table = fields[0x120 / 8];
+    if (highest >= 0x3ffff || !table)
+        return;
+    uint32_t occupied = 0, referenced = 0, flagged = 0, eligible = 0, unreadable = 0;
+    uint64_t entries[512];
+    for (uint32_t base = 0; base <= highest; base += 256) {
+        const uint32_t count = highest - base + 1 < 256 ? highest - base + 1 : 256;
+        if (!safe_read(table + (uint64_t)base * 16, entries, (uint64_t)count * 16))
+            break;
+        for (uint32_t index = 0; index < count; index++) {
+            const uint64_t key = entries[index * 2];
+            const uint64_t pointer = entries[index * 2 + 1];
+            if ((uint32_t)key == UINT32_MAX || !pointer)
+                continue;
+            uint32_t header[4];
+            occupied++;
+            if (!safe_read(pointer, header, sizeof header)) {
+                unreadable++;
+                continue;
+            }
+            referenced += header[1] != 0;
+            flagged += (header[2] & 1u) != 0;
+            eligible += header[1] == 0 && !(header[2] & 1u);
+            if (occupied <= 24) {
+                dump_field("resource_slot", base + index);
+                dump_field("resource_key", key);
+                dump_field("resource_address", pointer);
+                dump_field("resource_id", header[0]);
+                dump_field("resource_refs", header[1]);
+                dump_field("resource_flags", header[2]);
+                dump_field("resource_aux", header[3]);
+            }
+        }
+    }
+    dump_field("cache_occupied", occupied);
+    dump_field("cache_referenced", referenced);
+    dump_field("cache_flagged", flagged);
+    dump_field("cache_eligible", eligible);
+    dump_field("cache_unreadable", unreadable);
 }
 
 /* Some guest code reads the *physical* counter (mrs Xt, cntpct_el0), which is
@@ -691,14 +743,49 @@ static int emulate_counter_read(mcontext_t *mc) {
 /* Whether this tid ever entered guest code (see the definition further down). */
 static int thread_is_guest(pid_t tid);
 
-static void crash_handler(int sig, siginfo_t *si, void *context) {
+#ifdef D3_WITH_GPU
+static int cpu_write_fault(const mcontext_t *mc) {
+    /* ESR_EL1 signal context: accept only a data abort with WnR set. */
+    const unsigned char *cursor = mc->__reserved;
+    const unsigned char *end = cursor + sizeof mc->__reserved;
+    while (cursor + 8 <= end) {
+        uint32_t magic, size;
+        memcpy(&magic, cursor, 4); memcpy(&size, cursor + 4, 4);
+        if (!magic || size < 8 || (size & 15) || (size_t)(end - cursor) < size) break;
+        if (magic == 0x45535201u && size >= 16) {
+            uint64_t esr; memcpy(&esr, cursor + 8, 8);
+            return ((esr >> 26) == 0x24 || (esr >> 26) == 0x25) && (esr & 0x40);
+        }
+        cursor += size;
+    }
+    return 0;
+}
+#endif
+
+void d3_crash_handler_body(int sig, siginfo_t *si, void *context) {
     /* Only a guest fault needs its host TLS restored. Other threads must retain
        their own TLS while the preceding signal action runs. */
     ucontext_t *uc = context;
     mcontext_t *mc = &uc->uc_mcontext;
+#ifdef D3_WITH_GPU
+    if (sig == SIGSEGV && si && (si->si_code == SEGV_ACCERR || si->si_code == SEGV_MAPERR) && cpu_write_fault(mc) &&
+        d3_gpu_handle_cpu_write_fault((uint64_t)(uintptr_t)si->si_addr))
+        return;
+#endif
     /* Not one of our guest threads: hand the fault back to whoever installed a
        handler before us (ART, the framework), exactly as the kernel would. */
     if (!thread_is_guest((pid_t)syscall(SYS_gettid))) {
+#ifdef D3_WITH_GPU
+        if (sig == SIGSEGV && g_write_watch_signal && g_kernel_signals[sig].handler &&
+            g_kernel_signals[sig].handler != (uint64_t)(uintptr_t)crash_handler) {
+            /* Preserve ART's original context and keep the kernel interceptor
+               installed. Re-raising here loses the faulting Java instruction. */
+            void (*handler)(int, siginfo_t*, void*) =
+                (void (*)(int, siginfo_t*, void*))(uintptr_t)g_kernel_signals[sig].handler;
+            handler(sig, si, context);
+            return;
+        }
+#endif
         const struct sigaction *previous = &g_previous_signals[sig];
         static int framework_logs;
         if (framework_logs < 24) {
@@ -941,6 +1028,8 @@ static void crash_handler(int sig, siginfo_t *si, void *context) {
         dump_memory_links(19, (uint64_t)mc->regs[19]);
         dump_memory_links(20, (uint64_t)mc->regs[20]);
         dump_memory_links(21, (uint64_t)mc->regs[21]);
+        if (pc == g_bias + 0x1a2c440u && lr == g_bias + 0x16c24b8u)
+            dump_resource_cache((uint64_t)mc->regs[19]);
     }
     for (uint32_t i = 0; i < g_trace_count; i++) {
         dump_field("t_kind", g_trace[i].kind);
@@ -1061,6 +1150,22 @@ static void install_signal_actions(void) {
         D3SigAction kernel;
         if (sigaction(sig, 0, &g_previous_signals[sig]) != 0)
             fail("sigaction read %d errno %d", sig, errno);
+#ifdef D3_WITH_GPU
+        if (sig == SIGSEGV && access(D3_DATA_ROOT "/gpu-write-watch", R_OK) == 0) {
+            /* Like Eden's NCE signal chain, intercept before ART can touch the
+               guest's TPIDR_EL0. Do not also register as ART's user handler:
+               passing a framework fault to ART would recurse back into us. */
+            raw_sigaction(sig, 0, &kernel);
+            g_kernel_signals[sig] = kernel;
+            D3SigAction watched = kernel;
+            watched.handler = (uint64_t)(uintptr_t)crash_handler;
+            watched.flags |= SA_SIGINFO;
+            g_write_watch_signal = 1;
+            raw_sigaction(sig, &watched, 0);
+            info("sig %d CPU write-watch kernel interceptor installed", sig);
+            continue;
+        }
+#endif
         memset(&action, 0, sizeof action);
         action.sa_sigaction = crash_handler;
         action.sa_mask = g_previous_signals[sig].sa_mask;
@@ -1182,7 +1287,10 @@ typedef struct {
     int32_t code;
     int32_t pad;
     uint64_t addr;
+    uint8_t remainder[104];
 } D3Siginfo;
+
+_Static_assert(sizeof(D3Siginfo) == 128, "Linux siginfo ABI");
 
 static char g_trace_line[TRACE_SLOT];
 static char g_trace_state[0x3000];
@@ -1467,10 +1575,11 @@ static void t_state(long fd, pid_t target, uint64_t index, pid_t tid, int sig, i
             p = t_str(p, "sp read failed\n");
         }
     }
-    t_pwrite(fd, TRACE_STATE_OFF, g_trace_state, (size_t)(p - g_trace_state));
+    t_pwrite(fd, TRACE_STATE_OFF + (index % 16u) * 0x4000u,
+             g_trace_state, (size_t)(p - g_trace_state));
 }
 
-static void tracer_main(pid_t target) {
+static void tracer_main(pid_t target, pid_t attach_tid) {
     D3PtRegs regs;
     D3Siginfo info;
     D3Iov local;
@@ -1482,7 +1591,7 @@ static void tracer_main(pid_t target) {
     if (fd < 0)
         raw_syscall6(RAW_SYS_EXIT_GROUP, 3, 0, 0, 0, 0, 0);
     for (int attempt = 0; attempt < 300 && !attached; attempt++) {
-        if (raw_syscall6(RAW_SYS_PTRACE, D3_PTRACE_ATTACH, target, 0, 0, 0, 0) == 0)
+        if (raw_syscall6(RAW_SYS_PTRACE, D3_PTRACE_ATTACH, attach_tid, 0, 0, 0, 0) == 0)
             attached = 1;
         else
             t_sleep_ms(10);
@@ -1563,7 +1672,7 @@ static void tracer_main(pid_t target) {
             sig == SIGSYS || sig == SIGTRAP) {
             faults++;
             t_dump_maps(fd, target);
-            t_state(fd, target, seq, (pid_t)tid, sig, event, &regs, &info);
+            t_state(fd, target, faults, (pid_t)tid, sig, event, &regs, &info);
         }
         /* Suppressing a stop would swallow a real signal, so only the stops the tracer
            itself caused are dropped. */
@@ -1586,9 +1695,10 @@ static int trace_requested(void) {
    has all the locks: it only has to tell the kernel the child may attach. */
 static void start_tracer(void) {
     pid_t self = getpid();
+    const pid_t attach_tid = gettid();
     long child = raw_syscall6(RAW_SYS_CLONE, D3_SIGCHLD, 0, 0, 0, 0, 0);
     if (child == 0) {
-        tracer_main(self);
+        tracer_main(self, attach_tid);
         raw_syscall6(RAW_SYS_EXIT_GROUP, 0, 0, 0, 0, 0, 0);
     }
     if (child > 0)
@@ -1750,7 +1860,7 @@ static uint64_t hook_time_to_calendar(uint64_t calendar_out, uint64_t info_out, 
    pointers, so the host can read and write the guest's buffers directly.
    Paths like "data:/CPKs/Common.cpk" resolve under the staged game data. */
 
-#define D3_FS_HANDLES 32
+#define D3_FS_HANDLES 256
 
 typedef struct {
     int used;
@@ -1759,13 +1869,66 @@ typedef struct {
 } FsHandle;
 
 static FsHandle g_fs_handles[D3_FS_HANDLES];
+static pthread_mutex_t g_fs_handle_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* The staged game data is readable but not writable by the app, so anything the
    title creates has to live in the app's own storage; reads fall back to the
    shared copy. */
 static const char *const g_guest_data_roots[] = {
-    "/data/local/tmp/d3romfs",
+    D3_CONTENT_ROOT,
 };
+
+static pthread_mutex_t g_addon_mount_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct { char name[16]; unsigned index; } g_addon_mounts[32];
+static uint64_t g_unmount_trampoline;
+static uint32_t g_addon_mount_logs;
+extern void d3_call_guest_one(uint64_t function, uint64_t argument, uint64_t thread_tp);
+
+static uint64_t hook_fs_unmount(uint64_t name_pointer) {
+    const char *name = (const char *)(uintptr_t)name_pointer;
+    if (!name) return 0;
+    pthread_mutex_lock(&g_addon_mount_mutex);
+    for (size_t i = 0; i < 32; ++i) {
+        if (!g_addon_mounts[i].name[0] || strcmp(g_addon_mounts[i].name, name)) continue;
+        g_addon_mounts[i].name[0] = 0;
+        pthread_mutex_unlock(&g_addon_mount_mutex);
+        if (__atomic_fetch_add(&g_addon_mount_logs, 1, __ATOMIC_RELAXED) < 24)
+            info("fs: Unmount addon %s", name);
+        return 0;
+    }
+    pthread_mutex_unlock(&g_addon_mount_mutex);
+    if (g_unmount_trampoline) d3_call_guest_one(g_unmount_trampoline, name_pointer, hook_guest_tp());
+    return 0;
+}
+
+static uint64_t hook_fs_addon_cache_size(uint64_t out, uint64_t index) {
+    char root[512];
+    if (!out || index > 0xfff || !d3_content_addon_root((unsigned)index, root, sizeof root)) return 0x202u;
+    *(uint64_t *)(uintptr_t)out = 4096;
+    return 0;
+}
+
+static uint64_t hook_fs_mount_addon(uint64_t name_pointer, uint64_t index,
+                                  uint64_t cache, uint64_t cache_size) {
+    const char *name = (const char *)(uintptr_t)name_pointer;
+    char root[512];
+    if (!name || !*name || strlen(name) >= sizeof g_addon_mounts[0].name ||
+        strchr(name, ':') || strchr(name, '/') || strchr(name, '\\') ||
+        !cache || cache_size < 4096 || index > 0xfff || !d3_content_addon_root((unsigned)index, root, sizeof root))
+        return 0x202u;
+    pthread_mutex_lock(&g_addon_mount_mutex);
+    for (size_t i = 0; i < 32; ++i) {
+        if (g_addon_mounts[i].name[0] && strcmp(g_addon_mounts[i].name, name)) continue;
+        snprintf(g_addon_mounts[i].name, sizeof g_addon_mounts[i].name, "%s", name);
+        g_addon_mounts[i].index = (unsigned)index;
+        pthread_mutex_unlock(&g_addon_mount_mutex);
+        if (__atomic_fetch_add(&g_addon_mount_logs, 1, __ATOMIC_RELAXED) < 24)
+            info("fs: MountAddOnContent %s index=%llu root=%s", name, (unsigned long long)index, root);
+        return 0;
+    }
+    pthread_mutex_unlock(&g_addon_mount_mutex);
+    return 0x2a02u;
+}
 
 #define D3_GUEST_WRITE_ROOT D3_PRIVATE_ROOT "/files/romfs"
 
@@ -1805,10 +1968,44 @@ static void make_parents(const char *host) {
 }
 
 static int guest_data_host(const char *path, char *out, size_t size, int create) {
+    const char *colon = strchr(path, ':');
+    if (colon && strncmp(path, "data:", 5) && strncmp(path, "save", 4)) {
+        char root[512] = {0};
+        pthread_mutex_lock(&g_addon_mount_mutex);
+        for (size_t i = 0; i < 32; ++i) {
+            const size_t length = strlen(g_addon_mounts[i].name);
+            if (length && (size_t)(colon - path) == length && !memcmp(path, g_addon_mounts[i].name, length)) {
+                if (!d3_content_addon_root(g_addon_mounts[i].index, root, sizeof root)) root[0] = 0;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&g_addon_mount_mutex);
+        if (!root[0] || create) return -1;
+        const char *name = colon + 1;
+        while (*name == '/') ++name;
+        if (strstr(name, "..") || strchr(name, ':') || strchr(name, '\\')) return -1;
+        const int length = snprintf(out, size, "%s/%s", root, name);
+        return length >= 0 && (size_t)length < size ? 0 : -1;
+    }
+    if (!strncmp(path, "save", 4)) {
+        const char *colon = path + 4;
+        while (*colon >= '0' && *colon <= '9') colon++;
+        if (*colon == ':') {
+            const char *name = colon + 1;
+            while (*name == '/') name++;
+            if (strstr(name, "..") || strchr(name, ':') || strchr(name, '\\')) return -1;
+            const int length = snprintf(out, size, "%s/%s", D3_LOCAL_SAVE_ROOT, name);
+            return length >= 0 && (size_t)length < size ? 0 : -1;
+        }
+    }
     const char *name = guest_data_name(path);
     if (*name == 0)
         return -1;
     snprintf(out, size, "%s/%s", create ? D3_GUEST_WRITE_ROOT : g_guest_data_roots[0], name);
+    for (char *separator = out; *separator; separator++) {
+        if (*separator == '\\')
+            *separator = '/';
+    }
     if (create)
         make_parents(out);
     if (create) {
@@ -1846,27 +2043,28 @@ static int fs_open_host_mode(const char *path, int writable) {
         info("fs: open %s failed errno %d", path, errno);
         return -1;
     }
+    struct stat statbuf;
+    if (fstat(fd, &statbuf) != 0 || !S_ISREG(statbuf.st_mode)) {
+        close(fd);
+        return -1;
+    }
+    pthread_mutex_lock(&g_fs_handle_mutex);
     for (int index = 0; index < D3_FS_HANDLES; index++) {
         if (g_fs_handles[index].used)
             continue;
-        struct stat statbuf;
-        if (fstat(fd, &statbuf) != 0) {
-            close(fd);
-            return -1;
-        }
         g_fs_handles[index].used = 1;
         g_fs_handles[index].fd = fd;
         g_fs_handles[index].size = (int64_t)statbuf.st_size;
+        pthread_mutex_unlock(&g_fs_handle_mutex);
         info("fs: opened %s (%lld bytes) as handle %d", host, (long long)statbuf.st_size, index + 1);
         return index + 1;
     }
+    pthread_mutex_unlock(&g_fs_handle_mutex);
     close(fd);
     return -1;
 }
 
-/* nn::fs reports a missing path as MAKERESULT(2, 7); callers branch on exactly
-   this value to tell "optional file absent" from a real failure. */
-#define D3_FS_NOT_FOUND 0xE02u
+#define D3_FS_NOT_FOUND 0x202u
 
 static uint64_t hook_fs_open_file(uint64_t out, uint64_t path, uint64_t mode) {
     info("fs: OpenFile %s mode=%#" PRIx64, path ? (const char *)(uintptr_t)path : "(null)", mode);
@@ -1890,18 +2088,25 @@ static uint64_t hook_fs_open_file(uint64_t out, uint64_t path, uint64_t mode) {
 }
 
 static uint64_t hook_fs_close_file(uint64_t handle) {
+    pthread_mutex_lock(&g_fs_handle_mutex);
     FsHandle *slot = fs_handle_of(handle);
-    if (slot == 0)
+    if (slot == 0) {
+        pthread_mutex_unlock(&g_fs_handle_mutex);
         return D3_FS_NOT_FOUND;
+    }
     close(slot->fd);
     slot->used = 0;
+    pthread_mutex_unlock(&g_fs_handle_mutex);
     return 0;
 }
 
 static int64_t fs_read(uint64_t handle, int64_t offset, uint64_t buffer, uint64_t size) {
     FsHandle *slot = fs_handle_of(handle);
-    info("fs: read begin h=%llu off=%lld buf=%#" PRIx64 " size=%llu", (unsigned long long)handle,
-         (long long)offset, buffer, (unsigned long long)size);
+    static uint32_t reads_logged;
+    const int log_read = __atomic_fetch_add(&reads_logged, 1, __ATOMIC_RELAXED) < 128;
+    if (log_read)
+        info("fs: read begin h=%llu off=%lld buf=%#" PRIx64 " size=%llu", (unsigned long long)handle,
+             (long long)offset, buffer, (unsigned long long)size);
     if (slot == 0 || buffer == 0) {
         info("fs: read rejected");
         return -1;
@@ -1918,8 +2123,15 @@ static int64_t fs_read(uint64_t handle, int64_t offset, uint64_t buffer, uint64_
         size = (uint64_t)(slot->size - offset);
         info("fs: read clamped to %llu", (unsigned long long)size);
     }
+#ifdef D3_WITH_GPU
+    d3_gpu_begin_cpu_write(buffer, size);
+#endif
     ssize_t got = pread(slot->fd, (void *)(uintptr_t)buffer, (size_t)size, (off_t)offset);
-    info("fs: read end got=%lld", (long long)got);
+#ifdef D3_WITH_GPU
+    d3_gpu_end_cpu_write();
+#endif
+    if (log_read || got < 0)
+        info("fs: read end got=%lld", (long long)got);
     return got < 0 ? -1 : (int64_t)got;
 }
 
@@ -1951,10 +2163,10 @@ static uint64_t hook_fs_create_file(uint64_t path, uint64_t size, uint64_t mode)
     char host[512];
     if (path == 0 || guest_data_host((const char *)(uintptr_t)path, host, sizeof host, 1) != 0)
         return D3_FS_NOT_FOUND;
-    int fd = open(host, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    int fd = open(host, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
     if (fd < 0) {
         info("fs: create %s failed errno %d", host, errno);
-        return D3_FS_NOT_FOUND;
+        return errno == EEXIST ? 0x402u : D3_FS_NOT_FOUND;
     }
     if ((int64_t)size > 0 && ftruncate(fd, (off_t)(int64_t)size) != 0)
         info("fs: truncate %s errno %d", host, errno);
@@ -1997,84 +2209,6 @@ static uint64_t hook_fs_set_file_size(uint64_t handle, uint64_t size) {
     return 0;
 }
 
-/* nn::vi::native::DeserializeNativeWindow(holder, parcel, size) turns the parcel
-   from CreateStrayLayer into a NativeWindow.  The real object is a binder-backed
-   handle the host does not model yet, so the holder is handed a stable zeroed
-   block instead: everything that later treats it as an opaque pointer keeps
-   working, and the display path can be grown behind it. */
-/* The guest is a 32-bit-minded title: it stores object pointers in 32-bit fields,
-   and a host address above 4 GiB then gets truncated (the wild jumps to 0x48xxxxxx
-   are exactly the low halves of our 0x6e0e... pointers).  Keep the objects this
-   host hands out in the low 4 GiB so a truncating store still yields a valid
-   pointer. */
-static unsigned char *g_native_window;
-static unsigned char *g_vi_layer;
-
-#define D3_LOW_ARENA 0x20000000ull
-#define D3_LOW_ARENA_SIZE 0x2000u
-
-#ifndef MAP_FIXED_NOREPLACE
-#define MAP_FIXED_NOREPLACE 0x100000
-#endif
-
-static void *low_arena(void) {
-    static void *arena;
-    if (arena)
-        return arena;
-    /* A plain mapping: forcing the arena into a low gap collided with ART's JIT
-       space (binder threads started faulting) and the truncation theory it was
-       meant to test is disproven. */
-    void *mapped = mmap(0, D3_LOW_ARENA_SIZE, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (mapped == MAP_FAILED)
-        fail("vi arena allocation errno %d", errno);
-    arena = mapped;
-    g_native_window = (unsigned char *)arena + 0x1000;
-    g_vi_layer = (unsigned char *)arena + 0x800;
-    info("vi: placeholder arena at %p", arena);
-    return arena;
-}
-
-/* The real nn::vi::Layer is built from a binder-backed native window.  Handing
-   the title a stable placeholder layer keeps its display code running while the
-   window system stays unimplemented. */
-static uint64_t hook_vi_create_layer(uint64_t out, uint64_t display, uint64_t arg2, uint64_t arg3) {
-    (void)low_arena();
-    (void)display;
-    (void)arg2;
-    (void)arg3;
-    if (out)
-        *(uint64_t *)(uintptr_t)out = (uint64_t)(uintptr_t)g_vi_layer;
-    info("vi: CreateLayer out=%p -> placeholder %p", (void *)(uintptr_t)out, (void *)g_vi_layer);
-    return 0;
-}
-
-/* A zeroed block makes the first dereference land on 0; pointing the head at the
-   tail keeps a shallow chain of loads inside the block. */
-static void native_window_init(void) {
-    (void)low_arena();
-    *(uint64_t *)&g_native_window[0] = (uint64_t)(uintptr_t)&g_native_window[0x40];
-    *(uint64_t *)&g_native_window[0x40] = (uint64_t)(uintptr_t)&g_native_window[0x80];
-}
-
-static uint64_t hook_vi_deserialize_native_window(uint64_t holder, uint64_t parcel, uint64_t size) {
-    (void)parcel;
-    (void)size;
-    native_window_init();
-    if (holder)
-        *(uint64_t *)(uintptr_t)holder = (uint64_t)(uintptr_t)g_native_window;
-    info("vi: DeserializeNativeWindow holder=%p -> dummy %p", (void *)(uintptr_t)holder,
-         (void *)g_native_window);
-    return 0;
-}
-
-static uint64_t hook_vi_get_native_window(uint64_t out, uint64_t layer) {
-    (void)layer;
-    if (out)
-        *(uint64_t *)(uintptr_t)out = (uint64_t)(uintptr_t)g_native_window;
-    info("vi: GetNativeWindow out=%p -> dummy %p", (void *)(uintptr_t)out, (void *)g_native_window);
-    return 0;
-}
 
 /* Diagnostic: the guest currently dies through std::terminate.  __cxa_throw is
    called with (object, std::type_info*, destructor) and its guest return
@@ -2297,16 +2431,24 @@ static uint64_t hook_critical_enter(uint64_t self) {
         return 0;
     }
     const uint32_t id = guest_thread_id(hook_guest_tp());
-    uint32_t word = 0;
-    if (!safe_read(self, &word, sizeof word))
-        return 0;
-    if (word == 0) {
-        if (safe_write(self, &id, sizeof id))
+    uint32_t *mutex = (uint32_t *)(uintptr_t)self;
+    uint32_t word = __atomic_load_n(mutex, __ATOMIC_ACQUIRE);
+    for (;;) {
+        if ((word & ~D3_SYNC_WAIT_MASK) == id)
             return 0;
-        return 0;
+        const uint32_t desired = word ? word | D3_SYNC_WAIT_MASK : id;
+        if (!__atomic_compare_exchange_n(mutex, &word, desired, 0,
+                                         __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            continue;
+        if (word == 0)
+            return 0;
+        const uint32_t result = d3_sync_lock(word & ~D3_SYNC_WAIT_MASK, mutex, id);
+        if (result != 0)
+            fail("critical section %p wait failed: %#x owner=%#x tag=%#x word=%#x owner-kind=%d",
+                 (void *)mutex, result, word & ~D3_SYNC_WAIT_MASK, id,
+                 __atomic_load_n(mutex, __ATOMIC_ACQUIRE), d3_handle_kind(word & ~D3_SYNC_WAIT_MASK));
+        word = __atomic_load_n(mutex, __ATOMIC_ACQUIRE);
     }
-    (void)d3_sync_lock(word & ~D3_SYNC_WAIT_MASK, (uint32_t *)(uintptr_t)self, id);
-    return 0;
 }
 
 /* The engine bails out through nn::os::ExitProcess when an initialisation step
@@ -2337,6 +2479,67 @@ static uint64_t hook_abort_impl(uint64_t a, uint64_t b, uint64_t c, uint64_t d, 
         info("abort operand [%#" PRIx64 "] = %#x", e, operand);
     else
         info("abort operand arg4=%#" PRIx64 " arg5=%#" PRIx64, e, f);
+    /* nn::account::Initialize keeps its state in statics: the init count and its
+       mutex live at image +0xbf65cc / +0xbf65d0, and the ObjectHolder it fills is
+       at +0xc520b0 (the client object it acquired lands at +8).  The failing
+       nn::Result travels in whichever of sp, sp+8, sp+0x18 the operand pointer
+       names, so the words around it say which of the three checks aborted. */
+    if (g_bias) {
+        uint32_t init_count = 0;
+        uint64_t holder[2] = {0, 0};
+        (void)safe_read(g_bias + 0xbf65ccu, &init_count, sizeof init_count);
+        (void)safe_read(g_bias + 0xc520b0u, holder, sizeof holder);
+        info("abort account init_count=%#x holder=%#" PRIx64 " object=%#" PRIx64
+             " last_reply=%#x", init_count, holder[0], holder[1], d3_service_last_result());
+        if (holder[1]) {
+            uint64_t object[8] = {0};
+            if (safe_read(holder[1], object, sizeof object))
+                info("abort account object %#" PRIx64 ": %#" PRIx64 " %#" PRIx64 " %#" PRIx64
+                     " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64,
+                     holder[1], object[0], object[1], object[2], object[3], object[4], object[5],
+                     object[6], object[7]);
+            else
+                info("abort account object %#" PRIx64 " unreadable", holder[1]);
+        }
+        /* The hid applet resource path (sdk+0x250300) calls a second proxy
+           through this global right after CreateAppletResource; when that call
+           fails the abort lands here, so the global and its object name the
+           proxy and the session handle it carries. */
+        uint64_t proxy = 0;
+        if (safe_read(g_bias + 0xc9bba8u, &proxy, sizeof proxy) && proxy) {
+            uint64_t object[16] = {0};
+            if (safe_read(proxy, object, sizeof object)) {
+                info("abort hid global %#" PRIx64 " -> %#" PRIx64 " vtbl=%#" PRIx64,
+                     g_bias + 0xc9bba8u, proxy, object[0]);
+                info("abort hid object %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#"
+                     PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64,
+                     object[0], object[1], object[2], object[3], object[4], object[5], object[6],
+                     object[7]);
+                uint64_t slots[8] = {0};
+                if (object[0] >= g_bias && safe_read(object[0], slots, sizeof slots))
+                    info("abort hid vtbl %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64
+                         " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64,
+                         slots[0], slots[1], slots[2], slots[3], slots[4], slots[5], slots[6],
+                         slots[7]);
+            } else {
+                info("abort hid global %#" PRIx64 " -> %#" PRIx64 " unreadable",
+                     g_bias + 0xc9bba8u, proxy);
+            }
+        } else {
+            info("abort hid global %#" PRIx64 " -> %#" PRIx64, g_bias + 0xc9bba8u, proxy);
+        }
+        if (e >= 0x40) {
+            uint64_t words[12] = {0};
+            if (safe_read(e - 0x20, words, sizeof words))
+                info("abort words %#" PRIx64 ": %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64
+                     " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64
+                     " %#" PRIx64 " %#" PRIx64,
+                     e - 0x20, words[0], words[1], words[2], words[3], words[4], words[5], words[6],
+                     words[7], words[8], words[9], words[10], words[11]);
+            else
+                info("abort words %#" PRIx64 " unreadable", e - 0x20);
+        }
+    }
     abort();
     return 0;
 }
@@ -2395,107 +2598,125 @@ static uint64_t hook_mutex_unlock(uint64_t mutex) {
     return 0;
 }
 
-/* NV bring-up probe: this guest function dereferences [[this+8]+0x1ab8], an
-   object created by a later stage, and faults while the host still answers the
-   nvdrv ioctls as stubs.  Report the arguments and skip the call so the boot can
-   continue and reveal the next requirement. */
 static void restore_hook(uint64_t vaddr);
-static int g_nv_restore = 1;
 
-static uint64_t hook_nv_probe(uint64_t self, uint64_t arg) {
-    static int logs;
-    if (logs < 16) {
-        uint64_t device = 0;
-        uint64_t sub = 0;
-        if (self)
-            (void)safe_read(self + 8, &device, sizeof device);
-        if (device)
-            (void)safe_read(device + 0x1ab8, &sub, sizeof sub);
-        logs++;
-        info("nv: probe self=%#" PRIx64 " arg=%#" PRIx64 " device=%#" PRIx64 " sub=%#" PRIx64,
-             self, arg, device, sub);
-        /* The submit path of every frame reads [device+0x1ab8] and dereferences
-           its +0x10.  That object is created by an NV initialisation step this
-           host never completed, so it stays NULL and nothing is ever submitted.
-           Give it a self-consistent placeholder so the engine's "device exists"
-           path can be reached (and then the real submit code can be unhooked). */
-        if (device) {
-            uint64_t placeholder = (uint64_t)(uintptr_t)low_arena() + 0x200;
-            if (sub == 0) {
-                /* Self-referential dummy: whatever field the submit code reads
-                   through this object comes back as the object itself, so a
-                   shallow chain of loads stays inside valid memory. */
-                for (int word = 0; word < 64; word++)
-                    *(uint64_t *)(uintptr_t)(placeholder + (uint64_t)word * 8) = placeholder;
-                if (!safe_write(device + 0x1ab8, &placeholder, sizeof placeholder))
-                    info("nv: probe could not store the placeholder into %#" PRIx64, device);
-                else {
-                    info("nv: probe placeholder %#" PRIx64 " -> [%#" PRIx64 "+0x1ab8]",
-                         placeholder, device);
-                    /* Restoring the real submit function reaches further, but it
-                       then faults on another uninitialised image object, so the
-                       skip stays the default; flip this to 1 to explore it. */
-                    if (g_bias && g_nv_restore)
-                        restore_hook(g_bias + 0x43a9b0u);
-                }
-            }
-        }
-    }
-    return 0;
-}
+typedef struct {
+    char name[0x301];
+    uint8_t padding[3];
+    uint8_t type;
+    uint8_t reserved[3];
+    int64_t size;
+} GuestDirectoryEntry;
 
-/* Directory listing is not implemented against the host tree; report "path not
-   found" so the engine's own "nothing to enumerate" path runs instead of walking
-   an entry buffer that was never filled (that walk ended in a wild pointer). */
+_Static_assert(sizeof(GuestDirectoryEntry) == 0x310, "Horizon directory entry ABI");
+
+typedef struct {
+    DIR *directory;
+    uint32_t mode;
+} GuestDirectory;
+
+static GuestDirectory g_directories[32];
+static pthread_mutex_t g_directory_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static uint64_t hook_fs_open_directory(uint64_t out, uint64_t path, uint64_t mode) {
-    (void)mode;
-    info("fs: OpenDirectory %s -> not found", path ? (const char *)(uintptr_t)path : "(null)");
-    (void)out;
+    if (!out || !path || !(mode & 3u) || (mode & ~UINT64_C(0x80000003)))
+        return D3_FS_NOT_FOUND;
+    char host[512];
+    if (guest_data_host((const char *)(uintptr_t)path, host, sizeof host, 0) != 0)
+        return D3_FS_NOT_FOUND;
+    DIR *directory = opendir(host);
+    if (!directory)
+        return D3_FS_NOT_FOUND;
+    pthread_mutex_lock(&g_directory_mutex);
+    for (uint32_t index = 0; index < 32; index++) {
+        if (g_directories[index].directory)
+            continue;
+        g_directories[index] = (GuestDirectory){directory, (uint32_t)mode};
+        *(uint64_t *)(uintptr_t)out = index + 1;
+        pthread_mutex_unlock(&g_directory_mutex);
+        info("fs: OpenDirectory %s mode=%#" PRIx64 " -> %u", host, mode, index + 1);
+        return 0;
+    }
+    pthread_mutex_unlock(&g_directory_mutex);
+    closedir(directory);
     return D3_FS_NOT_FOUND;
 }
 
-/* nn::fs::ReadDirectory writes the number of entries it filled; leaving it to the
-   unhooked SDK path made the engine walk a directory buffer that never existed
-   (tens of thousands of data:/_CrashInfo-N.txt probes).  An empty listing keeps
-   the walk at zero entries. */
+static int fs_next_directory(GuestDirectory *directory, GuestDirectoryEntry *output) {
+    struct dirent *entry;
+    while ((entry = readdir(directory->directory)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        struct stat metadata;
+        if (fstatat(dirfd(directory->directory), entry->d_name, &metadata, AT_SYMLINK_NOFOLLOW) != 0)
+            continue;
+        const int is_directory = S_ISDIR(metadata.st_mode);
+        if ((!is_directory && !S_ISREG(metadata.st_mode)) ||
+            !(directory->mode & (is_directory ? 1u : 2u)))
+            continue;
+        if (output) {
+            memset(output, 0, sizeof *output);
+            snprintf(output->name, sizeof output->name, "%s", entry->d_name);
+            output->type = is_directory ? 0 : 1;
+            output->size = is_directory || (directory->mode & 0x80000000u) ? 0 : metadata.st_size;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static uint64_t hook_fs_read_directory(uint64_t out, uint64_t buffer, uint64_t handle,
                                        uint64_t count) {
-    (void)buffer;
-    (void)handle;
-    (void)count;
-    if (out)
-        *(int64_t *)(uintptr_t)out = 0;
-    return 0;
-}
-
-/* Belt and braces: a caller that ignores the failed OpenDirectory still asks for
-   the entry count, which must never stay an uninitialised stack value. */
-static uint64_t hook_fs_directory_count(uint64_t out, uint64_t handle) {
-    (void)handle;
-    if (out)
-        *(int64_t *)(uintptr_t)out = 0;
-    return 0;
-}
-
-/* The engine's startup walks a list of "crash info" records (0x310 bytes each)
-   and probes data:/_CrashInfo-N.txt for every one of them; the list is driven by
-   engine state the host does not model, so the walk never ends.  Skipping the
-   whole cleanup reports "nothing to clean" and lets nnMain continue. */
-static uint64_t hook_crash_cleanup(uint64_t self, uint64_t arg) {
-    static int logs;
-    if (logs < 6) {
-        logs++;
-        const uint64_t site = g_hook_tls.guest_lr;
-        uint64_t name = 0;
-        if (self)
-            (void)safe_read(self + 8, &name, sizeof name);
-        info("fs: crash probe caller=%#" PRIx64 " (%s+%#" PRIx64 ") self=%#" PRIx64
-             " arg=%#" PRIx64 " name=%#" PRIx64,
-             site, module_of(site), site >= g_bias ? site - g_bias : 0, self, arg, name);
+    if (!out || !handle || handle > 32 || (int64_t)count < 0 || (count && !buffer))
+        return D3_FS_NOT_FOUND;
+    pthread_mutex_lock(&g_directory_mutex);
+    GuestDirectory *directory = &g_directories[handle - 1];
+    if (!directory->directory) {
+        pthread_mutex_unlock(&g_directory_mutex);
+        return D3_FS_NOT_FOUND;
     }
-    /* The walk breaks as soon as the callback reports "nothing to do" (bit 0 of
-       the return value clear), so this ends the endless data:/_CrashInfo-N.txt
-       probing instead of answering like a missing file. */
+    uint64_t filled = 0;
+    while (filled < count && fs_next_directory(directory,
+            &((GuestDirectoryEntry *)(uintptr_t)buffer)[filled]))
+        filled++;
+    *(int64_t *)(uintptr_t)out = (int64_t)filled;
+    pthread_mutex_unlock(&g_directory_mutex);
+    info("fs: ReadDirectory h=%" PRIu64 " -> %" PRIu64 " entries", handle, filled);
+    return 0;
+}
+
+static uint64_t hook_fs_directory_count(uint64_t out, uint64_t handle) {
+    if (!out || !handle || handle > 32)
+        return D3_FS_NOT_FOUND;
+    pthread_mutex_lock(&g_directory_mutex);
+    GuestDirectory *directory = &g_directories[handle - 1];
+    if (!directory->directory) {
+        pthread_mutex_unlock(&g_directory_mutex);
+        return D3_FS_NOT_FOUND;
+    }
+    const long position = telldir(directory->directory);
+    rewinddir(directory->directory);
+    int64_t count = 0;
+    while (fs_next_directory(directory, NULL))
+        count++;
+    seekdir(directory->directory, position);
+    *(int64_t *)(uintptr_t)out = count;
+    pthread_mutex_unlock(&g_directory_mutex);
+    return 0;
+}
+
+static uint64_t hook_fs_close_directory(uint64_t handle) {
+    if (!handle || handle > 32)
+        return D3_FS_NOT_FOUND;
+    pthread_mutex_lock(&g_directory_mutex);
+    GuestDirectory *directory = &g_directories[handle - 1];
+    if (!directory->directory) {
+        pthread_mutex_unlock(&g_directory_mutex);
+        return D3_FS_NOT_FOUND;
+    }
+    closedir(directory->directory);
+    memset(directory, 0, sizeof *directory);
+    pthread_mutex_unlock(&g_directory_mutex);
     return 0;
 }
 
@@ -2513,13 +2734,153 @@ static uint64_t hook_get_port_processor(uint64_t name) {
     return 0;
 }
 
+/* ------------------------------------------------------------ hid probes -- */
+/* Two probes on nn::hid's applet-resource path.  The SDK builds an
+   IAppletResource proxy right after each CreateAppletResource reply and then
+   sends GetSharedMemoryHandle on it, so the question is what the SDK used as
+   that proxy's session.  Both probes log, then put the real function back and
+   call it, which keeps the guest behaviour unchanged. */
+
+static void probe_dump(const char *tag, uint64_t address, int words) {
+    uint64_t values[16] = {0};
+    if (!address || words < 1 || words > 16 || !safe_read(address, values, (uint64_t)words * 8)) {
+        info("probe %s %#" PRIx64 " unreadable", tag, address);
+        return;
+    }
+    for (int index = 0; index < words; index += 4)
+        info("probe %s %#" PRIx64 " +%#x: %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64, tag,
+             address, index * 8, values[index], values[index + 1], values[index + 2],
+             values[index + 3]);
+}
+
+static uint64_t probe_call_site(uint64_t vaddr, const char *what, uint64_t a0, uint64_t a1,
+                                uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    restore_hook(g_bias + vaddr);
+    typedef uint64_t (*body_t)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    body_t body = (body_t)(uintptr_t)(g_bias + vaddr);
+    (void)what;
+    return body(a0, a1, a2, a3, a4, a5);
+}
+
+/* nn::hid::detail::SharedMemoryAccessor::Activate: x0 is the hid facade the SDK
+   asks for the applet resource, so its vtable names the owner of the path. */
+static uint64_t hook_activate_probe(uint64_t self, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+                                    uint64_t arg4, uint64_t arg5) {
+    static int logs;
+    if (logs < 8) {
+        logs++;
+        const uint64_t site = g_hook_tls.guest_lr;
+        info("probe Activate self=%#" PRIx64 " args=%#" PRIx64 " %#" PRIx64 " %#" PRIx64
+             " %#" PRIx64 " %#" PRIx64 " lr=%#" PRIx64 " (%s+%#" PRIx64 ")",
+             self, arg1, arg2, arg3, arg4, arg5, site, module_of(site),
+             site >= g_bias ? site - g_bias : 0);
+        probe_dump("Activate self", self, 8);
+        uint64_t vtbl = 0;
+        if (self && safe_read(self, &vtbl, sizeof vtbl))
+            probe_dump("Activate vtbl", vtbl, 8);
+        /* x1 points at the caller's own variable holding the object Activate
+           sends the applet resource request through: name it and its method. */
+        uint64_t object = 0;
+        if (arg1 && safe_read(arg1, &object, sizeof object) && object) {
+            probe_dump("Activate arg1 object", object, 8);
+            uint64_t object_vtbl = 0;
+            if (safe_read(object, &object_vtbl, sizeof object_vtbl))
+                probe_dump("Activate arg1 vtbl", object_vtbl, 8);
+        }
+        probe_dump("hid statics", g_bias + 0xc9bb70u, 16);
+        probe_dump("ipc buffer", d3_service_current_buffer(), 16);
+        d3_dump_sdk_global(0xc9bb98u);
+        d3_dump_sdk_global(0xc9bba8u);
+    }
+    return probe_call_site(0x2501e0u, "Activate", self, arg1, arg2, arg3, arg4, arg5);
+}
+
+/* The applet resource proxy's first method.  x0 is the object's CmifProxy
+   subobject, whose +4 is the session handle the request goes out on. */
+static uint64_t hook_gshm_probe(uint64_t self, uint64_t out, uint64_t arg2, uint64_t arg3,
+                                uint64_t arg4, uint64_t arg5) {
+    static int logs;
+    if (logs < 8) {
+        logs++;
+        const uint64_t site = g_hook_tls.guest_lr;
+        info("probe GetSharedMemoryHandle self=%#" PRIx64 " out=%#" PRIx64 " lr=%#" PRIx64
+             " (%s+%#" PRIx64 ")",
+             self, out, site, module_of(site), site >= g_bias ? site - g_bias : 0);
+        if (self)
+            probe_dump("proxy", self - 8, 8);
+        probe_dump("ipc buffer", d3_service_current_buffer(), 16);
+        d3_dump_sdk_global(0xc9bb98u);
+    }
+    return probe_call_site(0x26ce10u, "GetSharedMemoryHandle", self, out, arg2, arg3, arg4, arg5);
+}
+
+/* nn::hid::IHidServer::CreateAppletResource: x0 is the IHidServer proxy, x1
+   holds the out-raw slot the aruid lands in, x2 addresses the out object the
+   SDK builds from the reply and x4 is the holder the reply processing fills.
+   The proxy the SDK then sends GetSharedMemoryHandle on comes out of here, so
+   dump both the holder and whatever object it holds, before and after. */
+static uint64_t hook_create_applet_resource(uint64_t self, uint64_t out, uint64_t object_arg,
+                                            uint64_t command, uint64_t holder, uint64_t arg5) {
+    static int logs;
+    if (logs < 4) {
+        logs++;
+        const uint64_t site = g_hook_tls.guest_lr;
+        info("probe CreateAppletResource self=%#" PRIx64 " out=%#" PRIx64 " object=%#" PRIx64
+             " command=%#" PRIx64 " holder=%#" PRIx64 " arg5=%#" PRIx64 " lr=%#" PRIx64
+             " (%s+%#" PRIx64 ")",
+             self, out, object_arg, command, holder, arg5, site, module_of(site),
+             site >= g_bias ? site - g_bias : 0);
+        probe_dump("create before out", out, 4);
+        probe_dump("create before object", object_arg, 4);
+        probe_dump("create before holder", holder, 4);
+        uint64_t before[4] = {0};
+        if (holder && safe_read(holder, before, sizeof before))
+            info("probe create holder value %#" PRIx64, before[0]);
+        probe_dump("create ipc buffer", d3_service_current_buffer(), 16);
+        d3_dump_sdk_global(0xc9bba8u);
+    }
+    restore_hook(g_bias + 0x26b690u);
+    typedef uint64_t (*body_t)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+    uint64_t result = ((body_t)(uintptr_t)(g_bias + 0x26b690u))(self, out, object_arg, command,
+                                                              holder, arg5);
+    if (logs <= 4) {
+        info("probe CreateAppletResource -> %#" PRIx64 " (%u)", result, (uint32_t)result);
+        probe_dump("create after out", out, 4);
+        probe_dump("create after object", object_arg, 4);
+        probe_dump("create after holder", holder, 4);
+        uint64_t object = 0;
+        if (holder && safe_read(holder, &object, sizeof object) && object) {
+            probe_dump("create result object", object, 8);
+            uint64_t vtbl = 0;
+            if (safe_read(object, &vtbl, sizeof vtbl))
+                probe_dump("create result vtbl", vtbl, 4);
+        }
+        probe_dump("create ipc buffer after", d3_service_current_buffer(), 16);
+    }
+    return result;
+}
+
 static const GuestHook g_hooks[] = {
-    {0x1002210, (void *)hook_crash_cleanup, "engine: crash-info probe shim"},
+    /* Probes stay in the first 64 entries: restore_hook only keeps the
+       original bytes of those. */
+    {0x2501e0, (void *)hook_activate_probe, "probe: hid SharedMemoryAccessor::Activate"},
+    {0x26ce10, (void *)hook_gshm_probe,
+     "probe: hid IAppletResource::GetSharedMemoryHandle"},
+    {0x26b690, (void *)hook_create_applet_resource, "probe: hid CreateAppletResource"},
     {0x205660, (void *)hook_fs_directory_count, "nn::fs::GetDirectoryEntryCount"},
     {0x2071c0, (void *)hook_fs_open_directory, "nn::fs::OpenDirectory"},
     {0x205550, (void *)hook_fs_read_directory, "nn::fs::ReadDirectory"},
-    {0x43a9b0, (void *)hook_nv_probe, "nv: NV init step ([[this+8]+0x1ab8]+0x10)"},
-    {0x2501e0, (void *)hook_success, "nn::hid::detail::SharedMemoryAccessor::Activate"},
+    {0x2054c0, (void *)hook_fs_close_directory, "nn::fs::CloseDirectory"},
+    /* NOT hooked any more.  Activate returns a Result and, on success, makes the
+       SDK map hid's 256 KiB block; with the whole function replaced by "return
+       success" the address it hands out stayed null, so the engine never saw a
+       pad and relaunched the Controller applet in a loop (logcat: the applet=0xc
+       sequence repeating, hid::GetSupportedNpadStyleSet polled ~170 times).
+       Everything it needs is implemented now - hid cmd 0 hands out the block and
+       svcMapSharedMemory seeds it (d3_hid_seed) - so let the real code run:
+       expect "MapSharedMemory ... size=0x40000" and "hid: seeded npad 0" in the
+       probe log.
+    {0x2501e0, (void *)hook_success, "nn::hid::detail::SharedMemoryAccessor::Activate"}, */
     {0x349f30, (void *)hook_critical_enter,
      "nn::os::detail::InternalCriticalSectionImplByHorizon::Enter"},
     {0x3413f0, (void *)hook_mutex_unlock, "nn::os::SdkMutexType::Unlock"},
@@ -2547,7 +2908,7 @@ static const GuestHook g_hooks[] = {
     {0x1924a0, (void *)hook_abort_impl, "nn::diag::detail::AbortImpl(f,f,f,i,r,exc,v)"},
     {0x4d9ea0, (void *)hook_cxa_throw, "__cxa_throw"},
     {0x4d72d8, (void *)hook_terminate, "std::terminate"},
-    {0x532730, (void *)hook_raise_exception, "_Unwind_RaiseException"},
+    {0x531730, (void *)hook_raise_exception, "_Unwind_RaiseException"},
     {0x39e2d0, (void *)hook_time_initialize, "_ZN2nn4time10InitializeEv"},
     {0x39e5e0, (void *)hook_time_is_initialized, "_ZN2nn4time13IsInitializedEv"},
     {0x3a14a0, (void *)hook_time_get_current_time, "StandardUserSystemClock::GetCurrentTime"},
@@ -2562,6 +2923,9 @@ static const GuestHook g_hooks[] = {
     {0x227960, (void *)hook_success, "nn::fs::MountRom(Pc,void*,u64)"},
     {0x227af0, (void *)hook_success, "nn::fs::MountRom(Pc,AppId,void*,u64)"},
     {0x227c80, (void *)hook_success, "nn::fs::MountRom(Pc,i,void*,u64)"},
+    {0x23be20, (void *)hook_fs_addon_cache_size, "nn::fs::QueryMountAddOnContentCacheSize"},
+    {0x23c050, (void *)hook_fs_mount_addon, "nn::fs::MountAddOnContent"},
+    {0x204f80, (void *)hook_fs_unmount, "nn::fs::Unmount"},
     {0x206eb0, (void *)hook_fs_open_file, "nn::fs::OpenFile(FileHandle*,Pc,int)"},
     {0x205700, (void *)hook_fs_close_file, "nn::fs::CloseFile"},
     {0x205950, (void *)hook_fs_read_file, "nn::fs::ReadFile(h,off,buf,size)"},
@@ -2572,12 +2936,6 @@ static const GuestHook g_hooks[] = {
     {0x205a20, (void *)hook_fs_write_file, "nn::fs::WriteFile(h,off,buf,size,opt)"},
     {0x205b60, (void *)hook_fs_flush_file, "nn::fs::FlushFile(h)"},
     {0x205c50, (void *)hook_fs_set_file_size, "nn::fs::SetFileSize(h,s64)"},
-    {0x3cc020, (void *)hook_vi_deserialize_native_window, "nn::vi::native::DeserializeNativeWindow"},
-    {0x3c9d10, (void *)hook_vi_get_native_window, "nn::vi::GetNativeWindow"},
-    {0x3c9830, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d)"},
-    {0x3c9880, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d,s)"},
-    {0x3c98a0, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d,w,h)"},
-    {0x3ca080, (void *)hook_vi_create_layer, "nn::vi::CreateLayer(o,d,f)"},
     {0x3c9c60, (void *)hook_success, "nn::vi::SetLayerScalingMode"},
     {0x3c9c70, (void *)hook_success, "nn::vi::SetLayerCrop"},
     {0x3c9da0, (void *)hook_success, "nn::vi::SetLayerPosition"},
@@ -2614,6 +2972,8 @@ static uint64_t hook_guest_tp(void) {
    install_guest_hooks(); the assembler needs the symbol, so it is not static. */
 #define HOOK_MAX 256
 uint64_t g_hook_bodies[HOOK_MAX];
+uint64_t g_veneer_resume;
+extern void d3_veneer_bridge(void);
 
 /* d3_hook_page lives in hook_stub.S: HOOK_MAX entries of "b d3_hook_stub".  A
    site stub branches to &d3_hook_page[index], which is what tells the stub which
@@ -2661,6 +3021,22 @@ static void install_guest_hooks(uint64_t base, uint64_t image_size) {
         g_hook_bodies[index] = (uint64_t)(uintptr_t)hook->target;
         const uint64_t entry = (uint64_t)(uintptr_t)&d3_hook_page[index];
         uint32_t *stub = (uint32_t *)(uintptr_t)(base + hook->vaddr);
+        if (hook->vaddr == 0x204f80) {
+            /* Unmount's first four instructions only save its frame. Preserve
+               the SDK path for non-addon mounts; host addon mounts use our table. */
+            const uint32_t expected[4] = {0xd10103ffu, 0xf9000bf5u, 0xa9024ff4u, 0xa9037bfdu};
+            if (memcmp(stub, expected, sizeof expected)) fail("Unmount prologue changed");
+            uint32_t *trampoline = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (trampoline == MAP_FAILED) fail("Unmount trampoline allocation failed");
+            memcpy(trampoline, stub, 16);
+            trampoline[4] = 0x58000050u; trampoline[5] = 0xd61f0200u;
+            const uint64_t resume = base + hook->vaddr + 16;
+            memcpy(trampoline + 6, &resume, 8);
+            __builtin___clear_cache((char*)trampoline, (char*)trampoline + 32);
+            if (mprotect(trampoline, 4096, PROT_READ | PROT_EXEC)) fail("Unmount trampoline protect failed");
+            g_unmount_trampoline = (uint64_t)(uintptr_t)trampoline;
+        }
         if (index < 64) {
             memcpy(g_hook_original[index], stub, 16);
             g_hook_site[index] = base + hook->vaddr;
@@ -2672,46 +3048,6 @@ static void install_guest_hooks(uint64_t base, uint64_t image_size) {
         memcpy(&stub[2], &entry, sizeof entry);
         __builtin___clear_cache((char *)stub, (char *)stub + 16);
         info("hook %s at %#" PRIx64 " -> %p", hook->name, base + hook->vaddr, hook->target);
-    }
-    /* A few SDK debug asserts abort the process when an optional service (the
-       Nintendo Account authorisation request here) is missing.  The title can
-       carry on without it, and the offsets live in the preserved sdk module, so
-       they are stable. */
-    static const struct {
-        uint64_t vaddr;
-        uint32_t words[3];
-        uint32_t count;
-        const char *name;
-    } patches[] = {
-        /* sdk+0x4c2f8 is the acquire of the account authorisation holder.  The
-           engine asks for an online authorisation request with no Nintendo
-           Account behind it, and the assert that follows would end the process;
-           report the acquire as successful so the title keeps booting offline. */
-        {0x4c2f8u, {0x2a1f03e0u /* mov w0, wzr */}, 1, "account authorisation acquire"},
-        /* nn::os::detail::InternalConditionVariableImplByHorizon::Wait asserts
-           "this == NULL!" when the object it was handed never got initialised.
-           The host has no condition variable to wait on, so the cold tail that
-           raises the assert becomes "return success" and the caller continues as
-           if the wait had been satisfied. */
-        {0x3499b0u, {0x2a1f03e0u /* mov w0, wzr */, 0x17fffffbu /* b <epilogue> */}, 2,
-         "null condition variable wait"},
-        /* ... and the same function's "holder was never initialised" tail: the bl
-           into AbortImpl followed by udf becomes "return success". */
-        {0x4c328u, {0x2a1f03e0u /* mov w0, wzr */, 0xd65f03c0u /* ret */}, 2,
-         "account authorisation holder"},
-    };
-    for (size_t index = 0; index < sizeof patches / sizeof patches[0]; index++) {
-        if (patches[index].vaddr + 4 * patches[index].count > image_size) {
-            info("patch %s outside image", patches[index].name);
-            continue;
-        }
-        uint32_t *site = (uint32_t *)(uintptr_t)(base + patches[index].vaddr);
-        info("patch %s at %#" PRIx64 ": %#x %#x -> %#x %#x", patches[index].name,
-             base + patches[index].vaddr, site[0], site[1], patches[index].words[0],
-             patches[index].words[1]);
-        for (uint32_t word = 0; word < patches[index].count; word++)
-            site[word] = patches[index].words[word];
-        __builtin___clear_cache((char *)site, (char *)site + 4 * patches[index].count);
     }
 }
 
@@ -2833,19 +3169,15 @@ static void load_guest(const char *path) {
            one thread resolve tpidrro_el0 -- and therefore its mutex owner id --
            to the other thread's region. */
         uint32_t *veneer = (uint32_t *)(uintptr_t)(base + D3_VENEER_BASE);
-        if (veneer[0x90u / 4] == 0xB4000751u /* cbz x17, #0x3000178 */)
-            veneer[0x90u / 4] = 0xF9400A03u;  /* ldr x3, [x16, #0x10] */
-        else
-            fail("unexpected veneer at %#" PRIx64, base + D3_VENEER_BASE + 0x90);
-        /* The veneer's restore stub ends with ldur x16,[sp,#-0x88]; br x16,
-           and a corrupted saved target sends the guest to an address that is not
-           in the image at all (pc 0x4803xxxx in the dumps).  Trap that return so
-           the handler can name the saved target and the caller (x30) before
-           jumping, instead of dying somewhere unmapped. */
-        if (veneer[0x174u / 4] == 0xD61F0200u /* br x16 */)
-            veneer[0x174u / 4] = 0xD4224680u; /* brk #0x1234 */
-        else
-            info("veneer return stub is %#x, not br x16", veneer[0x174u / 4]);
+        if (veneer[0x7cu / 4] != 0xd53bd051u || veneer[0xa4u / 4] != 0xf9400a11u)
+            fail("unexpected veneer TLS sequence at %#" PRIx64, base + D3_VENEER_BASE + 0x7c);
+        const uint64_t bridge = (uint64_t)(uintptr_t)d3_veneer_bridge;
+        veneer[0x7cu / 4] = 0x58000050u;
+        veneer[0x80u / 4] = 0xd61f0200u;
+        memcpy(&veneer[0x84u / 4], &bridge, sizeof bridge);
+        g_veneer_resume = base + D3_VENEER_BASE + 0xacu;
+        if (veneer[0x174u / 4] != 0xd61f0200u)
+            fail("unexpected veneer return at %#" PRIx64, base + D3_VENEER_BASE + 0x174);
     }
     for (size_t i = 0; i < g_guest_phnum; i++) {
         if (g_guest_phdr[i].p_type == PT_LOAD)
@@ -2855,6 +3187,7 @@ static void load_guest(const char *path) {
     g_bias = base;
     g_image = reserve_size;
     g_table = (uint64_t *)(uintptr_t)(base + D3_HOST_TABLE);
+    d3_sync_enable_address_cache(1);
     info("guest mapped base=%" PRIx64 " size=%" PRIx64 " rela=%" PRIu64, base, reserve_size, rela_size / rela_entry);
 }
 
@@ -2912,6 +3245,7 @@ static void overlay_region(Region overlay) {
 }
 
 static void compose_regions(void) {
+    d3_sync_invalidate_address_cache();
     g_nreg = 0;
     for (int i = 0; i < g_nfixed; i++) {
         if (g_nreg >= MAX_REG)
@@ -2980,6 +3314,16 @@ static void register_guest_segment(const Elf64_Phdr *ph) {
 }
 
 static void reserve_heap(void) {
+#ifdef D3_WITH_GPU
+    extern void *d3_gpu_guest_heap(uint64_t *size);
+    void *backing = d3_gpu_guest_heap(&g_heap_cap);
+    if (!backing)
+        fail("GPU-backed guest heap reserve failed");
+    g_heap = (uint64_t)(uintptr_t)backing;
+    g_heap_cur = 0;
+    info("GPU-backed heap reserve %" PRIx64 " cap %" PRIx64, g_heap, g_heap_cap);
+    return;
+#endif
     static const uint64_t tries[] = {0xC0000000ull, 0x80000000ull, 0x40000000ull, 0x20000000ull};
     for (size_t i = 0; i < sizeof tries / sizeof tries[0]; i++) {
         void *ptr = mmap(0, (size_t)tries[i], PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -3046,6 +3390,7 @@ static struct {
     pid_t tid;
     uint64_t tls;
     uint64_t host_tp;
+    uint64_t host_x18;
     int used;
 } g_thread_regions[MAX_THREAD_REGIONS];
 static pthread_mutex_t g_thread_region_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -3070,11 +3415,15 @@ static int thread_region_slot(pid_t tid, int create) {
    this value before touching host libc (mutexes, logging, errno) or the libc
    reads garbage; the trampoline cannot look it up, so it is cached here per tid. */
 static void thread_region_set_host_tp(uint64_t host_tp) {
+    uint64_t host_x18;
+    __asm__ volatile("mov %0, x18" : "=r"(host_x18));
     const pid_t tid = (pid_t)syscall(SYS_gettid);
     pthread_mutex_lock(&g_thread_region_mutex);
     const int slot = thread_region_slot(tid, 1);
-    if (slot >= 0 && host_tp)
+    if (slot >= 0 && host_tp) {
         g_thread_regions[slot].host_tp = host_tp;
+        g_thread_regions[slot].host_x18 = host_x18;
+    }
     pthread_mutex_unlock(&g_thread_region_mutex);
 }
 
@@ -3105,16 +3454,22 @@ static int thread_is_guest(pid_t tid) {
    thread pointer, so it must not touch TLS (bionic's errno, stack canary and
    pthread internals all resolve through tpidr_el0) and must not call libc:
    the tid comes from a raw syscall, the pointer from the tid-keyed table. */
-uint64_t d3_host_tp_current(void) {
+typedef struct {
+    uint64_t tp;
+    uint64_t x18;
+} HostThreadState;
+
+HostThreadState d3_host_tp_current(void) {
     register uint64_t number __asm__("x8") = 178; /* SYS_gettid on arm64 */
     register uint64_t result __asm__("x0");
     __asm__ volatile("svc #0" : "=r"(result) : "r"(number) : "memory");
     const uint64_t tid = result;
     for (int index = 0; index < MAX_THREAD_REGIONS; index++) {
         if (g_thread_regions[index].used && (uint64_t)g_thread_regions[index].tid == tid)
-            return g_thread_regions[index].host_tp;
+            return (HostThreadState){g_thread_regions[index].host_tp,
+                                      g_thread_regions[index].host_x18};
     }
-    return 0;
+    return (HostThreadState){0, 0};
 }
 
 static uint64_t this_guest_tls(void) {
@@ -3151,8 +3506,7 @@ static uint64_t current_guest_region(void) {
        dispatches, so this is the dispatching thread's own region.  guest_call's
        host TLS is not usable here: the veneer installs the host TLS recorded in
        the table, which is one thread's TCB for every guest thread. */
-    const uint64_t tp = g_table ? g_table[D3_HOST_OFF_GUEST_TP / 8] : 0;
-    return guest_tlr_for_tp(tp ? tp : this_guest_tls());
+    return guest_tlr_for_tp(this_guest_tls());
 }
 
 static void prepare_memory(void) {
@@ -3173,8 +3527,14 @@ static void prepare_memory(void) {
        GetInfo alias region) commits its bookkeeping page and every later
        allocation with MapPhysicalMemory, so the region itself is reserved
        PROT_NONE and gets read/write pages on demand (alias_commit). */
+#ifdef D3_WITH_GPU
+    extern void *d3_gpu_guest_alias(uint64_t *size);
+    uint64_t alias_size = 0;
+    void *alias = d3_gpu_guest_alias(&alias_size);
+#else
     void *alias = mmap(0, (size_t)ALIAS_SIZE, PROT_NONE,
                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+#endif
     void *exc = map_pages(EXC_SIZE, PROT_READ | PROT_WRITE);
     if (alias == MAP_FAILED)
         fail("alias reserve errno %d", errno);
@@ -3218,6 +3578,7 @@ static void set_saved(d3_saved *saved, uint32_t reg, uint64_t value) {
 }
 
 static void set_heap(d3_saved *saved) {
+    d3_sync_invalidate_address_cache();
     uint64_t size = saved->x[1];
     uint64_t page = (size + (PAGE_SIZE - 1)) & ~(uint64_t)(PAGE_SIZE - 1);
     if (page > g_heap_cap) {
@@ -3234,7 +3595,13 @@ static void set_heap(d3_saved *saved) {
             set_saved(saved, 1, 0);
             return;
         }
+#ifdef D3_WITH_GPU
+        d3_gpu_cpu_memory_permission(g_heap + g_heap_cur, page - g_heap_cur, 1);
+#endif
     } else if (page < g_heap_cur) {
+#ifdef D3_WITH_GPU
+        d3_gpu_cpu_memory_permission(g_heap + page, g_heap_cur - page, 0);
+#endif
         if (mprotect((void *)(uintptr_t)(g_heap + page), (size_t)(g_heap_cur - page), PROT_NONE) != 0)
             fail("SetHeapSize shrink errno %d", errno);
     }
@@ -3493,6 +3860,7 @@ static int in_alias(uint64_t address, uint64_t size) {
 /* MapMemory transfers backing pages into a free stack-region range. The source
    becomes inaccessible until UnmapMemory moves those same pages back. */
 static uint32_t stack_map_memory(uint64_t destination, uint64_t source, uint64_t size, int mapped) {
+    d3_sync_invalidate_address_cache();
     const uint32_t invalid = 0xD401;
     uint64_t alignment = g_os_page ? g_os_page : 0x1000u;
     if (!size || ((destination | source | size) & (alignment - 1)) ||
@@ -3515,6 +3883,9 @@ static uint32_t stack_map_memory(uint64_t destination, uint64_t source, uint64_t
                 fail("UnmapMemory lost stack reservation errno %d", errno);
             if (mprotect((void *)(uintptr_t)source, (size_t)size, host_prot(mapping->source_perm)) != 0)
                 fail("UnmapMemory restore permissions errno %d", errno);
+#ifdef D3_WITH_GPU
+            d3_gpu_cpu_memory_permission(source, size, (mapping->source_perm & PERM_RW) == PERM_RW);
+#endif
             mapping->size = 0;
             compose_regions();
             return 0;
@@ -3548,9 +3919,16 @@ static uint32_t stack_map_memory(uint64_t destination, uint64_t source, uint64_t
     }
     if (!mapping)
         return invalid;
+#ifdef D3_WITH_GPU
+    d3_gpu_cpu_memory_permission(source, size, 0);
+#endif
     if (mremap((void *)(uintptr_t)source, (size_t)size, (size_t)size,
-               MREMAP_MAYMOVE | MREMAP_FIXED, (void *)(uintptr_t)destination) == MAP_FAILED)
+               MREMAP_MAYMOVE | MREMAP_FIXED, (void *)(uintptr_t)destination) == MAP_FAILED) {
+#ifdef D3_WITH_GPU
+        d3_gpu_cpu_memory_permission(source, size, 1);
+#endif
         return invalid;
+    }
     if (mmap((void *)(uintptr_t)source, (size_t)size, PROT_NONE,
              MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED) {
         if (mremap((void *)(uintptr_t)destination, (size_t)size, (size_t)size,
@@ -3559,6 +3937,9 @@ static uint32_t stack_map_memory(uint64_t destination, uint64_t source, uint64_t
         if (mmap((void *)(uintptr_t)destination, (size_t)size, PROT_NONE,
                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
             fail("MapMemory rollback reservation errno %d", errno);
+#ifdef D3_WITH_GPU
+        d3_gpu_cpu_memory_permission(source, size, 1);
+#endif
         return invalid;
     }
     *mapping = (StackMap){destination, source, size, source_region.state, source_region.perm};
@@ -3574,11 +3955,18 @@ static void alias_commit(uint64_t address, uint64_t size, int mapped, const char
         return;
     if (!in_alias(address, page))
         return;
+#ifdef D3_WITH_GPU
+    extern int d3_gpu_alias_commit(uint64_t address, uint64_t size, int mapped);
+    if (d3_gpu_alias_commit(address, page, mapped) != 0)
+        fail("%s GPU backing commit failed addr=%#" PRIx64 " size=%#" PRIx64, what, address, page);
+#else
     if (mprotect((void *)(uintptr_t)address, (size_t)page,
                  mapped ? (PROT_READ | PROT_WRITE) : PROT_NONE) != 0) {
         info("%s mprotect(%#" PRIx64 ", %#" PRIx64 ") errno %d", what, address, page, errno);
         return;
     }
+#endif
+    d3_sync_invalidate_address_cache();
     if (g_alias_logs < 16) {
         g_alias_logs++;
         info("%s addr=%#" PRIx64 " size=%#" PRIx64 " %s", what, address, page,
@@ -3590,10 +3978,17 @@ static void range_prot(uint64_t address, uint64_t size, uint64_t permission, con
     uint64_t page = page_up(size);
     if (!address || !page)
         return;
+#ifdef D3_WITH_GPU
+    d3_gpu_cpu_memory_permission(address, page, 0);
+#endif
     if (mprotect((void *)(uintptr_t)address, (size_t)page, host_prot(permission)) != 0) {
         info("%s mprotect(%#" PRIx64 ", %#" PRIx64 ") errno %d", what, address, page, errno);
         return;
     }
+#ifdef D3_WITH_GPU
+    d3_gpu_cpu_memory_permission(address, page, (permission & PERM_RW) == PERM_RW);
+#endif
+    d3_sync_invalidate_address_cache();
     if (g_batch_logs < 24) {
         g_batch_logs++;
         info("%s addr=%#" PRIx64 " size=%#" PRIx64 " perm=%" PRIu64, what, address, page, permission);
@@ -3606,10 +4001,23 @@ static void range_prot(uint64_t address, uint64_t size, uint64_t permission, con
 static uint64_t map_shared_at(uint64_t address, uint64_t size, uint64_t permission) {
     uint64_t page = page_up(size);
     void *mapped;
+    const int protection = host_prot(permission);
+    const int seed_hid = page == 0x40000u;
+    int shared_fd = -1;
+    void *writer = NULL;
+    if (seed_hid) {
+        shared_fd = memfd_create("d3-hid", MFD_CLOEXEC);
+        if (shared_fd < 0 || ftruncate(shared_fd, (off_t)page) != 0)
+            fail("HID backing allocation errno %d", errno);
+        writer = mmap(NULL, (size_t)page, PROT_READ | PROT_WRITE, MAP_SHARED, shared_fd, 0);
+        if (writer == MAP_FAILED) fail("HID writable alias errno %d", errno);
+    }
     if (!address || !page)
         fail("MapSharedMemory(%#" PRIx64 ", %#" PRIx64 ")", address, size);
-    mapped = mmap((void *)(uintptr_t)address, (size_t)page, host_prot(permission),
-                  MAP_FIXED | MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    mapped = mmap((void *)(uintptr_t)address, (size_t)page,
+                  protection,
+                  MAP_FIXED | MAP_SHARED | (seed_hid ? 0 : MAP_ANONYMOUS), shared_fd, 0);
+    if (shared_fd >= 0) close(shared_fd);
     if (mapped == MAP_FAILED)
         fail("MapSharedMemory(%#" PRIx64 ", %#" PRIx64 ") errno %d", address, page, errno);
     if ((uint64_t)(uintptr_t)mapped != address)
@@ -3624,8 +4032,10 @@ static uint64_t map_shared_at(uint64_t address, uint64_t size, uint64_t permissi
        believes in from there, and with the block left zeroed the engine never
        sees a controller (it relaunches the Controller applet instead of
        booting). */
-    if (page == 0x40000u)
-        d3_hid_seed(address);
+    if (seed_hid) {
+        d3_hid_map(address, (uint64_t)(uintptr_t)writer);
+    }
+    d3_sync_invalidate_address_cache();
     return address;
 }
 
@@ -3700,6 +4110,10 @@ static uint64_t host_thread_pointer(void) {
     return (uint64_t)(uintptr_t)__builtin_thread_pointer();
 }
 
+static void guest_thread_cleanup(void *argument) {
+    thread_mark_exited((ThreadStart *)argument);
+}
+
 static void *guest_thread_body(void *param) {
     /* The handle keeps referring to this record, so it must outlive the thread. */
     ThreadStart *start = param;
@@ -3717,8 +4131,10 @@ static void *guest_thread_body(void *param) {
                  sigismember(&mask, SIGABRT));
         }
     }
+    /* ExitThread uses pthread_exit and never returns through guest_call. */
+    pthread_cleanup_push(guest_thread_cleanup, start);
     guest_call(start->entry, start->arg, 0);
-    thread_mark_exited(start);
+    pthread_cleanup_pop(1);
     info("thread: returned");
     return 0;
 }
@@ -3847,6 +4263,61 @@ static void panic_guest(const char *what, const d3_saved *saved) {
         fp = next;
     }
     d3_handle_dump();
+}
+
+/* A request on a handle the host never handed out means the guest read the
+   handle out of an object that was never filled in; the SDK keeps the proxy it
+   used in these image globals, so dump the pointer, the object and its vtable
+   for the next run to name the class. */
+void d3_watch_global(uint64_t offset, const char *why) {
+    /* Expensive pointer walks belong to opt-in diagnostics, not every IPC. */
+    static int enabled = -1;
+    if (enabled < 0) enabled = trace_requested();
+    if (!enabled) return;
+    if (!g_bias)
+        return;
+    uint64_t pointer = 0;
+    (void)safe_read(g_bias + offset, &pointer, sizeof pointer);
+    static uint64_t last_pointer = ~0ull;
+    static int have_last;
+    static uint64_t last_words[16];
+    uint64_t words[16] = {0};
+    if (pointer)
+        (void)safe_read(pointer, words, sizeof words);
+    if (have_last && pointer == last_pointer && memcmp(words, last_words, sizeof words) == 0)
+        return;
+    have_last = 1;
+    last_pointer = pointer;
+    memcpy(last_words, words, sizeof words);
+    info("watch %s global %#" PRIx64 " -> %#" PRIx64 " [%#" PRIx64 " %#" PRIx64 " %#" PRIx64
+         " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 "]",
+         why, offset, pointer, words[0], words[1], words[2], words[3], words[4], words[5],
+         words[6], words[7]);
+}
+
+void d3_dump_sdk_global(uint64_t offset) {
+    if (!g_bias) {
+        info("sdk global %#" PRIx64 " without a bias", offset);
+        return;
+    }
+    uint64_t pointer = 0;
+    (void)safe_read(g_bias + offset, &pointer, sizeof pointer);
+    info("sdk global %#" PRIx64 " [%#" PRIx64 "] = %#" PRIx64, offset, g_bias + offset, pointer);
+    if (!pointer)
+        return;
+    uint64_t object[12] = {0};
+    if (!safe_read(pointer, object, sizeof object)) {
+        info("sdk global %#" PRIx64 ": object %#" PRIx64 " unreadable", offset, pointer);
+        return;
+    }
+    info("sdk global %#" PRIx64 " object %#" PRIx64 ": %#" PRIx64 " %#" PRIx64 " %#" PRIx64
+         " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64, offset, pointer,
+         object[0], object[1], object[2], object[3], object[4], object[5], object[6], object[7]);
+    uint64_t slots[8] = {0};
+    if (object[0] && safe_read(object[0], slots, sizeof slots))
+        info("sdk global %#" PRIx64 " vtbl %#" PRIx64 ": %#" PRIx64 " %#" PRIx64 " %#" PRIx64
+             " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64 " %#" PRIx64, offset, object[0],
+             slots[0], slots[1], slots[2], slots[3], slots[4], slots[5], slots[6], slots[7]);
 }
 
 void d3_trace_guest(const char *tag, const d3_saved *saved) {
@@ -4036,6 +4507,7 @@ static void svc_call(d3_saved *saved, uint32_t id, uint64_t thread_tp) {
         set_saved(saved, 0, 0);
         return;
     case 0x14:
+        d3_hid_unmap(x[1]);
         range_prot(x[1], x[2], 0, "UnmapSharedMemory");
         set_saved(saved, 0, 0);
         return;
@@ -4084,11 +4556,9 @@ static void svc_call(d3_saved *saved, uint32_t id, uint64_t thread_tp) {
                 *(int32_t *)(uintptr_t)out_index = -1;
         } else {
             memcpy(list, (const void *)(uintptr_t)handles, (size_t)bounded * sizeof list[0]);
-            /* WaitSynchronizationN(any): one pass over the handles consumes the
-               first signal that is already pending; otherwise poll until the
-               deadline.  An infinite wait is capped so a signal this host never
-               delivers cannot stall the emulator, and the SDK simply retries. */
-            const int64_t limit_ns = timeout < 0 ? 2000000000 : timeout;
+            /* Infinite waits must stay infinite: nn::os::WaitThread treats a
+               fabricated timeout as fatal when loading a new scene. */
+            const int64_t limit_ns = timeout < 0 ? 0 : timeout;
             const uint64_t limit_ticks = (uint64_t)limit_ns * 12u / 625u;
             const uint64_t base = ticks();
             for (;;) {
@@ -4111,7 +4581,7 @@ static void svc_call(d3_saved *saved, uint32_t id, uint64_t thread_tp) {
                         break;
                     }
                 }
-                if (wait_result == 0 || ticks() - base >= limit_ticks)
+                if (wait_result == 0 || (timeout >= 0 && ticks() - base >= limit_ticks))
                     break;
                 usleep(500);
             }
@@ -4318,14 +4788,21 @@ static void svc_call(d3_saved *saved, uint32_t id, uint64_t thread_tp) {
     case 0x32:
         set_saved(saved, 0, 0);
         return;
-    case 0x34:
+    case 0x34: {
+        const int log = g_sync_logs++ < 80;
+        if (log)
+            info("WaitForAddress addr=%#" PRIx64 " type=%u value=%d timeout=%" PRId64,
+                 x[0], (uint32_t)x[1], (int32_t)x[2], (int64_t)x[3]);
+        const uint32_t result = d3_sync_wait_address((uint32_t *)(uintptr_t)x[0],
+                                                    (uint32_t)x[1], (int32_t)x[2], (int64_t)x[3]);
+        if (log)
+            info("WaitForAddress result=%#x", result);
+        set_saved(saved, 0, result);
+        return;
+    }
     case 0x35:
-        if (g_batch_logs < 24) {
-            g_batch_logs++;
-            info("svc #%u addr=%#" PRIx64 " x1=%#" PRIx64 " x2=%#" PRIx64 " x3=%#" PRIx64,
-                 (unsigned)id, x[0], x[1], x[2], x[3]);
-        }
-        set_saved(saved, 0, 0);
+        set_saved(saved, 0, d3_sync_signal_address((uint32_t *)(uintptr_t)x[0],
+                                                  (uint32_t)x[1], (int32_t)x[2], (int32_t)x[3]));
         return;
     case 0x36:
         return;
@@ -4415,7 +4892,6 @@ void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved, uint64_t th
 }
 
 static void dispatch_inner(uint32_t kind, uint64_t extra, d3_saved *saved, uint64_t thread_tp) {
-    __asm__ volatile("mov x18, %0" :: "r"(g_host_x18) : "memory");
     g_last_kind = kind;
     g_last_extra = extra;
     if (kind == D3_KIND_SVC)
@@ -4480,7 +4956,7 @@ static void guest_call_with_tp(uint64_t fn, uint64_t arg0, uint64_t arg1, uint64
     io[2] = arg1;
     io[3] = g_guest_x18;
     io[4] = guest_tp;
-    io[5] = g_host_x18;
+    __asm__ volatile("mov %0, x18" : "=r"(io[5]));
     io[6] = host_tp;
     io[7] = 0;
     io[8] = 0;
@@ -4580,31 +5056,63 @@ static void boot_sequence(void) {
 
 /* The handler only records into a preallocated ring: logging from a signal
    handler is not async-signal-safe.  A flusher thread prints the samples. */
-#define SAMPLE_SLOTS 256
+#define SAMPLE_SLOTS 2048
 static volatile uint64_t g_sample_pc[SAMPLE_SLOTS];
+static volatile uint64_t g_sample_lr[SAMPLE_SLOTS];
+static volatile uint64_t g_sample_tid[SAMPLE_SLOTS];
+static volatile uint64_t g_sample_caller[SAMPLE_SLOTS];
+static int g_sample_ready[SAMPLE_SLOTS];
 static volatile int g_sample_count;
+static int g_worker_sampling;
 
 static void sample_handler(int sig, siginfo_t *siginfo, void *context) {
     (void)sig;
     (void)siginfo;
     const ucontext_t *state = context;
-    const int slot = g_sample_count;
+    const int slot = __atomic_fetch_add(&g_sample_count, 1, __ATOMIC_RELAXED);
     if (slot >= SAMPLE_SLOTS)
         return;
     g_sample_pc[slot] = (uint64_t)state->uc_mcontext.pc;
-    g_sample_count = slot + 1;
+    g_sample_lr[slot] = (uint64_t)state->uc_mcontext.regs[30];
+    g_sample_tid[slot] = (uint64_t)raw_syscall4(RAW_SYS_GETTID, 0, 0, 0, 0);
+    if (g_worker_sampling) {
+        uint64_t frame = (uint64_t)state->uc_mcontext.regs[29];
+        for (int depth = 0; depth < 24 && frame && !(frame & 7u); depth++) {
+            uint64_t words[2];
+            if (!safe_read(frame, words, sizeof words))
+                break;
+            if (words[1] >= g_bias && words[1] - g_bias < 0x3400000u) {
+                g_sample_caller[slot] = words[1] - g_bias;
+                break;
+            }
+            if (words[0] <= frame || words[0] - frame > 0x4000000u)
+                break;
+            frame = words[0];
+        }
+    }
+    __atomic_store_n(&g_sample_ready[slot], 1, __ATOMIC_RELEASE);
 }
 
 static void *sample_flusher(void *arg) {
     (void)arg;
     int printed = 0;
-    for (int tick = 0; tick < 200; tick++) {
+    for (int tick = 0; tick < (g_worker_sampling ? 1800 : 200); tick++) {
         usleep(50000);
-        const int count = g_sample_count;
-        while (printed < count && printed < SAMPLE_SLOTS) {
-            info("sample pc=%#" PRIx64, (uint64_t)g_sample_pc[printed]);
+        const int count = __atomic_load_n(&g_sample_count, __ATOMIC_ACQUIRE);
+        while (printed < count && printed < SAMPLE_SLOTS &&
+               __atomic_load_n(&g_sample_ready[printed], __ATOMIC_ACQUIRE)) {
+            info("sample tid=%" PRIu64 " pc=%#" PRIx64 " lr=%#" PRIx64 " bias=%#" PRIx64 " guest_caller=%#" PRIx64,
+                 (uint64_t)g_sample_tid[printed], (uint64_t)g_sample_pc[printed],
+                 (uint64_t)g_sample_lr[printed], g_bias, (uint64_t)g_sample_caller[printed]);
             printed++;
         }
+#ifdef D3_WITH_GPU
+        if (g_worker_sampling && tick == 1000)
+        {
+            extern void d3_gpu_nv_diagnostics(void);
+            d3_gpu_nv_diagnostics();
+        }
+#endif
     }
     return 0;
 }
@@ -4636,7 +5144,17 @@ static void *stall_watchdog(void *arg) {
 
 static void *guest_sampler(void *arg) {
     uint64_t tid = (uint64_t)(uintptr_t)arg;
-    for (int tick = 0; tick < 600 && g_sample_count < SAMPLE_SLOTS; tick++) {
+    if (g_worker_sampling) {
+        usleep(21000000);
+        for (int tick = 0; tick < 40; tick++) {
+            const int count = __atomic_load_n(&g_tid_map_count, __ATOMIC_ACQUIRE);
+            for (int index = 0; index < count; index++)
+                syscall(SYS_tgkill, getpid(), (pid_t)g_tid_map[index].tid, SIGPROF);
+            usleep(100000);
+        }
+        return 0;
+    }
+    for (int tick = 0; tick < 600 && __atomic_load_n(&g_sample_count, __ATOMIC_RELAXED) < 256; tick++) {
         usleep(5000);
         syscall(SYS_tgkill, getpid(), (pid_t)tid, SIGPROF);
     }
@@ -4647,6 +5165,8 @@ static void *guest_thread(void *arg) {
     (void)arg;
     prctl(PR_SET_NAME, (unsigned long)"d3-guest", 0, 0, 0);
     g_guest_tid = (uint64_t)gettid();
+    struct stat sample_marker;
+    g_worker_sampling = stat(D3_DATA_ROOT "/sample-workers", &sample_marker) == 0;
     /* sigaltstack is per thread: without one here a stack fault cannot be reported. */
     install_crash_handler();
     {
@@ -4661,7 +5181,7 @@ static void *guest_thread(void *arg) {
     /* The boot thread keeps the region the guest's libc init already filled in;
        threads the guest starts get their own from guest_call. */
     thread_region_assign(g_tls);
-    thread_region_set_host_tp((uint64_t)(uintptr_t)pthread_self());
+    thread_region_set_host_tp(g_host_tp);
     g_table[D3_HOST_OFF_DISPATCH / 8] = (uint64_t)(uintptr_t)d3_hle_dispatch;
     g_table[D3_HOST_OFF_HOST_TP / 8] = g_host_tp;
     g_table[D3_HOST_OFF_GUEST_TP / 8] = g_guest_tp;
@@ -4673,7 +5193,8 @@ static void *guest_thread(void *arg) {
         pthread_t sampler, flusher, watchdog;
         if (pthread_create(&flusher, 0, sample_flusher, 0) == 0)
             pthread_detach(flusher);
-        if (pthread_create(&sampler, 0, guest_sampler, (void *)(uintptr_t)g_guest_tid) == 0)
+        if (!trace_requested() &&
+            pthread_create(&sampler, 0, guest_sampler, (void *)(uintptr_t)g_guest_tid) == 0)
             pthread_detach(sampler);
         if (pthread_create(&watchdog, 0, stall_watchdog, 0) == 0)
             pthread_detach(watchdog);
@@ -4688,6 +5209,8 @@ static void *guest_thread(void *arg) {
         *(volatile uint64_t *)0 = 1;
     }
     install_crash_handler();
+    if (trace_requested())
+        start_tracer();
     boot_sequence();
     return 0;
 }
@@ -4700,8 +5223,6 @@ int d3_host_start(const char *guest_path) {
     if (g_started)
         return -1;
     g_started = 1;
-    if (trace_requested())
-        start_tracer();
     install_crash_handler();
     /* A silent death with no signal and no dump means the process exited through
        libc; this records that it happened even though the caller is unknown. */

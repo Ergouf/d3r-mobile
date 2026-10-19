@@ -16,5 +16,7 @@ int d3_host_start(const char *guest_path);
    may be writing. */
 void d3_hle_dispatch(uint32_t kind, uint64_t extra, d3_saved *saved, uint64_t thread_tp);
 void d3_trace_guest(const char *tag, const d3_saved *saved);
+void d3_dump_sdk_global(uint64_t offset);
+void d3_watch_global(uint64_t offset, const char *why);
 
 #endif

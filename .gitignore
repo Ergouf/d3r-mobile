@@ -5,6 +5,8 @@ Thumbs.db
 *.xci
 *.nsp
 *.nso
+*.nca
+*.cpk
 *.zip
 *.7z
 # Local secrets and signing material.
@@ -52,3 +54,9 @@ reference/d2r-mobile/
 d3-android/gpu/third_party/
 d3-android/gpu/gen/
 d3-android/gpu/probe/.spv_tmp/
+
+# Generated device traces/screenshots stay local; curated handoff evidence is
+# versioned under d3-android/evidence/. Existing tracked probe files are kept.
+/d3-android/gpu/probe/*.txt
+/d3-android/gpu/probe/*.png
+/d3-android/tools/resource_recovery/xci-index.json

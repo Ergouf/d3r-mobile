@@ -9,16 +9,21 @@
 
     <!-- arm64 guest + host: no x86/armeabi fallbacks on purpose. -->
     <application
-        android:label="D3HOST Recovery"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:label="Diablo III"
+        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+        android:appCategory="game"
         android:debuggable="true"
         android:extractNativeLibs="true"
         android:hasCode="true">
 
         <activity
             android:name="com.d3mobile.host.MainActivity"
-            android:label="D3HOST Recovery"
+            android:label="Diablo III"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"
             android:exported="true">
+            <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
