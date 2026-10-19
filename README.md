@@ -95,7 +95,8 @@
 git clone https://github.com/eden-emulator/mirror.git reference/eden
 git -C reference/eden checkout e0d47f2790e3f758fa2188926a0bb2f56af6b310
 git -C reference/eden submodule update --init --recursive
-git -C reference/eden apply d3-android/gpu/patches/eden-local-20261019.patch
+git -C reference/eden apply --check ../../d3-android/gpu/patches/eden-local-20261019.patch
+git -C reference/eden apply ../../d3-android/gpu/patches/eden-local-20261019.patch
 ```
 
 其余依赖（fmt、libadrenotools、sirit、SPIRV-Headers、VMA、Vulkan-Headers、Vulkan-Utility-Libraries）按 JSON 中的 `origin` + `revision` 检出到对应 `third_party` 目录；Boost 使用 1.86.0 本地 archive。`build_adreno.py` 会校验 libadrenotools revision，并幂等应用 `adrenotools-mali-isolation.patch`。
