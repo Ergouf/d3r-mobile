@@ -12,8 +12,21 @@
 
 - Samsung SM-X700（Adreno 730，Android 16）：已进入第一章，验证触屏移动、攻击、击杀、经验增长、存档恢复及 HOME 返回；中文语音已补齐并通过真机试听。
 - vivo X200 Pro（Mali-G925，Android 16）：已接入原生宽屏、左侧安全区浮动摇杆、可隐藏/换位的虚拟手柄、Android 16 返回键设置入口；宽屏标题渲染通过，3D 场景、HUD 与完整玩法仍待验收。
-- 性能：系统 Vulkan 1.0× 早期玩法约 34–37fps，长时间/复杂场景约 21–33fps；1.5× 约 22–23fps；X200 Pro 标题/视频约 44.5–45.1fps。**稳定 60fps、第一章完整通关、跨设备兼容、OEM AI 插帧/超分均未验收。**
-- 可选 `genshin` / `genshin-bilibili` 身份包已构建；OEM 游戏助手可识别，但 AI 插帧与超分没有启用证据。
+- 性能：系统 Vulkan 1.0× 早期玩法约 34–37fps，长时间/复杂场景约 21–33fps；1.5× 约 22–23fps；X200 Pro 标题/视频原生约 44.8–45.1fps。**稳定 60fps、第一章完整通关、跨设备兼容均未验收。**
+- 可选 `genshin` / `genshin-bilibili` 身份包已构建；OEM 游戏助手可识别并下发插帧配置，但实际插帧输出尚未验证。
+
+### 插帧帧率
+
+vivo X200 Pro 的 OEM 游戏助手为 `com.miHoYo.ys.bilibili` 下发了 `1:3:<pid>:45:90` 的插帧配置（`switchState=3`，显示模式 90Hz），即原生约 45fps → 插帧目标 **90fps**。这是当前配置的可达上限，不是已实测的稳定结果：
+
+| 项目 | 结果 |
+| --- | --- |
+| 原生标题/视频帧率 | 44.77–45.09fps（8 组 5s 采样，PID 23462） |
+| 插帧目标/显示上限 | **90fps（45→90）**，90Hz |
+| 实际插帧输出 | 未验证（`interpolated_output_verified=false`） |
+| MEMC 状态 | `isMEMCApp=0`、`mInitSuccess=0`、`MEMC_POST_PROCESSING_ENABLE_PROPERTY false`；`property.sys.game.memc.postprocessing.enable=0` |
+| 设备 MEMC 能力 | `property.ro.vendor.mtk.gpu.game_memc=1` |
+| 玩法帧率 | 未测量，不能把 90fps 当作已达成 |
 
 ## 目录结构
 
