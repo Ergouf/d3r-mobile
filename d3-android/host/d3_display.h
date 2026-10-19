@@ -24,4 +24,25 @@ static inline int d3_display_patch(uint32_t* code, uint32_t* letterbox_aspect, u
     return 0;
 }
 
+static inline int d3_display_menu_patch(uint32_t* call, uint32_t* trampoline, uint32_t width, float* applied_scale) {
+    if (width < 1600 || width > 4096 || *call != 0x9402df8e ||
+        trampoline[-1] != 0xd65f03c0 || trampoline[0] || trampoline[1] || trampoline[2]) return -1;
+    const float maximum_scale = 1600.0f / width;
+    float scale = 0;
+    uint32_t immediate = 0;
+    for (uint32_t candidate = 0; candidate < 128; ++candidate) {
+        uint32_t bits = ((candidate & 64) ? 0x3e000000 : 0x40000000) | ((candidate & 63) << 19);
+        float value;
+        memcpy(&value, &bits, sizeof value);
+        if (value <= maximum_scale && value > scale) { scale = value; immediate = candidate; }
+    }
+    if (!immediate) return -1;
+    trampoline[0] = 0x1e201000 | immediate << 13;
+    trampoline[1] = 0x1e200940;
+    trampoline[2] = 0x14000000 | ((uint32_t)((0x12656c0ll - 0x129b4ccll) / 4) & 0x03ffffff);
+    *call = 0x94000000 | ((uint32_t)((0x129b4c4ll - 0x11ad888ll) / 4) & 0x03ffffff);
+    *applied_scale = scale;
+    return 0;
+}
+
 #endif

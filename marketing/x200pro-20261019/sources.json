@@ -1,0 +1,84 @@
+{
+  "screenshots": [
+    {
+      "file": "screens/gameplay-clean.png",
+      "source_in_local_evidence": "live ADB screenshot saved directly",
+      "device_process_id": "18533",
+      "capture_date": "2026-10-19",
+      "device": "vivo X200 Pro V2405A / MT6991 / Mali-G925 / Android 16",
+      "size": [
+        2800,
+        1260
+      ],
+      "sha256": "7ec6ee4eddde05b8a1adf3ecb7804ea34bc7490bd5063d4d2484e2a25df1bcfc",
+      "description": "New Tristram, controls hidden; transient Android toast remains in the original"
+    },
+    {
+      "file": "screens/gameplay-controls.png",
+      "source_in_local_evidence": "menu-framing-after-recreate.png",
+      "device_process_id": "18533",
+      "capture_date": "2026-10-19",
+      "device": "vivo X200 Pro V2405A / MT6991 / Mali-G925 / Android 16",
+      "size": [
+        2800,
+        1260
+      ],
+      "sha256": "9b6abb33e4a88422d5ae996bf32a2881ef0ec9bffe879feddb9fd83af8246e7a",
+      "description": "New Tristram with touch overlay"
+    },
+    {
+      "file": "screens/floating-live-one.png",
+      "source_in_local_evidence": "floating-first-origin.png",
+      "device_process_id": "30339",
+      "capture_date": "2026-10-19",
+      "device": "vivo X200 Pro V2405A / MT6991 / Mali-G925 / Android 16",
+      "size": [
+        2800,
+        1260
+      ],
+      "sha256": "53afe21b0b3914185c3015e3de17f93c11df1cdba57d32ce68d8d94593e07322",
+      "description": "Floating origin at 400,900 over a cutscene; touch-overlay test, not gameplay"
+    },
+    {
+      "file": "screens/floating-live-two.png",
+      "source_in_local_evidence": "floating-second-origin.png",
+      "device_process_id": "30339",
+      "capture_date": "2026-10-19",
+      "device": "vivo X200 Pro V2405A / MT6991 / Mali-G925 / Android 16",
+      "size": [
+        2800,
+        1260
+      ],
+      "sha256": "5f406358ebcd0408586777345cefc7e3ba4b0b1c56ec344045e0a92a874e8a80",
+      "description": "Floating origin at 850,850 over a cutscene; touch-overlay test, not gameplay"
+    },
+    {
+      "file": "screens/menu-clean.png",
+      "source_in_local_evidence": "pause-menu-latest.png",
+      "device_process_id": "18533",
+      "capture_date": "2026-10-19",
+      "device": "vivo X200 Pro V2405A / MT6991 / Mali-G925 / Android 16",
+      "size": [
+        2800,
+        1260
+      ],
+      "sha256": "8b4e3a6831df1527d4b2dda99b472029cf806686e21f5e733116ba75353c762b",
+      "description": "In-game pause screen, not the main menu camera framing acceptance"
+    },
+    {
+      "file": "screens/main-menu-edge-before.png",
+      "source_in_local_evidence": "menu-edge-before-fix.png",
+      "device_process_id": "12982",
+      "capture_date": "2026-10-19",
+      "device": "vivo X200 Pro V2405A / MT6991 / Mali-G925 / Android 16",
+      "size": [
+        2800,
+        1260
+      ],
+      "sha256": "1d958fd3948b53bd0ed37f0079e822e5e77da3dcb69e35bd935fe16e062c03d3",
+      "description": "Known main-menu side-edge defect, kept as before evidence, not used in posters"
+    }
+  ],
+  "processing": "Only proportional downscaling into poster layout. No screenshot cropping, AI scene generation, retouching, invented FPS or synthetic control overlay.",
+  "main_menu_edge_fix_status": "Candidate implemented and on-device native test passed; final main-menu visual acceptance incomplete when user disconnected the device."
+}

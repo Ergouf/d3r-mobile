@@ -30,6 +30,9 @@ vivo X200 Pro 的 OEM 游戏助手为 `com.miHoYo.ys.bilibili` 下发了 `1:3:<p
 
 ## 目录结构
 
+实机原始截图与 4 张适合 X 发布的宣传图见 [X200 Pro 图集](marketing/x200pro-20261019/)，
+包含中英文案与截图来源。主菜单边缘适配仍待最终同场景复测，不能作为已全面修复宣传。
+
 | 路径 | 内容 |
 | --- | --- |
 | `d3-android/host/` | Horizon 兼容层：SVC/IPC、线程与 TLS、文件系统、HID、音频、内容挂载、nvdrv |

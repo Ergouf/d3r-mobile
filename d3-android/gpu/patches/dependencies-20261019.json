@@ -21,7 +21,8 @@
     "path": "d3-android/gpu/third_party/libadrenotools",
     "revision": "8fae8ce254dfc1344527e05301e43f37dea2df80",
     "origin": "https://github.com/bylaws/libadrenotools.git",
-    "status": ""
+    "status": "M src/hook/hook_impl.cpp",
+    "patch": "d3-android/gpu/patches/adrenotools-mali-isolation.patch"
   },
   {
     "path": "d3-android/gpu/third_party/sirit",

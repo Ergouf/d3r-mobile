@@ -44,6 +44,31 @@ int main(void) {
         assert(!memcmp(code, mismatched, sizeof code));
         assert(letterbox_aspect == 0x3fe38e39);
     }
+    uint32_t camera_call = 0x9402df8e;
+    uint32_t camera_padding[4] = {0xd65f03c0, 0, 0, 0};
+    float scale;
+    assert(d3_display_menu_patch(&camera_call, camera_padding + 1, 2000, &scale) == 0);
+    assert(scale == 0.78125f);
+    assert(camera_padding[1] == 0x1e2d3000);
+    assert(camera_padding[2] == 0x1e200940);
+    assert(0x11ad888 + (camera_call & 0x03ffffff) * 4 == 0x129b4c4);
+    assert(0x129b4cc + ((int32_t)(camera_padding[3] << 6) >> 6) * 4 == 0x12656c0);
+    assert(d3_display_menu_patch(&camera_call, camera_padding + 1, 2000, &scale) == -1);
+    camera_call = 0x9402df8e;
+    camera_padding[1] = camera_padding[2] = camera_padding[3] = 0;
+    assert(d3_display_menu_patch(&camera_call, camera_padding + 1, 4096, &scale) == 0);
+    assert(scale <= 1600.0f / 4096 && scale > 0);
+    camera_call = 0;
+    camera_padding[1] = camera_padding[2] = camera_padding[3] = 0;
+    assert(d3_display_menu_patch(&camera_call, camera_padding + 1, 2000, &scale) == -1);
+    camera_call = 0x9402df8e;
+    camera_padding[0] = 0;
+    assert(d3_display_menu_patch(&camera_call, camera_padding + 1, 2000, &scale) == -1);
+    assert(camera_call == 0x9402df8e && camera_padding[1] == 0);
+    camera_padding[0] = 0xd65f03c0;
+    assert(d3_display_menu_patch(&camera_call, camera_padding + 1, 5000, &scale) == -1);
+    assert(d3_display_menu_patch(&camera_call, camera_padding + 1, 1600, &scale) == 0);
+    assert(scale == 1.0f);
     puts("Verified guest-resolution patch, aspect and mismatch guards passed");
     return 0;
 }

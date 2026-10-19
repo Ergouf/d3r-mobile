@@ -3029,6 +3029,17 @@ static void install_guest_hooks(uint64_t base, uint64_t image_size) {
              g_display_width, g_display_height, (double)g_display_width / g_display_height);
         info("native widescreen: scene/UI letterbox aspect synchronized at guest vaddr=%#llx",
              (unsigned long long)letterbox_offset);
+        const uint64_t menu_call = 0x11ad888, menu_trampoline = 0x129b4c4;
+        const uint32_t menu_arguments[4] = {0x4eaa1d40, 0x4eab1d61, 0x4ea81d02, 0x4ea91d23};
+        float menu_scale;
+        if (menu_call + 4 > image_size || menu_trampoline + 12 > image_size ||
+            memcmp((void*)(uintptr_t)(base + 0x11ad850), menu_arguments, sizeof menu_arguments) ||
+            d3_display_menu_patch((uint32_t*)(uintptr_t)(base + menu_call),
+                                  (uint32_t*)(uintptr_t)(base + menu_trampoline), g_display_width, &menu_scale))
+            fail("native widescreen: menu camera call/padding differs from the verified update image");
+        __builtin___clear_cache((char*)(uintptr_t)(base + menu_call), (char*)(uintptr_t)(base + menu_call + 4));
+        __builtin___clear_cache((char*)(uintptr_t)(base + menu_trampoline), (char*)(uintptr_t)(base + menu_trampoline + 12));
+        info("native widescreen: menu-only camera FOV scale=%.6f; gameplay projection unchanged", (double)menu_scale);
     }
     log_exec_maps();
     const size_t count = sizeof g_hooks / sizeof g_hooks[0];
