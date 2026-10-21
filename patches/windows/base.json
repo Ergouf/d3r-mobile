@@ -20,5 +20,5 @@
     "src/nx/runtime/settings.txt": "c9eab50291afdb7838ca95c8fa528cfc4f21fab6f157cdf061aeeff07838cdd7"
   },
   "verification": "git archive base + git apply --check, apply; all 13 resulting files equal current source after LF normalization; worktree index restored to unstaged",
-  "runtime_release_sha256": "64e0c3ce898da18552920c7862e223b0513671b2c61dfb957f3d3cf11c266087"
+  "runtime_release_sha256": "02097a2aacd693c6f7cb113069e342da65ad23378b329bf98d44e35c902033a7"
 }

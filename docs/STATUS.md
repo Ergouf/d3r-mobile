@@ -37,6 +37,7 @@ Windows 路径基于 ScarletNX 固定提交 `dbf8915965367e8a9616b19e5a0c1eddafa
 - 10 项相关设置/运行时测试、三份 FSR 着色器 SPIR-V 验证通过。描述符录制、回退图像布局、资源寿命与翻转修复已进入本地版本。
 - 简体中文与中文语音 DLC 已包含；Windows 中文语音尚未完成人工听验。Xbox A 确认、B 取消，X→X、Y→Y。
 - 当前启动入口为 `D:\Games\DiabloIII\Launch.cmd`，旧 `D:\Program Files` 安装已迁移删除；完整 ZIP 归档位于 `local/releases/windows/`。归档的逐文件 CRC/SHA-256、整体校验值和解压副本 25 秒启动测试通过，见 [发行记录](windows/RELEASE.md)。
+- 2026-10-21 用当前源码重新构建并替换了安装目录运行时（SHA-256 `02097a2a…`，含 FSR1、`SNX_PRESENT_STATS` 与 `vk_sc_view`），旧运行时备份在 `out/windows/backups/`，安装目录 `SHA256SUMS.txt` 已同步；`local/releases/` 里的归档 ZIP 仍是旧的 `64e0c3…` 版本。
 
 此前未加本次 FSR 改动的第一章早期道路基线为约 **58.96 FPS**，来自 6,600 次 guest present / 111.94 秒；不是独立上屏帧率，也不能代表全部战斗场景。FSR 版最终实战验收尚未完成。
 
