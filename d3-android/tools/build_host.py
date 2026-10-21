@@ -20,7 +20,8 @@ HOST_SRC = [
     # assembler (hand written opcodes in C were wrong twice in a row).
     os.path.join(ROOT, "host", "hook_stub.S"),
 ]
-GPU_LIB = os.path.join(ROOT, "build", "libeden_gpu.a")
+OUTPUT_ROOT = os.path.join(os.path.dirname(ROOT), "out", "android")
+GPU_LIB = os.path.join(OUTPUT_ROOT, "gpu", "libeden_gpu.a")
 PROBE_SRC = os.path.join(ROOT, "tools", "d3_probe.c")
 
 # Native tests. Each test #includes the .c it exercises, so the exercised unit
@@ -185,8 +186,8 @@ def build_host_with_gpu(clang: str, defines, out_dir: str, host_out: str) -> Non
         *defines,
         *objects,
         GPU_LIB,
-        os.path.join(ROOT, "build", "adrenotools", "libadrenotools.a"),
-        os.path.join(ROOT, "build", "adrenotools", "lib", "linkernsbypass", "liblinkernsbypass.a"),
+        os.path.join(OUTPUT_ROOT, "adrenotools", "libadrenotools.a"),
+        os.path.join(OUTPUT_ROOT, "adrenotools", "lib", "linkernsbypass", "liblinkernsbypass.a"),
         "-llog",
         "-laaudio",
         "-ldl",
@@ -209,8 +210,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir",
-        default=os.path.join(ROOT, "build"),
-        help="Output directory (default: <project>/build)",
+        default=os.path.join(OUTPUT_ROOT, "host"),
+        help="Output directory (default: <repository>/out/android/host)",
     )
     parser.add_argument(
         "--sandbox-root",
@@ -222,7 +223,7 @@ def main() -> None:
     parser.add_argument(
         "--with-gpu",
         action="store_true",
-        help="Link build/libeden_gpu.a (Eden Vulkan stack) into libd3host.so",
+        help="Link out/android/gpu/libeden_gpu.a (Eden Vulkan stack) into libd3host.so",
     )
     parser.add_argument("--data-root", help="Absolute Android runtime data directory")
     parser.add_argument(

@@ -7,7 +7,7 @@
     pwsh -File coverage.ps1 -All            # include OpenGL / NVDEC / post-processing too
     pwsh -File coverage.ps1 -Tree shader_recompiler
 
-  Output: gpu/probe/coverage-<tree>.json + console summary by error signature.
+  Output: out/android/probes/coverage-<tree>.json + console summary by error signature.
 #>
 param(
     [string]$Tree = 'video_core',
@@ -25,6 +25,10 @@ $Third   = Join-Path $Root 'd3-android\gpu\third_party'
 $Eden    = Join-Path $Root 'reference\eden'
 $EdenSrc = Join-Path $Eden 'src'
 $Clang   = 'D:\workspace\Gdict\android_sdk\ndk\28.2.13676358\toolchains\llvm\prebuilt\windows-x86_64\bin\clang++.exe'
+$Gen     = Join-Path $Root 'out\android\generated\include'
+
+& python -I (Join-Path $Root 'd3-android\gpu\tools\gen_shaders.py') --ensure
+if ($LASTEXITCODE -ne 0) { throw 'Shader header generation failed' }
 
 # Trees that cannot contribute to the first Vulkan frame.
 $exclude = @(
@@ -44,7 +48,7 @@ $common = @(
     '-I', (Join-Path $Third 'Vulkan-Headers\include'),
     '-I', (Join-Path $Third 'Vulkan-Utility-Libraries\include'),
     '-I', (Join-Path $Third 'VMA\include'),
-    '-I', (Join-Path $Root 'd3-android\gpu\gen\include'),
+    '-I', $Gen,
     '-I', (Join-Path $Third 'fmt\include'),
     '-I', (Join-Path $Third 'boost\boost_1_86_0'),
     '-I', (Join-Path $Eden 'externals\stb'),
@@ -80,7 +84,9 @@ $results = $Files | ForEach-Object -Parallel {
 
 $ok      = @($results | Where-Object Ok)
 $bad     = @($results | Where-Object { -not $_.Ok })
-$outPath = Join-Path $Root "d3-android\gpu\probe\coverage-$Tree.json"
+$probeRoot = Join-Path $Root 'out\android\probes'
+New-Item -ItemType Directory -Force -Path $probeRoot | Out-Null
+$outPath = Join-Path $probeRoot "coverage-$Tree.json"
 $results | ConvertTo-Json -Depth 4 | Set-Content -Path $outPath -Encoding UTF8
 
 Write-Host ""

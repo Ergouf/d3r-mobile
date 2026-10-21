@@ -18,14 +18,17 @@ $ErrorActionPreference = 'Stop'
 $Root    = 'D:\workspace\Diablo'
 $Shim    = Join-Path $Root 'd3-android\gpu\shim'
 $Third   = Join-Path $Root 'd3-android\gpu\third_party'
-$Gen     = Join-Path $Root 'd3-android\gpu\gen\include'
+$Gen     = Join-Path $Root 'out\android\generated\include'
 $Eden    = Join-Path $Root 'reference\eden'
 $EdenSrc = Join-Path $Eden 'src'
-$ObjRoot = Join-Path $Root 'd3-android\build\gpu-obj'
-$Lib     = Join-Path $Root 'd3-android\build\libeden_gpu.a'
+$ObjRoot = Join-Path $Root 'out\android\gpu\obj'
+$Lib     = Join-Path $Root 'out\android\gpu\libeden_gpu.a'
 $Bin     = 'D:\workspace\Gdict\android_sdk\ndk\28.2.13676358\toolchains\llvm\prebuilt\windows-x86_64\bin'
 $Clang   = Join-Path $Bin 'clang++.exe'
 $Ar      = Join-Path $Bin 'llvm-ar.exe'
+
+& python -I (Join-Path $Root 'd3-android\gpu\tools\gen_shaders.py') --ensure
+if ($LASTEXITCODE -ne 0) { throw 'Shader header generation failed' }
 
 if ($Clean) {
     Remove-Item -Recurse -Force $ObjRoot -ErrorAction SilentlyContinue

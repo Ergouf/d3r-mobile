@@ -24,8 +24,8 @@ MAIN_BASE = 0x01000000
 SDK_BASE = 0x00010000  # symbol file offsets are sdk-module relative
 ROOT = Path(__file__).resolve().parents[2]
 SYMBOLS = str(ROOT / "reference" / "d3-symbols" / "sdk.symbols.json")
-BASE_MAIN = str(ROOT / "reference" / "extract" / "exefs" / "main.nso0")
-UPDATE_MAIN = str(ROOT / "reference" / "extract" / "exefs_update" / "main.nso0")
+BASE_MAIN = str(ROOT / "local" / "assets" / "exefs" / "main.nso0")
+UPDATE_MAIN = str(ROOT / "local" / "assets" / "exefs_update" / "main.nso0")
 
 RELATIVE = 1027
 GLOB_DAT = 1025

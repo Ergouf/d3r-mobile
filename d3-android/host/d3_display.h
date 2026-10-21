@@ -24,8 +24,9 @@ static inline int d3_display_patch(uint32_t* code, uint32_t* letterbox_aspect, u
     return 0;
 }
 
-static inline int d3_display_menu_patch(uint32_t* call, uint32_t* trampoline, uint32_t width, float* applied_scale) {
-    if (width < 1600 || width > 4096 || *call != 0x9402df8e ||
+static inline int d3_display_menu_patch(uint32_t* stable_call, uint32_t* transition_call,
+                                      uint32_t* trampoline, uint32_t width, float* applied_scale) {
+    if (width < 1600 || width > 4096 || *stable_call != 0x9402e0d7 || *transition_call != 0x9402df8e ||
         trampoline[-1] != 0xd65f03c0 || trampoline[0] || trampoline[1] || trampoline[2]) return -1;
     const float maximum_scale = 1600.0f / width;
     float scale = 0;
@@ -40,7 +41,10 @@ static inline int d3_display_menu_patch(uint32_t* call, uint32_t* trampoline, ui
     trampoline[0] = 0x1e201000 | immediate << 13;
     trampoline[1] = 0x1e200940;
     trampoline[2] = 0x14000000 | ((uint32_t)((0x12656c0ll - 0x129b4ccll) / 4) & 0x03ffffff);
-    *call = 0x94000000 | ((uint32_t)((0x129b4c4ll - 0x11ad888ll) / 4) & 0x03ffffff);
+    /* The stable path submits its camera and returns before the transition
+       path. Both calls use s10 for FOV and must enter the same trampoline. */
+    *stable_call = 0x94000000 | ((uint32_t)((0x129b4c4ll - 0x11ad364ll) / 4) & 0x03ffffff);
+    *transition_call = 0x94000000 | ((uint32_t)((0x129b4c4ll - 0x11ad888ll) / 4) & 0x03ffffff);
     *applied_scale = scale;
     return 0;
 }

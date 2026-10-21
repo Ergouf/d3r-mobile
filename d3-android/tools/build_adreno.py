@@ -24,7 +24,7 @@ def build(sdk, ndk):
         subprocess.run(["git", "-C", str(source), "apply", str(patch)], check=True)
     cmake_root = pathlib.Path(sdk) / "cmake/3.22.1/bin"
     cmake = str(cmake_root / "cmake.exe")
-    output = ROOT / "build/adrenotools"
+    output = ROOT.parent / "out/android/adrenotools"
     subprocess.run([cmake, "-S", str(source), "-B", str(output), "-G", "Ninja",
         "-DCMAKE_MAKE_PROGRAM=" + str(cmake_root / "ninja.exe"),
         "-DCMAKE_TOOLCHAIN_FILE=" + str(pathlib.Path(ndk) / "build/cmake/android.toolchain.cmake"),

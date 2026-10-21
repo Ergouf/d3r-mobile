@@ -7,11 +7,13 @@
 # skips that).
 #
 # Writes logcat-<Name>.txt / d3-crash-<Name>.txt / tombstone-<Name>.txt into
-# d3-android/gpu/probe and prints a one-screen summary (log lines, interesting
+# out/android/probes and prints a one-screen summary (log lines, interesting
 # markers, crash thread).
 param(
-    [string]$Name = "baseline",
+    [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$Name = "baseline",
     [int]$Seconds = 25,
+    [string]$Package = 'com.d3mobile.host.recovery',
+    [string]$OutputDir,
     [switch]$NoAutostart,
     # Clear the app data before the run.  A timed-out or aborted run leaves a
     # partial save under files/runtime and the next boot then wedges in the
@@ -21,9 +23,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$pkg = "com.d3mobile.host.recovery"
+$pkg = $Package
 $activity = "$pkg/com.d3mobile.host.MainActivity"
-$outDir = (Resolve-Path (Join-Path $PSScriptRoot "..\gpu\probe")).Path
+if (-not $OutputDir) { $OutputDir = Join-Path $PSScriptRoot '..\..\out\android\probes' }
+$outDir = [IO.Path]::GetFullPath($OutputDir)
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 adb shell am force-stop $pkg | Out-Null
 if (-not $Keep) {

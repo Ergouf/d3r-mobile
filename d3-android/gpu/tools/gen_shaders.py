@@ -6,7 +6,7 @@ NDK's glslc (v2022.3) does not have.  We run glslc to a .spv and write the heade
 ourselves in the same shape the C++ code expects: a global `constexpr` array of
 u32 named <FILE>_SPV.
 
-Output tree: d3-android/gpu/gen/include/video_core/host_shaders/
+Output tree: out/android/generated/include/video_core/host_shaders/
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 EDEN = ROOT / 'reference' / 'eden'
 SHADER_SRC = EDEN / 'src' / 'video_core' / 'host_shaders'
 FFX = EDEN / 'externals' / 'FidelityFX-FSR' / 'ffx-fsr'
-OUT = ROOT / 'd3-android' / 'gpu' / 'gen' / 'include' / 'video_core' / 'host_shaders'
+OUT = ROOT / 'out' / 'android' / 'generated' / 'include' / 'video_core' / 'host_shaders'
 GLSLC = pathlib.Path(r'D:\workspace\Gdict\android_sdk\ndk\28.2.13676358\shader-tools\windows-x86_64\glslc.exe')
 
 EXTENSIONS = {'.comp', '.vert', '.frag'}
@@ -78,6 +78,7 @@ VARIANTS = [
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--ensure', action='store_true', help='Reuse current headers; generate missing or outdated ones')
     args = parser.parse_args()
 
     if not GLSLC.exists():
@@ -97,9 +98,14 @@ def main() -> int:
         stem = f'{src.stem}_{suffix}{src.suffix}'.replace('.', '_')
         jobs.append((src, stem, [f'SAMPLER_TYPE={sampler}', f'TEXEL_TYPE={texel}']))
 
+    dependencies = [pathlib.Path(__file__), *FFX.glob('*.h')]
+    dependency_mtime = max(path.stat().st_mtime_ns for path in dependencies)
     for src, stem, defines in jobs:
         dest = OUT / f'{stem}_spv.h'
         spv = tmp / f'{stem}.spv'
+        if args.ensure and dest.is_file() and dest.stat().st_mtime_ns >= max(src.stat().st_mtime_ns, dependency_mtime):
+            ok += 1
+            continue
         if args.dry_run:
             print(f'would build {dest.name}')
             continue

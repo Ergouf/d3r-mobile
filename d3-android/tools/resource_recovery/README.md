@@ -1,28 +1,30 @@
-# 中文语音恢复脚本快照
+# 中文语音资源工具
 
-保留本轮已用的脚本，非通用安装器。在仓库根运行，需要已有 XCI、prod.keys、
-Python cryptography 和本地 nstool。资源与密钥不入 Git。
+所有命令从仓库根目录运行。原始 XCI 位于 `local/assets/game/`，密钥为 `local/keys/prod.keys`；它们及其他 `local/` 输入只读使用，不入 Git。
 
-`inspect_xci.py` 使用根目录第一份 .xci 和 prod.keys，解密 NCA header 并生成索引；
-Nintendo XTS sector tweak 使用 big endian。多份 XCI 时先明确脚本输入。
-`--extract-voice` 提取中文 title ID `01001b300b9bf00b` 的 NCA。
+`inspect_xci.py` 默认要求游戏目录中恰好一份 XCI，也可用 `--source` 显式指定。索引写入 `out/android/resource-recovery/xci-index.json`。`--extract-voice` 只把中文语音 NCA 写入同一输出目录的 `voice-zh/`，已存在时拒绝覆盖；不会替换保留的语音 CPK。
 
 ```powershell
+python d3-android/tools/resource_recovery/inspect_xci.py --help
 python d3-android/tools/resource_recovery/inspect_xci.py --extract-voice
-& reference/tools/nstool/nstool.exe -k prod.keys --part0 reference/extract/voice_zh/romfs reference/extract/voice_zh/c4cf91f251ed3209a50a5feb710282be.nca
 ```
 
-已部署设备无需重提取。换平板部署，先设置目标串号，再复制和逐文件校验：
+提取需要 Python `cryptography`。NCA header 使用 Nintendo XTS 的 big-endian sector tweak。解开 NCA 需已有本地 `nstool`；解包目标也应选 `out/`，验收后再由使用者明确部署资源。
+
+当前完整更新资源位于 `local/assets/android/romfs/`；14 份中文语音 CPK 位于 `local/assets/android/voice-zh/`。本地校验无需设备：
 
 ```powershell
-$env:ANDROID_SERIAL = 'R52T90127WT'
+python d3-android/tools/resource_recovery/verify_voice.py --local-only
+```
+
+需要部署到明确的 Android 设备时：
+
+```powershell
+$env:ANDROID_SERIAL = '目标设备串号'
 adb get-state
 adb shell mkdir -p /data/local/tmp/d3romfs/AddOnContent/11
-adb push reference/extract/voice_zh/romfs/. /data/local/tmp/d3romfs/AddOnContent/11/
-python d3-android/tools/resource_recovery/verify_voice.py
+adb push local/assets/android/voice-zh/. /data/local/tmp/d3romfs/AddOnContent/11/
+python d3-android/tools/resource_recovery/verify_voice.py --serial $env:ANDROID_SERIAL
 ```
 
-校验器要求恰好 14 个 CPK，逐个比较本地与设备 SHA-256，全部匹配后写安装 marker。
-仍输出到原 `d3-android/build/touch-audio/zh-voice-manifest.json`，运行前确保目录存在。
-不要提前写 marker；替换已完成安装的资源时先移除 marker，再复制和校验。
-已验证清单见 `../../evidence/20261019-handoff/zh-voice-manifest.json`。
+校验器逐个比较设备 SHA-256，全部匹配后才写设备端安装 marker；`--local-only` 不连接 ADB，也不写 marker。两种模式的本地清单均写入 `out/android/resource-recovery/zh-voice-manifest.json`，可用 `--output` 改到其他生成输出位置。工具拒绝将输出写回 `local/`。不要提前写 marker。

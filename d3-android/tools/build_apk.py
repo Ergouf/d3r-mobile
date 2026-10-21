@@ -10,7 +10,8 @@ It deliberately does NOT compile the host or guest. Both are required inputs
 tool never globs for or chooses a "latest" .so.
 
 No device is touched: no install, no adb. The only files written are inside
---output-dir (the APK, its metadata JSON, and the local debug keystore).
+--output-dir (the APK and its metadata JSON). The required signing keystore is
+read-only input and is never generated or replaced.
 
 Reads only:
   <sdk>/platforms/android-36/android.jar        (compile + link against)
@@ -24,7 +25,7 @@ The JDK is never launched via its .bat wrappers: every tool is a `java -cp`/
 `java -jar`/`.exe` subprocess with an explicit argv (shell=False), so
 JAVA_HOME/profile handling cannot leak in.
 
-Run with:  python -I tools/build_apk.py --host ... --guest ...
+Run with:  python -I tools/build_apk.py --host ... --guest ... --keystore ...
 """
 import argparse
 import hashlib
@@ -45,6 +46,7 @@ BUILD_TOOLS_VERSION = "36.0.0"
 PLATFORM = "android-36"
 
 PACKAGE_NAME = "com.d3mobile.host.recovery"
+VALIDATION_PACKAGE = "com.d3mobile.host.validation"
 OEM_PACKAGES = ("com.miHoYo.Yuanshen", "com.miHoYo.ys.bilibili")
 MAIN_CLASS = "com.d3mobile.host.MainActivity"
 ABI = "arm64-v8a"
@@ -100,19 +102,9 @@ def jdk_tool(jdk, name):
 
 
 def ensure_keystore(keytool, keystore_path):
-    """Create the local debug keystore once; reuse it on later runs."""
-    if os.path.isfile(keystore_path):
-        print("reusing debug keystore %s" % keystore_path)
-        return
-    print("generating local debug keystore %s (debug-only, not for release)"
-          % keystore_path)
-    run([keytool, "-genkeypair", "-v",
-         "-keystore", keystore_path,
-         "-alias", KEY_ALIAS,
-         "-storepass", STORE_PASS,
-         "-keypass", KEY_PASS,
-         "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
-         "-dname", "CN=D3HOST Recovery Debug,O=Local Test,C=CN"])
+    """Require the preserved signing key, including if it disappeared during the build."""
+    require_file(keystore_path, "preserved signing keystore")
+    print("reusing debug keystore %s" % keystore_path)
 
 
 def collect_java_sources(src_dir):
@@ -164,12 +156,13 @@ def main():
     parser.add_argument("--jdk", default=None,
                         help="JDK root (default: the jdk-* directory under --sdk)")
     parser.add_argument("--output-dir",
-                        default=os.path.join(ROOT, "build", "apk-recovery"),
+                        default=os.path.join(os.path.dirname(ROOT), "out", "android", "recovery", "apk"),
                         help="Output directory for the APK, metadata and keystore "
-                             "(default: <project>/build/apk-recovery)")
-    parser.add_argument("--keystore", help="Existing debug keystore to reuse across output directories")
-    parser.add_argument("--package", choices=[PACKAGE_NAME, *OEM_PACKAGES], default=PACKAGE_NAME,
-                        help="Optional OEM game identity; requires a host compiled for this package's private root")
+                             "(default: <repository>/out/android/recovery/apk)")
+    parser.add_argument("--keystore", required=True,
+                        help="Existing signing keystore to reuse (required; never replaced or generated)")
+    parser.add_argument("--package", choices=[PACKAGE_NAME, VALIDATION_PACKAGE, *OEM_PACKAGES], default=PACKAGE_NAME,
+                        help="Recovery, isolated validation or OEM identity; requires a host compiled for this package's private root")
     parser.add_argument("--driver-hooks-dir", help="Built libadrenotools src/hook directory")
     args = parser.parse_args()
 
@@ -211,9 +204,8 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     apk_out = os.path.join(output_dir, APK_NAME)
     meta_out = os.path.join(output_dir, META_NAME)
-    keystore_path = os.path.abspath(args.keystore) if args.keystore else os.path.join(output_dir, KEYSTORE_NAME)
-    if args.keystore:
-        require_file(keystore_path, "existing debug keystore (--keystore)")
+    keystore_path = os.path.abspath(args.keystore)
+    require_file(keystore_path, "existing debug keystore (--keystore)")
 
     # Fresh work dir per run so stale classes/dex from a previous build cannot
     # be picked up.
@@ -286,7 +278,7 @@ def main():
             "guest_so": {"path": guest_so, "sha256": sha256_file(guest_so),
                          "size": os.path.getsize(guest_so)},
             "signed": True,
-            "signing_keystore": KEYSTORE_NAME,
+            "signing_keystore": os.path.basename(keystore_path),
             "signing_key_alias": KEY_ALIAS,
         }
         with open(meta_out, "w", encoding="utf-8") as f:

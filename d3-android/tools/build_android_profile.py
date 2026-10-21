@@ -15,23 +15,27 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=["recovery", "genshin", "genshin-bilibili"], default="recovery")
+    parser.add_argument("--profile", choices=["recovery", "validation", "genshin", "genshin-bilibili"], default="recovery")
     parser.add_argument("--guest", required=True)
     parser.add_argument("--keystore", required=True)
     parser.add_argument("--sdk", default=r"D:\workspace\Gdict\android_sdk")
     parser.add_argument("--ndk", default=r"D:\workspace\Gdict\android_sdk\ndk\28.2.13676358")
     args = parser.parse_args()
-    package = {"genshin": "com.miHoYo.Yuanshen",
+    for label, value in (("guest", args.guest), ("keystore", args.keystore)):
+        if not pathlib.Path(value).is_file():
+            parser.error("Preserved %s input does not exist: %s" % (label, value))
+    package = {"validation": "com.d3mobile.host.validation",
+               "genshin": "com.miHoYo.Yuanshen",
                "genshin-bilibili": "com.miHoYo.ys.bilibili"}.get(args.profile, "com.d3mobile.host.recovery")
     private = "/data/user/0/" + package
-    output = ROOT / "build" / ("android-" + args.profile)
+    output = ROOT.parent / "out" / "android" / args.profile
     build_adreno.build(args.sdk, args.ndk)
     subprocess.run(["pwsh", "-File", str(ROOT / "gpu/build_gpu.ps1")], check=True)
     subprocess.run([sys.executable, "-I", str(ROOT / "tools/build_host.py"), "--with-gpu", "--ndk", args.ndk,
         "--private-root", private, "--data-root", private + "/files/runtime", "--output-dir", str(output / "host")], check=True)
     subprocess.run([sys.executable, "-I", str(ROOT / "tools/build_apk.py"), "--package", package, "--sdk", args.sdk,
         "--host", str(output / "host/libd3host.so"), "--guest", args.guest, "--keystore", args.keystore,
-        "--driver-hooks-dir", str(ROOT / "build/adrenotools/src/hook"), "--output-dir", str(output / "apk")], check=True)
+        "--driver-hooks-dir", str(ROOT.parent / "out/android/adrenotools/src/hook"), "--output-dir", str(output / "apk")], check=True)
 
 if __name__ == "__main__":
     main()
