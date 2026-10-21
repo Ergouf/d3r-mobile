@@ -1,0 +1,24 @@
+{
+  "project": "ScarletNX",
+  "origin": "https://github.com/scarletnx/ScarletNX.git",
+  "base_commit": "dbf8915965367e8a9616b19e5a0c1eddafaf28f3",
+  "patch": "0001-fsr1-present-stats.patch",
+  "patch_sha256": "a1c5565df64e2d5a923f3170ab4a5d1b619994ef31792c69480d733d2b65d438",
+  "changed_files_lf_sha256": {
+    "src/nx/CMakeLists.txt": "54188f5f91592047556e3d3a76fa74136c82a2144c71ba0ba24ea02ea5e030a3",
+    "src/nx/gpu/vk/cmd.c": "5a53cc6968763bc480756387805aa6b4c521b06d74dbbf7a626c3868e3b37269",
+    "src/nx/gpu/vk/device.c": "5778aca6fac3866475ac0fbcddc3cd64ced11f699bda58870ce9fe9d23337360",
+    "src/nx/gpu/vk/fsr.c": "ac89558f35eb223ea9d92fff460f1927da4239fe42d1d9bad0284786b662e2e6",
+    "src/nx/gpu/vk/fsr_spv.h": "fd3bb52b1b8bb94662f862c9a1aaf984730491ccb4013f215a71a287455b9732",
+    "src/nx/gpu/vk/renderer.c": "4db1f670109c2ab701ca264b4fc5cc4e017dc1e121df90f5fb1bee5efcf5630c",
+    "src/nx/gpu/vk/shaders/fsr.frag": "e231f77deae34f036a4adb7e805269901171ac603aba76025b4b48d8e6b927f3",
+    "src/nx/gpu/vk/shaders/fsr.vert": "431d78230788e2b9884c494009f82689af121b8b4edd8fa64940f9423710c62d",
+    "src/nx/gpu/vk/shaders/fsr_rcas.frag": "f6cff018b09ab98811fa0fe1e8f5b8d891d1030302389c6223e21f13ac0b02db",
+    "src/nx/gpu/vk/ui.c": "27c6e68ac490dd2eee89b625077505cbf4944f5456bddf1cbbae183d99031b01",
+    "src/nx/gpu/vk/vk.h": "2ecaf635fe7ac55d1adc75b22778b0dc353e6ece8d9939dfa30209fef4d283a6",
+    "src/nx/runtime/present.c": "54d889b3729796f8b57976ad62eaefe0b944230cc74b2a00bfa5912654f556c2",
+    "src/nx/runtime/settings.txt": "c9eab50291afdb7838ca95c8fa528cfc4f21fab6f157cdf061aeeff07838cdd7"
+  },
+  "verification": "git archive base + git apply --check, apply; all 13 resulting files equal current source after LF normalization; worktree index restored to unstaged",
+  "runtime_release_sha256": "64e0c3ce898da18552920c7862e223b0513671b2c61dfb957f3d3cf11c266087"
+}

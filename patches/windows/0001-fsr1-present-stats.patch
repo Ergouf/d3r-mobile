@@ -1,0 +1,2263 @@
+diff --git a/src/nx/CMakeLists.txt b/src/nx/CMakeLists.txt
+index b2a6b9f..6ad555c 100644
+--- a/src/nx/CMakeLists.txt
++++ b/src/nx/CMakeLists.txt
+@@ -86,13 +86,17 @@ include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
+ snx_shaderdec(snx_shader)
+ snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/record.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
+                  gpu/vk/buffer.c gpu/vk/writeback.c gpu/vk/pipeline.c gpu/vk/pipeline_file.c gpu/vk/render.c gpu/vk/release.c gpu/vk/query.c gpu/vk/compute.c
+-                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
++                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/vk/fsr.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
+                  "${volk_SOURCE_DIR}/volk.c")
+ # the ASTC decoder's and the VIC composition's SPIR-V, compiled from their GLSL at build time (cmake/glsl.cmake). The
+ # VIC shader is built twice: for word aligned rows, and for the rest (gpu/video/vic_compose.glsl)
+ include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
+ snx_glsl_spirv(snx_vk SOURCE gpu/texture/astc.comp NAME astc_spv HEADER nx/gpu/texture/astc_spv.h)
+ snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_spv HEADER nx/gpu/video/vic_spv.h)
++# the FSR 1 EASU pass's triangle and its upscale (gpu/vk/fsr.c)
++snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr.vert NAME fsr_vert_spv HEADER nx/gpu/vk/fsr_spv.h)
++snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr.frag NAME fsr_frag_spv HEADER nx/gpu/vk/fsr_spv.h)
++snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr_rcas.frag NAME fsr_rcas_spv HEADER nx/gpu/vk/fsr_spv.h)
+ snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_unaligned_spv HEADER nx/gpu/video/vic_spv.h
+                DEFINES VIC_UNALIGNED)
+ set(components core kernel hle video gpu platform shader vk)
+diff --git a/src/nx/gpu/vk/cmd.c b/src/nx/gpu/vk/cmd.c
+index f9abb45..68711ec 100644
+--- a/src/nx/gpu/vk/cmd.c
++++ b/src/nx/gpu/vk/cmd.c
+@@ -1,508 +1,600 @@
+-/* SPDX-License-Identifier: GPL-3.0-or-later
+-   Copyright 2026 the ScarletNX contributors */
+-/* Frames in flight. A frame runs from one present to the next and may submit many times (a readback, results the
+-   guest needs): each submission gets its own command buffer and signals the next value of the graphics timeline
+-   semaphore. A frame has a staging ring for uploads and for data draws read directly (vertices, indices, constant
+-   buffers), a ring its storage results are copied back into for the CPU, descriptor pools, and the resources to
+-   destroy once its work is done; none of them is reused before its last submission has finished. Ending a frame at a
+-   submit would reset them mid-draw, and wait for the GPU at every submit. */
+-#include <stdlib.h>
+-#include <string.h>
+-#include "nx/runtime/platform/log.h"
+-#include "nx/gpu/vk/vk.h"
+-#include "nx/runtime/platform/plat.h"
+-
+-typedef struct {
+-    VkImage img;
+-    VmaAllocation mem;
+-    VkImageView v1, v2;
+-    VkBuffer buf;
+-    VkBufferView view;
+-} Dead;
+-
+-/* A per-frame ring of one mapped buffer, reused once the frame's previous work is done. */
+-typedef struct {
+-    VkBuffer buf;
+-    VmaAllocation mem;
+-    u8* ptr;
+-    u64 cap, used;
+-    u32 small; /* frames in a row that used a quarter of it or less */
+-} Ring;
+-
+-#define SPARE_SETS 32
+-#define SPARE_LAYOUTS 16
+-typedef struct {
+-    VkCommandPool pool;
+-    VkCommandBuffer* cbs; /* one per submission in this use of the frame */
+-    u32 ncb, icb;         /* icb: the one recording, or the next to begin */
+-    u64 last;             /* the timeline value of the frame's last submission, 0 when it has none */
+-    int recording, fresh; /* fresh: just ended up current, not yet reset for its new use */
+-    Ring stage;           /* uploads and draw data, written by the CPU and read by the GPU */
+-    Ring back;            /* storage results copied back by the GPU for the CPU to read (vk_stage_back) */
+-    /* destroyed once this frame's work is done */
+-    Dead* dead;
+-    int ndead, capdead;
+-    /* descriptor pools, reset when the frame is reused and kept */
+-    VkDescriptorPool pool_d[64];
+-    int npool, ipool; /* pool_d[ipool] is the one allocating; the ones after it are reset and waiting */
+-    /* sets allocated ahead, a batch per layout at a time: most draws make a new set, and the driver's allocation cost
+-       is mostly per call */
+-    struct {
+-        VkDescriptorSetLayout layout;
+-        VkDescriptorSet set[SPARE_SETS];
+-        u32 n;
+-    } spare[SPARE_LAYOUTS];
+-} Frame;
+-
+-static Frame g_fr[VK_FRAMES];
+-static u32 g_cur;
+-static u32 g_cb_begun = 1; /* command buffers begun, so a command buffer's state is told from an earlier one's */
+-static u64 g_frame_id;
+-static VkSemaphore g_gsem; /* graphics timeline: submission n signals n */
+-static u64 g_gval;         /* the last submission */
+-static u64 g_landed;       /* submissions whose storage results vk_buf_frame_done has landed */
+-u32 g_vk_epoch, g_vk_present;
+-
+-u64 vk_hash(const void* p, u64 size) {
+-    const u64* q = p;
+-    u64 n = size / 8, i = 0;
+-    u64 a = 0x9E3779B97F4A7C15ull, b = 0xC2B2AE3D27D4EB4Full, c = 0x165667B19E3779F9ull, d = 0x27D4EB2F165667C5ull;
+-    for (; i + 3 < n; i += 4) {
+-        a = (a ^ q[i]) * 0x100000001B3ull;
+-        b = (b ^ q[i + 1]) * 0x100000001B3ull;
+-        c = (c ^ q[i + 2]) * 0x100000001B3ull;
+-        d = (d ^ q[i + 3]) * 0x100000001B3ull;
+-    }
+-    for (; i < n; i++) a = (a ^ q[i]) * 0x100000001B3ull;
+-    for (u64 k = n * 8; k < size; k++) b = (b ^ ((const u8*)p)[k]) * 0x100000001B3ull;
+-    return a ^ (b << 1) ^ (c << 2) ^ (d << 3) ^ size;
+-}
+-
+-u64 vk_sample_hash(u64 gva, u64 len) {
+-    u8 tmp[2048 + 128];
+-    if (len <= sizeof tmp) {
+-        gmem_read(gva, tmp, len);
+-        return vk_hash(tmp, len);
+-    }
+-    u32 n = 0;
+-    gmem_read(gva, tmp, 64);
+-    n = 64;
+-    gmem_read(gva + len - 64, tmp + n, 64);
+-    n += 64;
+-    u64 step = (len - 32) / 62;
+-    for (int i = 0; i < 62; i++) {
+-        gmem_read(gva + (u64)i * step, tmp + n, 32);
+-        n += 32;
+-    }
+-    return vk_hash(tmp, n);
+-}
+-
+-u64 vk_stage_align(void) {
+-    static u64 al;
+-    if (!al) {
+-        const VkPhysicalDeviceLimits* l = &g_vk.props.limits;
+-        al = 16;
+-        if (l->minUniformBufferOffsetAlignment > al) al = l->minUniformBufferOffsetAlignment;
+-        if (l->minStorageBufferOffsetAlignment > al) al = l->minStorageBufferOffsetAlignment;
+-        if (l->minTexelBufferOffsetAlignment > al) al = l->minTexelBufferOffsetAlignment; /* compute buffer images */
+-    }
+-    return al;
+-}
+-
+-static void dead_push(Frame* f, Dead d) {
+-    if (f->ndead == f->capdead) {
+-        f->capdead = f->capdead ? f->capdead * 2 : 64;
+-        f->dead = realloc(f->dead, sizeof *f->dead * f->capdead);
+-    }
+-    f->dead[f->ndead++] = d;
+-}
+-static void dead_free(Frame* f) {
+-    for (int i = 0; i < f->ndead; i++) {
+-        Dead* d = &f->dead[i];
+-        if (d->v1) vkDestroyImageView(g_vk.dev, d->v1, NULL);
+-        if (d->v2) vkDestroyImageView(g_vk.dev, d->v2, NULL);
+-        if (d->view) vkDestroyBufferView(g_vk.dev, d->view, NULL);
+-        if (d->img) vk_image_destroy(d->img, d->mem);
+-        if (d->buf) vmaDestroyBuffer(g_vk.vma, d->buf, d->mem);
+-    }
+-    f->ndead = 0;
+-}
+-
+-void vk_cmd_init(void) {
+-    VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+-                                   .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+-                                   .queueFamilyIndex = g_vk.gfx_family};
+-    VkSemaphoreTypeCreateInfo tci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+-                                     .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
+-    VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &tci};
+-    VK_OK(vkCreateSemaphore(g_vk.dev, &sci, NULL, &g_gsem));
+-    for (int i = 0; i < VK_FRAMES; i++) {
+-        VK_OK(vkCreateCommandPool(g_vk.dev, &pci, NULL, &g_fr[i].pool));
+-        g_fr[i].fresh = 1;
+-    }
+-    vk_rec_init();
+-}
+-
+-#define STAGE_MIN (16ull << 20)
+-
+-/* a ring grown for a burst goes once it has been mostly unused for a while (the frame's work is done, nothing reads
+-   it); the next allocation makes one of the usual size */
+-/* Whether the staging ring's memory should move, while it is idle: it is in a heap past the driver's budget for this
+-   process (other programs' use taken out), or in host memory while a device-local heap the CPU maps has room for it
+-   again (with a quarter to spare, so it doesn't go back and forth). The rings are made when there is room and kept,
+-   and the BAR window's budget shrinks under them when the desktop takes more of it: 246 MiB on an RTX 2080 without
+-   resizable BAR, of which the driver left this process 47 to 111 while its rings held 134 to 198. Past the budget the
+-   driver moves the memory, and each CPU write to it faults: one game crawled at 10 frames a second for
+-   twenty seconds, its GPU thread half in the kernel. A ring dropped here is made again under the budget
+-   (ring_alloc's VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT), in host memory when the window is full */
+-static int ring_misplaced(const Ring* r, const VmaBudget* b) {
+-    const VkPhysicalDeviceMemoryProperties* mp;
+-    VmaAllocationInfo ai;
+-    u32 heap, t;
+-    vmaGetAllocationInfo(g_vk.vma, r->mem, &ai);
+-    vmaGetMemoryProperties(g_vk.vma, &mp);
+-    heap = mp->memoryTypes[ai.memoryType].heapIndex;
+-    if (b[heap].usage > b[heap].budget) return 1;
+-    if (mp->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) return 0;
+-    for (t = 0; t < mp->memoryTypeCount; t++) {
+-        VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+-        u32 h = mp->memoryTypes[t].heapIndex;
+-        if ((mp->memoryTypes[t].propertyFlags & want) == want && b[h].usage + r->cap < b[h].budget / 4 * 3) return 1;
+-    }
+-    return 0;
+-}
+-static void ring_reset(Ring* r, const VmaBudget* budget) {
+-    r->small = r->cap > STAGE_MIN && r->used <= r->cap / 4 ? r->small + 1 : 0;
+-    if (r->small >= 300 || (budget && r->buf && ring_misplaced(r, budget))) {
+-        vmaDestroyBuffer(g_vk.vma, r->buf, r->mem);
+-        *r = (Ring){0};
+-    }
+-    r->used = 0;
+-}
+-
+-static void timeline_wait(u64 value) {
+-    VkSemaphoreWaitInfo wi = {
+-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_gsem, .pValues = &value};
+-    VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));
+-}
+-/* the storage results of every submission up to value, which has finished, land in guest memory, in order */
+-static void land_through(u64 value) {
+-    while (g_landed < value) vk_buf_frame_done(++g_landed);
+-}
+-
+-/* the frame's previous use is done, its results landed and what it held freed, before it records again */
+-static void frame_recycle(Frame* f) {
+-    if (f->last) {
+-        timeline_wait(f->last);
+-        land_through(f->last);
+-        f->last = 0;
+-    }
+-    dead_free(f);
+-    vkResetCommandPool(g_vk.dev, f->pool, 0);
+-    /* the pools stay, reset: a frame's draws fill several, and making them again every frame costs */
+-    for (int i = 0; i < f->npool; i++) vkResetDescriptorPool(g_vk.dev, f->pool_d[i], 0);
+-    f->ipool = 0;
+-    memset(f->spare, 0, sizeof f->spare);
+-    {
+-        VmaBudget budget[VK_MAX_MEMORY_HEAPS];
+-        vmaSetCurrentFrameIndex(g_vk.vma, (u32)g_frame_id); /* VMA asks the driver for its budgets again */
+-        vmaGetHeapBudgets(g_vk.vma, budget);
+-        ring_reset(&f->stage, budget);
+-    }
+-    ring_reset(&f->back, NULL);
+-    vk_rec_frame_reset((u32)(f - g_fr)); /* the slot's sets made on the recording thread too */
+-    f->icb = 0;
+-    f->fresh = 0;
+-}
+-
+-VkCommandBuffer vk_cmd(void) {
+-    Frame* f = &g_fr[g_cur];
+-    if (!f->recording) {
+-        if (f->fresh) frame_recycle(f);
+-        if (f->icb == f->ncb) {
+-            /* the pool's command buffers may still be recording on the recording thread, and a pool is used by one
+-               thread at a time. A frame's slot only grows to its most submissions, so this is rare */
+-            vk_rec_sync();
+-            VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+-                                              .commandPool = f->pool,
+-                                              .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+-                                              .commandBufferCount = 1};
+-            VkCommandBuffer* cbs = realloc(f->cbs, sizeof *cbs * (f->ncb + 1));
+-            if (!cbs) fatal("vulkan: out of memory for command buffers");
+-            f->cbs = cbs;
+-            VK_OK(vkAllocateCommandBuffers(g_vk.dev, &ai, &f->cbs[f->ncb]));
+-            f->ncb++;
+-        }
+-        vk_rec_begin(f->cbs[f->icb]);
+-        f->recording = 1;
+-        g_cb_begun++;
+-    }
+-    return f->cbs[f->icb];
+-}
+-
+-static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
+-                      VmaMemoryUsage where, VkBuffer* buf, u64* off, VmaAllocation* mem) {
+-    if (align < 16) align = 16;
+-    u64 at = (r->used + align - 1) & ~(align - 1);
+-    if (size > g_vk.alloc_cap) return NULL; /* no allocation is bigger (memory.c) */
+-    if (!r->buf || at + size > r->cap) {
+-        /* a bigger buffer; the old one stays alive until this frame's work is done */
+-        if (r->buf) {
+-            /* The submit only flushes the current staging ring. Flush a retired one too: earlier copies and ASTC
+-               dispatches still read its host writes (the readback ring has none) */
+-            if (r == &f->stage) vmaFlushAllocation(g_vk.vma, r->mem, 0, VK_WHOLE_SIZE);
+-            dead_push(f, (Dead){.buf = r->buf, .mem = r->mem});
+-        }
+-        u64 cap = r->cap ? r->cap * 2 : STAGE_MIN;
+-        while (cap < size) cap *= 2;
+-        /* at the cap a full ring is followed by another of the same size: a frame's big uploads take several */
+-        if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
+-        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+-                                  .size = cap,
+-                                  .usage = usage,
+-                                  .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+-        VmaAllocationCreateInfo aci = {.flags = flags | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = where};
+-        VmaAllocationInfo info;
+-        if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &r->buf, &r->mem, &info))) {
+-            r->buf = VK_NULL_HANDLE;
+-            r->cap = 0;
+-            return NULL;
+-        }
+-        r->ptr = info.pMappedData;
+-        r->cap = cap;
+-        at = 0;
+-    }
+-    r->used = at + size;
+-    *buf = r->buf;
+-    *off = at;
+-    if (mem) *mem = r->mem;
+-    return r->ptr + at;
+-}
+-
+-u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem) {
+-    vk_cmd(); /* the ring is only reused once this frame's previous work is done */
+-    /* written once from the CPU, read by the GPU: device-local when the CPU can map it (resizable BAR), as long as
+-       that heap stays within its budget, else host memory. Without resizable BAR the window is small (246 MiB, a
+-       budget of 196, on an RTX 2080) and the rings of the frames in flight, doubled for a frame's big uploads, went
+-       past it: the driver then moved the memory, and every CPU write to it faulted in the kernel. Tears of the
+-       Kingdom crawled at 10 frames a second for twenty seconds in one camera run of two, its GPU thread half in the
+-       kernel. All of staging in host memory instead costs a quarter of the frame rate (the GPU reads draws' buffers
+-       across PCIe), so only what doesn't fit goes there */
+-    return ring_alloc(&g_fr[g_cur], &g_fr[g_cur].stage, size, align,
+-                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+-                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+-                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+-                          VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT,
+-                      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
+-                      VMA_MEMORY_USAGE_AUTO, buf, off, mem);
+-}
+-u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) { return vk_stage_output(size, align, buf, off, NULL); }
+-
+-/* The staging ring can be device-local memory behind the BAR, where every CPU read crosses PCIe uncached: comparing
+-   a frame's storage results there cost one game most of its GPU thread. The frame's results are copied
+-   on the GPU into host-cached memory instead, and read from there. */
+-u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem) {
+-    vk_cmd();
+-    return ring_alloc(&g_fr[g_cur], &g_fr[g_cur].back, size, g_vk.props.limits.nonCoherentAtomSize,
+-                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+-                      VMA_MEMORY_USAGE_AUTO_PREFER_HOST, buf, off, mem);
+-}
+-
+-void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
+-    vk_render_end();
+-    Frame* f = &g_fr[g_cur];
+-    VkCommandBuffer cb = vk_cmd(); /* a submit with nothing recorded still has to wait and signal */
+-    vk_query_flush(cb);            /* the samples-passed counts of the passes ended (query.c) */
+-    vk_buf_host_barrier(cb, g_gval + 1);
+-    /* staging memory may not be host coherent: the host writes are made visible to the GPU here */
+-    if (f->stage.mem) vmaFlushAllocation(g_vk.vma, f->stage.mem, 0, VK_WHOLE_SIZE);
+-    VkSemaphoreSubmitInfo w[2] = {
+-        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = wait, .stageMask = wait_stage}};
+-    u32 nw = wait ? 1 : 0;
+-    if (g_vk_cs_wait_value) { /* draws read compute results on the GPU: after that batch */
+-        w[nw++] = (VkSemaphoreSubmitInfo){.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+-                                          .semaphore = g_vk_csem,
+-                                          .value = g_vk_cs_wait_value,
+-                                          .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
+-        g_vk_cs_wait_value = 0;
+-    }
+-    VkSemaphoreSubmitInfo s[2] = {{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+-                                   .semaphore = g_gsem,
+-                                   .value = g_gval + 1,
+-                                   .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT},
+-                                  {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+-                                   .semaphore = signal,
+-                                   .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}};
+-    /* ended and submitted after its commands, on the recording thread (a submission that fails signals the timeline
+-       from the host there, so waits for it end) */
+-    vk_rec_submit(cb, w, nw, s, signal ? 2u : 1u);
+-    g_gval++;
+-    f->recording = 0;
+-    f->icb++;
+-    f->last = g_gval;
+-    /* results of submissions the GPU has finished land now, so a later release doesn't find them pending */
+-    u64 done = 0;
+-    if (VK_OK(vkGetSemaphoreCounterValue(g_vk.dev, g_gsem, &done))) land_through(done < g_gval ? done : g_gval);
+-}
+-
+-u64 g_vk_finishes, g_vk_finish_ns;
+-void vk_finish(void) {
+-    u64 t0 = plat_ns();
+-    vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
+-    timeline_wait(g_gval);
+-    land_through(g_gval);
+-    g_vk_finishes++;
+-    g_vk_finish_ns += plat_ns() - t0;
+-}
+-
+-/* A present ends the frame: the next one records in the other slot, once that slot's previous use is done */
+-void vk_frame_next(void) {
+-    if (g_fr[g_cur].recording) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
+-    g_cur = (g_cur + 1) % VK_FRAMES;
+-    g_fr[g_cur].fresh = 1;
+-    g_frame_id++;
+-}
+-/* A frame that goes long without a present (a loading screen) still has to hand its pools and rings back: one with
+-   many submissions or descriptor pools ends here, at the start of a draw or dispatch, before anything is set up */
+-void vk_frame_check(void) {
+-    const Frame* f = &g_fr[g_cur];
+-    if (f->icb >= 64 || f->ipool >= 32 || vk_rec_frame_sets(g_cur) >= 32 * 1024) vk_frame_next();
+-}
+-
+-u64 vk_submit_number(void) { return g_gval + 1; }
+-u32 vk_cb_begun(void) { return g_cb_begun; }
+-u64 vk_last_submit(void) { return g_gval; }
+-void vk_wait_submit(u64 value) { timeline_wait(value); }
+-void vk_land_through(u64 value) { land_through(value < g_gval ? value : g_gval); }
+-u64 vk_frame_id(void) { return g_frame_id; }
+-u32 vk_frame_slot(void) { return g_cur; }
+-
+-VkDescriptorPool vk_desc_pool_new(void) {
+-    /* a thousand sets of the stage layout (gpu/vk/pipeline.c), each with all its descriptors: a frame chains more
+-       pools when it needs them */
+-    VkDescriptorPoolSize sz[VK_POOL_TYPES];
+-    VkDescriptorPoolCreateInfo ci = {0};
+-    vk_pool_sizes(sz, 1024);
+-    ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+-    ci.maxSets = 1024;
+-    ci.poolSizeCount = VK_POOL_TYPES;
+-    ci.pPoolSizes = sz;
+-    VkDescriptorPool p = VK_NULL_HANDLE;
+-    VK_OK(vkCreateDescriptorPool(g_vk.dev, &ci, NULL, &p));
+-    return p;
+-}
+-/* count sets of layout from the frame's pools into sets: count, or 1 when a pool can't hold that many, 0 on failure */
+-static u32 desc_alloc_n(Frame* f, VkDescriptorSetLayout layout, VkDescriptorSet* sets, u32 count) {
+-    VkDescriptorSetLayout layouts[SPARE_SETS];
+-    for (u32 i = 0; i < count; i++) layouts[i] = layout;
+-    for (int tries = 0; tries < 3; tries++) {
+-        if (tries) f->ipool++;
+-        if (tries == 2) count = 1; /* a fresh pool short of a whole batch */
+-        if (f->ipool == f->npool) {
+-            if (f->npool == (int)(sizeof f->pool_d / sizeof f->pool_d[0])) {
+-                LOG_LIMIT(1, "vulkan: a frame used all its descriptor pools (draws skipped)\n");
+-                return 0;
+-            }
+-            VkDescriptorPool p = vk_desc_pool_new();
+-            if (!p) return 0;
+-            f->pool_d[f->npool++] = p;
+-        }
+-        VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+-                                          .descriptorPool = f->pool_d[f->ipool],
+-                                          .descriptorSetCount = count,
+-                                          .pSetLayouts = layouts};
+-        VkResult r = vkAllocateDescriptorSets(g_vk.dev, &ai, sets);
+-        if (r == VK_SUCCESS) return count;
+-        if (r != VK_ERROR_OUT_OF_POOL_MEMORY && r != VK_ERROR_FRAGMENTED_POOL) {
+-            VK_OK(r);
+-            return 0;
+-        }
+-    }
+-    return 0;
+-}
+-VkDescriptorSet vk_desc_alloc(VkDescriptorSetLayout layout) {
+-    vk_cmd(); /* the pools are reset when the frame starts */
+-    Frame* f = &g_fr[g_cur];
+-    int i = 0;
+-    while (i < SPARE_LAYOUTS && f->spare[i].layout && f->spare[i].layout != layout) i++;
+-    if (i == SPARE_LAYOUTS) { /* more layouts than kept: one at a time */
+-        VkDescriptorSet set;
+-        return desc_alloc_n(f, layout, &set, 1) ? set : VK_NULL_HANDLE;
+-    }
+-    f->spare[i].layout = layout;
+-    if (!f->spare[i].n) f->spare[i].n = desc_alloc_n(f, layout, f->spare[i].set, SPARE_SETS);
+-    return f->spare[i].n ? f->spare[i].set[--f->spare[i].n] : VK_NULL_HANDLE;
+-}
+-
+-/* vk_cmd() first: after a frame advance g_cur is the next slot, still holding an older frame's work. Starting it waits for
+-   that work and frees its list, so what is pushed now waits for the frame recorded from now on, which is submitted
+-   after every frame that can still use it */
+-void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2) {
+-    vk_cmd();
+-    dead_push(&g_fr[g_cur], (Dead){.img = img, .mem = a, .v1 = v1, .v2 = v2});
+-}
+-void vk_defer_buffer(VkBuffer b, VmaAllocation a) {
+-    vk_cmd();
+-    dead_push(&g_fr[g_cur], (Dead){.buf = b, .mem = a});
+-}
+-void vk_defer_buffer_view(VkBufferView v) {
+-    vk_cmd();
+-    dead_push(&g_fr[g_cur], (Dead){.view = v});
+-}
+-
+-void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPipelineStageFlags2 src_stage,
+-                VkAccessFlags2 src_access, VkImageLayout from, VkPipelineStageFlags2 dst_stage,
+-                VkAccessFlags2 dst_access, VkImageLayout to) {
+-    VkImageMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+-                               .srcStageMask = src_stage,
+-                               .srcAccessMask = src_access,
+-                               .dstStageMask = dst_stage,
+-                               .dstAccessMask = dst_access,
+-                               .oldLayout = from,
+-                               .newLayout = to,
+-                               .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+-                               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+-                               .image = img,
+-                               .subresourceRange = {aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}};
+-    VkDependencyInfo d = {
+-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &b};
+-    rec_CmdPipelineBarrier2(cb, &d);
+-}
+-
+-/* one buffer the GPU copies into for the host to read: vk_readback_buffer before recording the copy, vk_finish,
+-   then vk_readback_ready before reading the pointer */
+-static VkBuffer g_rb;
+-static VmaAllocation g_rb_mem;
+-static u8* g_rb_ptr;
+-static u64 g_rb_cap;
+-static u32 g_rb_small; /* readbacks in a row of an eighth of it or less */
+-u8* vk_readback_buffer(u64 size, VkBuffer* buf) {
+-    /* it grows to the biggest readback, and shrinks back after many small ones */
+-    if (size > g_vk.alloc_cap) return NULL; /* read back in parts (memory.c) */
+-    g_rb_small = g_rb_cap > STAGE_MIN && size <= g_rb_cap / 8 ? g_rb_small + 1 : 0;
+-    if (size > g_rb_cap || g_rb_small >= 64) {
+-        if (g_rb) vk_defer_buffer(g_rb, g_rb_mem);
+-        u64 cap = size > g_rb_cap ? (g_rb_cap ? g_rb_cap : STAGE_MIN) : STAGE_MIN;
+-        g_rb_small = 0;
+-        while (cap < size) cap *= 2;
+-        if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
+-        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+-                                  .size = cap,
+-                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+-                                  .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+-        VmaAllocationCreateInfo aci = {.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+-                                                VMA_ALLOCATION_CREATE_MAPPED_BIT,
+-                                       .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST};
+-        VmaAllocationInfo info;
+-        if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &g_rb, &g_rb_mem, &info))) {
+-            g_rb = VK_NULL_HANDLE;
+-            g_rb_cap = 0;
+-            return NULL;
+-        }
+-        g_rb_ptr = info.pMappedData;
+-        g_rb_cap = cap;
+-    }
+-    *buf = g_rb;
+-    return g_rb_ptr;
+-}
+-void vk_readback_ready(void) { vmaInvalidateAllocation(g_vk.vma, g_rb_mem, 0, VK_WHOLE_SIZE); }
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   Copyright 2026 the ScarletNX contributors */
++/* Frames in flight. A frame runs from one present to the next and may submit many times (a readback, results the
++   guest needs): each submission gets its own command buffer and signals the next value of the graphics timeline
++   semaphore. A frame has a staging ring for uploads and for data draws read directly (vertices, indices, constant
++   buffers), a ring its storage results are copied back into for the CPU, descriptor pools, and the resources to
++   destroy once its work is done; none of them is reused before its last submission has finished. Ending a frame at a
++   submit would reset them mid-draw, and wait for the GPU at every submit. */
++#include <stdlib.h>
++#include <string.h>
++#include "nx/runtime/platform/log.h"
++#include "nx/gpu/vk/vk.h"
++#include "nx/runtime/platform/plat.h"
++
++typedef struct {
++    VkImage img;
++    VmaAllocation mem;
++    VkImageView v1, v2;
++    VkBuffer buf;
++    VkBufferView view;
++} Dead;
++
++/* A per-frame ring of one mapped buffer, reused once the frame's previous work is done. */
++typedef struct {
++    VkBuffer buf;
++    VmaAllocation mem;
++    u8* ptr;
++    u64 cap, used;
++    u32 small; /* frames in a row that used a quarter of it or less */
++} Ring;
++
++#define SPARE_SETS 32
++#define SPARE_LAYOUTS 16
++typedef struct {
++    VkCommandPool pool;
++    VkCommandBuffer* cbs; /* one per submission in this use of the frame */
++    u32 ncb, icb;         /* icb: the one recording, or the next to begin */
++    u64 last;             /* the timeline value of the frame's last submission, 0 when it has none */
++    int recording, fresh; /* fresh: just ended up current, not yet reset for its new use */
++    Ring stage;           /* uploads and draw data, written by the CPU and read by the GPU */
++    Ring back;            /* storage results copied back by the GPU for the CPU to read (vk_stage_back) */
++    /* destroyed once this frame's work is done */
++    Dead* dead;
++    int ndead, capdead;
++    /* descriptor pools, reset when the frame is reused and kept */
++    VkDescriptorPool pool_d[64];
++    int npool, ipool; /* pool_d[ipool] is the one allocating; the ones after it are reset and waiting */
++    /* sets allocated ahead, a batch per layout at a time: most draws make a new set, and the driver's allocation cost
++       is mostly per call */
++    struct {
++        VkDescriptorSetLayout layout;
++        VkDescriptorSet set[SPARE_SETS];
++        u32 n;
++    } spare[SPARE_LAYOUTS];
++} Frame;
++
++static Frame g_fr[VK_FRAMES];
++static u32 g_cur;
++static u32 g_cb_begun = 1; /* command buffers begun, so a command buffer's state is told from an earlier one's */
++static u64 g_frame_id;
++static VkSemaphore g_gsem; /* graphics timeline: submission n signals n */
++static u64 g_gval;         /* the last submission */
++static u64 g_landed;       /* submissions whose storage results vk_buf_frame_done has landed */
++u32 g_vk_epoch, g_vk_present;
++
++/* vk_wait_submit is also called without vk_lock (the release worker). Keep diagnostics per thread throughout. */
++typedef struct {
++    u64 count, sum_ns, max_ns, over_20ms;
++} CmdCallStats;
++enum { WAIT_FRAME, WAIT_FINISH, WAIT_SUBMIT, WAIT_REASON_N };
++enum { RECYCLE_TOTAL, RECYCLE_MAINTENANCE, RECYCLE_RESET, RECYCLE_BUDGET, RECYCLE_STAGE_N };
++static __thread int g_cmd_stats_on = -1;
++static __thread CmdCallStats g_cmd_wait_stats[WAIT_REASON_N], g_cmd_recycle_stats[RECYCLE_STAGE_N];
++static __thread u64 g_cmd_wait_calls, g_cmd_recycle_calls;
++static __thread unsigned g_cmd_wait_warned, g_cmd_recycle_warned;
++static int cmd_stats_on(void) {
++    if (g_cmd_stats_on < 0) {
++        const char* env = getenv("SNX_PRESENT_STATS");
++        g_cmd_stats_on = env && *env && strcmp(env, "0") != 0;
++    }
++    return g_cmd_stats_on;
++}
++static void cmd_stats_add(CmdCallStats* s, u64 ns) {
++    s->count++;
++    s->sum_ns += ns;
++    if (ns > s->max_ns) s->max_ns = ns;
++    if (ns > 20000000) s->over_20ms++;
++}
++static void cmd_wait_note(unsigned reason, u64 value, u64 ns) {
++    cmd_stats_add(&g_cmd_wait_stats[reason], ns);
++    if (ns > 20000000 && g_cmd_wait_warned < 10) {
++        static const char* const names[] = {"frame", "finish", "submit"};
++        g_cmd_wait_warned++;
++        WARN("timeline-wait: thread=%p reason=%s target=%llu us=%llu\n", (void*)&g_cmd_stats_on, names[reason],
++             (unsigned long long)value, (unsigned long long)(ns / 1000));
++    }
++    if (++g_cmd_wait_calls % 600) return;
++    const CmdCallStats* f = &g_cmd_wait_stats[WAIT_FRAME];
++    const CmdCallStats* n = &g_cmd_wait_stats[WAIT_FINISH];
++    const CmdCallStats* s = &g_cmd_wait_stats[WAIT_SUBMIT];
++    LOG("timeline-stats: thread=%p calls=%llu window=600 count/sum_us/max_us/over20ms "
++        "frame=%llu/%llu/%llu/%llu finish=%llu/%llu/%llu/%llu submit=%llu/%llu/%llu/%llu\n",
++        (void*)&g_cmd_stats_on, (unsigned long long)g_cmd_wait_calls,
++        (unsigned long long)f->count, (unsigned long long)(f->sum_ns / 1000),
++        (unsigned long long)(f->max_ns / 1000), (unsigned long long)f->over_20ms,
++        (unsigned long long)n->count, (unsigned long long)(n->sum_ns / 1000),
++        (unsigned long long)(n->max_ns / 1000), (unsigned long long)n->over_20ms,
++        (unsigned long long)s->count, (unsigned long long)(s->sum_ns / 1000),
++        (unsigned long long)(s->max_ns / 1000), (unsigned long long)s->over_20ms);
++    memset(g_cmd_wait_stats, 0, sizeof g_cmd_wait_stats);
++}
++static void cmd_recycle_note(u64 total, u64 maintenance, u64 reset, u64 budget) {
++    cmd_stats_add(&g_cmd_recycle_stats[RECYCLE_TOTAL], total);
++    cmd_stats_add(&g_cmd_recycle_stats[RECYCLE_MAINTENANCE], maintenance);
++    cmd_stats_add(&g_cmd_recycle_stats[RECYCLE_RESET], reset);
++    cmd_stats_add(&g_cmd_recycle_stats[RECYCLE_BUDGET], budget);
++    if (maintenance > 20000000 && g_cmd_recycle_warned < 10) {
++        g_cmd_recycle_warned++;
++        WARN("recycle-slow: thread=%p frame=%llu total_us=%llu maintenance_us=%llu reset_us=%llu budget_us=%llu\n",
++             (void*)&g_cmd_stats_on, (unsigned long long)g_frame_id, (unsigned long long)(total / 1000),
++             (unsigned long long)(maintenance / 1000), (unsigned long long)(reset / 1000),
++             (unsigned long long)(budget / 1000));
++    }
++    if (++g_cmd_recycle_calls % 600) return;
++    const CmdCallStats* t = &g_cmd_recycle_stats[RECYCLE_TOTAL];
++    const CmdCallStats* m = &g_cmd_recycle_stats[RECYCLE_MAINTENANCE];
++    const CmdCallStats* r = &g_cmd_recycle_stats[RECYCLE_RESET];
++    const CmdCallStats* b = &g_cmd_recycle_stats[RECYCLE_BUDGET];
++    LOG("recycle-stats: thread=%p calls=%llu window=600 count/sum_us/max_us/over20ms "
++        "total=%llu/%llu/%llu/%llu maintenance=%llu/%llu/%llu/%llu "
++        "reset=%llu/%llu/%llu/%llu budget=%llu/%llu/%llu/%llu\n",
++        (void*)&g_cmd_stats_on, (unsigned long long)g_cmd_recycle_calls,
++        (unsigned long long)t->count, (unsigned long long)(t->sum_ns / 1000),
++        (unsigned long long)(t->max_ns / 1000), (unsigned long long)t->over_20ms,
++        (unsigned long long)m->count, (unsigned long long)(m->sum_ns / 1000),
++        (unsigned long long)(m->max_ns / 1000), (unsigned long long)m->over_20ms,
++        (unsigned long long)r->count, (unsigned long long)(r->sum_ns / 1000),
++        (unsigned long long)(r->max_ns / 1000), (unsigned long long)r->over_20ms,
++        (unsigned long long)b->count, (unsigned long long)(b->sum_ns / 1000),
++        (unsigned long long)(b->max_ns / 1000), (unsigned long long)b->over_20ms);
++    memset(g_cmd_recycle_stats, 0, sizeof g_cmd_recycle_stats);
++}
++
++u64 vk_hash(const void* p, u64 size) {
++    const u64* q = p;
++    u64 n = size / 8, i = 0;
++    u64 a = 0x9E3779B97F4A7C15ull, b = 0xC2B2AE3D27D4EB4Full, c = 0x165667B19E3779F9ull, d = 0x27D4EB2F165667C5ull;
++    for (; i + 3 < n; i += 4) {
++        a = (a ^ q[i]) * 0x100000001B3ull;
++        b = (b ^ q[i + 1]) * 0x100000001B3ull;
++        c = (c ^ q[i + 2]) * 0x100000001B3ull;
++        d = (d ^ q[i + 3]) * 0x100000001B3ull;
++    }
++    for (; i < n; i++) a = (a ^ q[i]) * 0x100000001B3ull;
++    for (u64 k = n * 8; k < size; k++) b = (b ^ ((const u8*)p)[k]) * 0x100000001B3ull;
++    return a ^ (b << 1) ^ (c << 2) ^ (d << 3) ^ size;
++}
++
++u64 vk_sample_hash(u64 gva, u64 len) {
++    u8 tmp[2048 + 128];
++    if (len <= sizeof tmp) {
++        gmem_read(gva, tmp, len);
++        return vk_hash(tmp, len);
++    }
++    u32 n = 0;
++    gmem_read(gva, tmp, 64);
++    n = 64;
++    gmem_read(gva + len - 64, tmp + n, 64);
++    n += 64;
++    u64 step = (len - 32) / 62;
++    for (int i = 0; i < 62; i++) {
++        gmem_read(gva + (u64)i * step, tmp + n, 32);
++        n += 32;
++    }
++    return vk_hash(tmp, n);
++}
++
++u64 vk_stage_align(void) {
++    static u64 al;
++    if (!al) {
++        const VkPhysicalDeviceLimits* l = &g_vk.props.limits;
++        al = 16;
++        if (l->minUniformBufferOffsetAlignment > al) al = l->minUniformBufferOffsetAlignment;
++        if (l->minStorageBufferOffsetAlignment > al) al = l->minStorageBufferOffsetAlignment;
++        if (l->minTexelBufferOffsetAlignment > al) al = l->minTexelBufferOffsetAlignment; /* compute buffer images */
++    }
++    return al;
++}
++
++static void dead_push(Frame* f, Dead d) {
++    if (f->ndead == f->capdead) {
++        f->capdead = f->capdead ? f->capdead * 2 : 64;
++        f->dead = realloc(f->dead, sizeof *f->dead * f->capdead);
++    }
++    f->dead[f->ndead++] = d;
++}
++static void dead_free(Frame* f) {
++    for (int i = 0; i < f->ndead; i++) {
++        Dead* d = &f->dead[i];
++        if (d->v1) vkDestroyImageView(g_vk.dev, d->v1, NULL);
++        if (d->v2) vkDestroyImageView(g_vk.dev, d->v2, NULL);
++        if (d->view) vkDestroyBufferView(g_vk.dev, d->view, NULL);
++        if (d->img) vk_image_destroy(d->img, d->mem);
++        if (d->buf) vmaDestroyBuffer(g_vk.vma, d->buf, d->mem);
++    }
++    f->ndead = 0;
++}
++
++void vk_cmd_init(void) {
++    VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
++                                   .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
++                                   .queueFamilyIndex = g_vk.gfx_family};
++    VkSemaphoreTypeCreateInfo tci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
++                                     .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
++    VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &tci};
++    VK_OK(vkCreateSemaphore(g_vk.dev, &sci, NULL, &g_gsem));
++    for (int i = 0; i < VK_FRAMES; i++) {
++        VK_OK(vkCreateCommandPool(g_vk.dev, &pci, NULL, &g_fr[i].pool));
++        g_fr[i].fresh = 1;
++    }
++    vk_rec_init();
++}
++
++#define STAGE_MIN (16ull << 20)
++
++/* a ring grown for a burst goes once it has been mostly unused for a while (the frame's work is done, nothing reads
++   it); the next allocation makes one of the usual size */
++/* Whether the staging ring's memory should move, while it is idle: it is in a heap past the driver's budget for this
++   process (other programs' use taken out), or in host memory while a device-local heap the CPU maps has room for it
++   again (with a quarter to spare, so it doesn't go back and forth). The rings are made when there is room and kept,
++   and the BAR window's budget shrinks under them when the desktop takes more of it: 246 MiB on an RTX 2080 without
++   resizable BAR, of which the driver left this process 47 to 111 while its rings held 134 to 198. Past the budget the
++   driver moves the memory, and each CPU write to it faults: one game crawled at 10 frames a second for
++   twenty seconds, its GPU thread half in the kernel. A ring dropped here is made again under the budget
++   (ring_alloc's VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT), in host memory when the window is full */
++static int ring_misplaced(const Ring* r, const VmaBudget* b) {
++    const VkPhysicalDeviceMemoryProperties* mp;
++    VmaAllocationInfo ai;
++    u32 heap, t;
++    vmaGetAllocationInfo(g_vk.vma, r->mem, &ai);
++    vmaGetMemoryProperties(g_vk.vma, &mp);
++    heap = mp->memoryTypes[ai.memoryType].heapIndex;
++    if (b[heap].usage > b[heap].budget) return 1;
++    if (mp->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) return 0;
++    for (t = 0; t < mp->memoryTypeCount; t++) {
++        VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
++        u32 h = mp->memoryTypes[t].heapIndex;
++        if ((mp->memoryTypes[t].propertyFlags & want) == want && b[h].usage + r->cap < b[h].budget / 4 * 3) return 1;
++    }
++    return 0;
++}
++static void ring_reset(Ring* r, const VmaBudget* budget) {
++    r->small = r->cap > STAGE_MIN && r->used <= r->cap / 4 ? r->small + 1 : 0;
++    if (r->small >= 300 || (budget && r->buf && ring_misplaced(r, budget))) {
++        vmaDestroyBuffer(g_vk.vma, r->buf, r->mem);
++        *r = (Ring){0};
++    }
++    r->used = 0;
++}
++
++static void timeline_wait(u64 value, unsigned reason) {
++    int stats = cmd_stats_on();
++    u64 start = stats ? plat_ns() : 0;
++    VkSemaphoreWaitInfo wi = {
++        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_gsem, .pValues = &value};
++    VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));
++    if (stats) cmd_wait_note(reason, value, plat_ns() - start);
++}
++/* the storage results of every submission up to value, which has finished, land in guest memory, in order */
++static void land_through(u64 value) {
++    while (g_landed < value) vk_buf_frame_done(++g_landed);
++}
++
++/* the frame's previous use is done, its results landed and what it held freed, before it records again */
++static void frame_recycle(Frame* f) {
++    int stats = cmd_stats_on();
++    u64 start = stats ? plat_ns() : 0, maintenance_start = start, reset_ns = 0, budget_ns = 0;
++    if (f->last) {
++        timeline_wait(f->last, WAIT_FRAME);
++        if (stats) maintenance_start = plat_ns();
++        land_through(f->last);
++        f->last = 0;
++    }
++    dead_free(f);
++    u64 reset_start = stats ? plat_ns() : 0;
++    vkResetCommandPool(g_vk.dev, f->pool, 0);
++    /* the pools stay, reset: a frame's draws fill several, and making them again every frame costs */
++    for (int i = 0; i < f->npool; i++) vkResetDescriptorPool(g_vk.dev, f->pool_d[i], 0);
++    if (stats) reset_ns = plat_ns() - reset_start;
++    f->ipool = 0;
++    memset(f->spare, 0, sizeof f->spare);
++    {
++        VmaBudget budget[VK_MAX_MEMORY_HEAPS];
++        u64 budget_start = stats ? plat_ns() : 0;
++        vmaSetCurrentFrameIndex(g_vk.vma, (u32)g_frame_id); /* VMA asks the driver for its budgets again */
++        vmaGetHeapBudgets(g_vk.vma, budget);
++        if (stats) budget_ns = plat_ns() - budget_start;
++        ring_reset(&f->stage, budget);
++    }
++    ring_reset(&f->back, NULL);
++    vk_rec_frame_reset((u32)(f - g_fr)); /* the slot's sets made on the recording thread too */
++    f->icb = 0;
++    f->fresh = 0;
++    if (stats) {
++        u64 now = plat_ns();
++        cmd_recycle_note(now - start, now - maintenance_start, reset_ns, budget_ns);
++    }
++}
++
++VkCommandBuffer vk_cmd(void) {
++    Frame* f = &g_fr[g_cur];
++    if (!f->recording) {
++        if (f->fresh) frame_recycle(f);
++        if (f->icb == f->ncb) {
++            /* the pool's command buffers may still be recording on the recording thread, and a pool is used by one
++               thread at a time. A frame's slot only grows to its most submissions, so this is rare */
++            vk_rec_sync();
++            VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
++                                              .commandPool = f->pool,
++                                              .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
++                                              .commandBufferCount = 1};
++            VkCommandBuffer* cbs = realloc(f->cbs, sizeof *cbs * (f->ncb + 1));
++            if (!cbs) fatal("vulkan: out of memory for command buffers");
++            f->cbs = cbs;
++            VK_OK(vkAllocateCommandBuffers(g_vk.dev, &ai, &f->cbs[f->ncb]));
++            f->ncb++;
++        }
++        vk_rec_begin(f->cbs[f->icb]);
++        f->recording = 1;
++        g_cb_begun++;
++    }
++    return f->cbs[f->icb];
++}
++
++static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
++                      VmaMemoryUsage where, VkBuffer* buf, u64* off, VmaAllocation* mem) {
++    if (align < 16) align = 16;
++    u64 at = (r->used + align - 1) & ~(align - 1);
++    if (size > g_vk.alloc_cap) return NULL; /* no allocation is bigger (memory.c) */
++    if (!r->buf || at + size > r->cap) {
++        /* a bigger buffer; the old one stays alive until this frame's work is done */
++        if (r->buf) {
++            /* The submit only flushes the current staging ring. Flush a retired one too: earlier copies and ASTC
++               dispatches still read its host writes (the readback ring has none) */
++            if (r == &f->stage) vmaFlushAllocation(g_vk.vma, r->mem, 0, VK_WHOLE_SIZE);
++            dead_push(f, (Dead){.buf = r->buf, .mem = r->mem});
++        }
++        u64 cap = r->cap ? r->cap * 2 : STAGE_MIN;
++        while (cap < size) cap *= 2;
++        /* at the cap a full ring is followed by another of the same size: a frame's big uploads take several */
++        if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
++        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
++                                  .size = cap,
++                                  .usage = usage,
++                                  .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
++        VmaAllocationCreateInfo aci = {.flags = flags | VMA_ALLOCATION_CREATE_MAPPED_BIT, .usage = where};
++        VmaAllocationInfo info;
++        if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &r->buf, &r->mem, &info))) {
++            r->buf = VK_NULL_HANDLE;
++            r->cap = 0;
++            return NULL;
++        }
++        r->ptr = info.pMappedData;
++        r->cap = cap;
++        at = 0;
++    }
++    r->used = at + size;
++    *buf = r->buf;
++    *off = at;
++    if (mem) *mem = r->mem;
++    return r->ptr + at;
++}
++
++u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem) {
++    vk_cmd(); /* the ring is only reused once this frame's previous work is done */
++    /* written once from the CPU, read by the GPU: device-local when the CPU can map it (resizable BAR), as long as
++       that heap stays within its budget, else host memory. Without resizable BAR the window is small (246 MiB, a
++       budget of 196, on an RTX 2080) and the rings of the frames in flight, doubled for a frame's big uploads, went
++       past it: the driver then moved the memory, and every CPU write to it faulted in the kernel. Tears of the
++       Kingdom crawled at 10 frames a second for twenty seconds in one camera run of two, its GPU thread half in the
++       kernel. All of staging in host memory instead costs a quarter of the frame rate (the GPU reads draws' buffers
++       across PCIe), so only what doesn't fit goes there */
++    return ring_alloc(&g_fr[g_cur], &g_fr[g_cur].stage, size, align,
++                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
++                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
++                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
++                          VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT,
++                      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
++                      VMA_MEMORY_USAGE_AUTO, buf, off, mem);
++}
++u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) { return vk_stage_output(size, align, buf, off, NULL); }
++
++/* The staging ring can be device-local memory behind the BAR, where every CPU read crosses PCIe uncached: comparing
++   a frame's storage results there cost one game most of its GPU thread. The frame's results are copied
++   on the GPU into host-cached memory instead, and read from there. */
++u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem) {
++    vk_cmd();
++    return ring_alloc(&g_fr[g_cur], &g_fr[g_cur].back, size, g_vk.props.limits.nonCoherentAtomSize,
++                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
++                      VMA_MEMORY_USAGE_AUTO_PREFER_HOST, buf, off, mem);
++}
++
++void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
++    vk_render_end();
++    Frame* f = &g_fr[g_cur];
++    VkCommandBuffer cb = vk_cmd(); /* a submit with nothing recorded still has to wait and signal */
++    vk_query_flush(cb);            /* the samples-passed counts of the passes ended (query.c) */
++    vk_buf_host_barrier(cb, g_gval + 1);
++    /* staging memory may not be host coherent: the host writes are made visible to the GPU here */
++    if (f->stage.mem) vmaFlushAllocation(g_vk.vma, f->stage.mem, 0, VK_WHOLE_SIZE);
++    VkSemaphoreSubmitInfo w[2] = {
++        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = wait, .stageMask = wait_stage}};
++    u32 nw = wait ? 1 : 0;
++    if (g_vk_cs_wait_value) { /* draws read compute results on the GPU: after that batch */
++        w[nw++] = (VkSemaphoreSubmitInfo){.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
++                                          .semaphore = g_vk_csem,
++                                          .value = g_vk_cs_wait_value,
++                                          .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT};
++        g_vk_cs_wait_value = 0;
++    }
++    VkSemaphoreSubmitInfo s[2] = {{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
++                                   .semaphore = g_gsem,
++                                   .value = g_gval + 1,
++                                   .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT},
++                                  {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
++                                   .semaphore = signal,
++                                   .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}};
++    /* ended and submitted after its commands, on the recording thread (a submission that fails signals the timeline
++       from the host there, so waits for it end) */
++    vk_rec_submit(cb, w, nw, s, signal ? 2u : 1u);
++    g_gval++;
++    f->recording = 0;
++    f->icb++;
++    f->last = g_gval;
++    /* results of submissions the GPU has finished land now, so a later release doesn't find them pending */
++    u64 done = 0;
++    if (VK_OK(vkGetSemaphoreCounterValue(g_vk.dev, g_gsem, &done))) land_through(done < g_gval ? done : g_gval);
++}
++
++u64 g_vk_finishes, g_vk_finish_ns;
++void vk_finish(void) {
++    u64 t0 = plat_ns();
++    vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
++    timeline_wait(g_gval, WAIT_FINISH);
++    land_through(g_gval);
++    g_vk_finishes++;
++    g_vk_finish_ns += plat_ns() - t0;
++}
++
++/* A present ends the frame: the next one records in the other slot, once that slot's previous use is done */
++void vk_frame_next(void) {
++    if (g_fr[g_cur].recording) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
++    g_cur = (g_cur + 1) % VK_FRAMES;
++    g_fr[g_cur].fresh = 1;
++    g_frame_id++;
++}
++/* A frame that goes long without a present (a loading screen) still has to hand its pools and rings back: one with
++   many submissions or descriptor pools ends here, at the start of a draw or dispatch, before anything is set up */
++void vk_frame_check(void) {
++    const Frame* f = &g_fr[g_cur];
++    if (f->icb >= 64 || f->ipool >= 32 || vk_rec_frame_sets(g_cur) >= 32 * 1024) vk_frame_next();
++}
++
++u64 vk_submit_number(void) { return g_gval + 1; }
++u32 vk_cb_begun(void) { return g_cb_begun; }
++u64 vk_last_submit(void) { return g_gval; }
++void vk_wait_submit(u64 value) { timeline_wait(value, WAIT_SUBMIT); }
++void vk_land_through(u64 value) { land_through(value < g_gval ? value : g_gval); }
++u64 vk_frame_id(void) { return g_frame_id; }
++u32 vk_frame_slot(void) { return g_cur; }
++
++VkDescriptorPool vk_desc_pool_new(void) {
++    /* a thousand sets of the stage layout (gpu/vk/pipeline.c), each with all its descriptors: a frame chains more
++       pools when it needs them */
++    VkDescriptorPoolSize sz[VK_POOL_TYPES];
++    VkDescriptorPoolCreateInfo ci = {0};
++    vk_pool_sizes(sz, 1024);
++    ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
++    ci.maxSets = 1024;
++    ci.poolSizeCount = VK_POOL_TYPES;
++    ci.pPoolSizes = sz;
++    VkDescriptorPool p = VK_NULL_HANDLE;
++    VK_OK(vkCreateDescriptorPool(g_vk.dev, &ci, NULL, &p));
++    return p;
++}
++/* count sets of layout from the frame's pools into sets: count, or 1 when a pool can't hold that many, 0 on failure */
++static u32 desc_alloc_n(Frame* f, VkDescriptorSetLayout layout, VkDescriptorSet* sets, u32 count) {
++    VkDescriptorSetLayout layouts[SPARE_SETS];
++    for (u32 i = 0; i < count; i++) layouts[i] = layout;
++    for (int tries = 0; tries < 3; tries++) {
++        if (tries) f->ipool++;
++        if (tries == 2) count = 1; /* a fresh pool short of a whole batch */
++        if (f->ipool == f->npool) {
++            if (f->npool == (int)(sizeof f->pool_d / sizeof f->pool_d[0])) {
++                LOG_LIMIT(1, "vulkan: a frame used all its descriptor pools (draws skipped)\n");
++                return 0;
++            }
++            VkDescriptorPool p = vk_desc_pool_new();
++            if (!p) return 0;
++            f->pool_d[f->npool++] = p;
++        }
++        VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
++                                          .descriptorPool = f->pool_d[f->ipool],
++                                          .descriptorSetCount = count,
++                                          .pSetLayouts = layouts};
++        VkResult r = vkAllocateDescriptorSets(g_vk.dev, &ai, sets);
++        if (r == VK_SUCCESS) return count;
++        if (r != VK_ERROR_OUT_OF_POOL_MEMORY && r != VK_ERROR_FRAGMENTED_POOL) {
++            VK_OK(r);
++            return 0;
++        }
++    }
++    return 0;
++}
++VkDescriptorSet vk_desc_alloc(VkDescriptorSetLayout layout) {
++    vk_cmd(); /* the pools are reset when the frame starts */
++    Frame* f = &g_fr[g_cur];
++    int i = 0;
++    while (i < SPARE_LAYOUTS && f->spare[i].layout && f->spare[i].layout != layout) i++;
++    if (i == SPARE_LAYOUTS) { /* more layouts than kept: one at a time */
++        VkDescriptorSet set;
++        return desc_alloc_n(f, layout, &set, 1) ? set : VK_NULL_HANDLE;
++    }
++    f->spare[i].layout = layout;
++    if (!f->spare[i].n) f->spare[i].n = desc_alloc_n(f, layout, f->spare[i].set, SPARE_SETS);
++    return f->spare[i].n ? f->spare[i].set[--f->spare[i].n] : VK_NULL_HANDLE;
++}
++
++/* vk_cmd() first: after a frame advance g_cur is the next slot, still holding an older frame's work. Starting it waits for
++   that work and frees its list, so what is pushed now waits for the frame recorded from now on, which is submitted
++   after every frame that can still use it */
++void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2) {
++    vk_cmd();
++    dead_push(&g_fr[g_cur], (Dead){.img = img, .mem = a, .v1 = v1, .v2 = v2});
++}
++void vk_defer_buffer(VkBuffer b, VmaAllocation a) {
++    vk_cmd();
++    dead_push(&g_fr[g_cur], (Dead){.buf = b, .mem = a});
++}
++void vk_defer_buffer_view(VkBufferView v) {
++    vk_cmd();
++    dead_push(&g_fr[g_cur], (Dead){.view = v});
++}
++
++void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPipelineStageFlags2 src_stage,
++                VkAccessFlags2 src_access, VkImageLayout from, VkPipelineStageFlags2 dst_stage,
++                VkAccessFlags2 dst_access, VkImageLayout to) {
++    VkImageMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
++                               .srcStageMask = src_stage,
++                               .srcAccessMask = src_access,
++                               .dstStageMask = dst_stage,
++                               .dstAccessMask = dst_access,
++                               .oldLayout = from,
++                               .newLayout = to,
++                               .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++                               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++                               .image = img,
++                               .subresourceRange = {aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}};
++    VkDependencyInfo d = {
++        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &b};
++    rec_CmdPipelineBarrier2(cb, &d);
++}
++
++/* one buffer the GPU copies into for the host to read: vk_readback_buffer before recording the copy, vk_finish,
++   then vk_readback_ready before reading the pointer */
++static VkBuffer g_rb;
++static VmaAllocation g_rb_mem;
++static u8* g_rb_ptr;
++static u64 g_rb_cap;
++static u32 g_rb_small; /* readbacks in a row of an eighth of it or less */
++u8* vk_readback_buffer(u64 size, VkBuffer* buf) {
++    /* it grows to the biggest readback, and shrinks back after many small ones */
++    if (size > g_vk.alloc_cap) return NULL; /* read back in parts (memory.c) */
++    g_rb_small = g_rb_cap > STAGE_MIN && size <= g_rb_cap / 8 ? g_rb_small + 1 : 0;
++    if (size > g_rb_cap || g_rb_small >= 64) {
++        if (g_rb) vk_defer_buffer(g_rb, g_rb_mem);
++        u64 cap = size > g_rb_cap ? (g_rb_cap ? g_rb_cap : STAGE_MIN) : STAGE_MIN;
++        g_rb_small = 0;
++        while (cap < size) cap *= 2;
++        if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
++        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
++                                  .size = cap,
++                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
++                                  .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
++        VmaAllocationCreateInfo aci = {.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
++                                                VMA_ALLOCATION_CREATE_MAPPED_BIT,
++                                       .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST};
++        VmaAllocationInfo info;
++        if (!VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &g_rb, &g_rb_mem, &info))) {
++            g_rb = VK_NULL_HANDLE;
++            g_rb_cap = 0;
++            return NULL;
++        }
++        g_rb_ptr = info.pMappedData;
++        g_rb_cap = cap;
++    }
++    *buf = g_rb;
++    return g_rb_ptr;
++}
++void vk_readback_ready(void) { vmaInvalidateAllocation(g_vk.vma, g_rb_mem, 0, VK_WHOLE_SIZE); }
+diff --git a/src/nx/gpu/vk/device.c b/src/nx/gpu/vk/device.c
+index 6f813ff..ba11913 100644
+--- a/src/nx/gpu/vk/device.c
++++ b/src/nx/gpu/vk/device.c
+@@ -504,6 +504,7 @@ static void swapchain_retire(void) {
+     nretired = 0;
+     for (u32 i = 0; i < g_vk.sc_count; i++) retired[nretired++] = g_vk.sc_done[i];
+     vk_ui_swapchain_gone();
++    vk_fsr_swapchain_gone();
+     vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
+     g_vk.swapchain = VK_NULL_HANDLE;
+     g_vk.sc_count = 0;
+diff --git a/src/nx/gpu/vk/fsr.c b/src/nx/gpu/vk/fsr.c
+new file mode 100644
+index 0000000..b418c94
+--- /dev/null
++++ b/src/nx/gpu/vk/fsr.c
+@@ -0,0 +1,336 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   Copyright 2026 the ScarletNX contributors */
++/* FSR 1 as the final upscale (AMD FidelityFX FSR 1, MIT licence): the presented frame's rectangle enlarged into the
++   swapchain image where a blit would stretch it with one bilinear tap. EASU rebuilds edges into an image the size of
++   the window's rectangle; RCAS then sharpens that by each pixel's ring. The shaders (shaders/fsr.frag and
++   shaders/fsr_rcas.frag) do the work; this makes their pipelines, keeps the intermediate image, binds the frame and
++   draws. Under vk_lock, from renderer.c's show(): the swapchain image is in TRANSFER_DST_OPTIMAL, the frame in
++   SHADER_READ_ONLY_OPTIMAL. */
++#include <math.h>
++#include <string.h>
++#include "nx/gpu/vk/vk.h"
++#include "nx/gpu/vk/fsr_spv.h"
++#include "nx/runtime/platform/log.h"
++
++/* the EASU shader's push constants, in its order: vec4s of floats */
++typedef struct {
++    float con0[4]; /* output pixel to a position in the source rectangle */
++    float con1[4];
++    float con2[4];
++    float con3[4];
++    float rect[4];  /* the source rectangle's origin and size, in the image's UV */
++    float dst[4];   /* the draw's origin and size, in framebuffer pixels */
++    float flags[4]; /* x: the source is flipped vertically */
++} EasuPush;
++
++/* the RCAS shader's */
++typedef struct {
++    float sharp[4]; /* x: the lobe scale, exp2(-sharpness) */
++    float size[4];  /* xy: the input's size in texels */
++    float dst[4];   /* xy: the draw's origin in framebuffer pixels */
++} RcasPush;
++
++/* RCAS attenuation in stops: 0 is strongest; larger values reduce sharpening. */
++#define FSR_SHARPNESS 1.5f
++
++static VkDescriptorSetLayout g_easu_dsl, g_rcas_dsl;
++static VkPipelineLayout g_easu_layout, g_rcas_layout;
++static VkPipeline g_easu_pipe, g_rcas_pipe;
++static VkFormat g_pipe_format;
++static VkSampler g_samp;
++static VkImage g_tmp;
++static VmaAllocation g_tmp_mem;
++static VkImageView g_tmp_view;
++static VkImageLayout g_tmp_layout;
++static u32 g_tmp_w, g_tmp_h;
++
++static int layout_make(void) {
++    VkDescriptorSetLayoutBinding b = {.binding = 0,
++                                      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++                                      .descriptorCount = 1,
++                                      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
++    VkDescriptorSetLayoutCreateInfo dci = {
++        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
++    VkPushConstantRange easu_pc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(EasuPush)};
++    VkPushConstantRange rcas_pc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(RcasPush)};
++    VkPipelineLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
++                                      .setLayoutCount = 1,
++                                      .pSetLayouts = &g_easu_dsl,
++                                      .pushConstantRangeCount = 1,
++                                      .pPushConstantRanges = &easu_pc};
++    VkSamplerCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
++                               .magFilter = VK_FILTER_NEAREST,
++                               .minFilter = VK_FILTER_NEAREST,
++                               .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
++                               .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
++                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
++                               .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
++    if (g_samp) return 1;
++    if (!VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &dci, NULL, &g_easu_dsl))) return 0;
++    if (!VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &dci, NULL, &g_rcas_dsl))) return 0;
++    if (!VK_OK(vkCreatePipelineLayout(g_vk.dev, &lci, NULL, &g_easu_layout))) return 0;
++    lci.pSetLayouts = &g_rcas_dsl;
++    lci.pPushConstantRanges = &rcas_pc;
++    if (!VK_OK(vkCreatePipelineLayout(g_vk.dev, &lci, NULL, &g_rcas_layout))) return 0;
++    if (!VK_OK(vkCreateSampler(g_vk.dev, &sci, NULL, &g_samp))) return 0;
++    return 1;
++}
++
++/* A set for one draw. It goes through the recorder's stand-in allocator: the frame command buffer is
++   recorded on another thread, and a raw VkDescriptorSet may also look like one of its stand-ins. */
++static VkDescriptorSet set_new(VkDescriptorSetLayout layout, VkImageView view) {
++    VkDescriptorImageInfo di = {.sampler = g_samp,
++                                .imageView = view,
++                                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
++                               .descriptorCount = 1,
++                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
++                               .pImageInfo = &di};
++    return vk_rec_new_set(layout, 1, &wr);
++}
++
++/* The EASU output can change size when the frame's aspect changes, even within the same swapchain. */
++static int tmp_make(u32 w, u32 h) {
++    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
++                            .imageType = VK_IMAGE_TYPE_2D,
++                            .format = g_vk.sc_format,
++                            .extent = {w, h, 1},
++                            .mipLevels = 1,
++                            .arrayLayers = 1,
++                            .samples = VK_SAMPLE_COUNT_1_BIT,
++                            .tiling = VK_IMAGE_TILING_OPTIMAL,
++                            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
++                            .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
++    VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
++    VkImageViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
++                                 .viewType = VK_IMAGE_VIEW_TYPE_2D,
++                                 .format = g_vk.sc_format,
++                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
++    if (g_tmp && g_tmp_w == w && g_tmp_h == h) return 1;
++    if (g_tmp) {
++        vk_defer_image(g_tmp, g_tmp_mem, g_tmp_view, VK_NULL_HANDLE);
++        g_tmp = VK_NULL_HANDLE;
++        g_tmp_view = VK_NULL_HANDLE;
++        g_tmp_w = g_tmp_h = 0;
++    }
++    if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &g_tmp, &g_tmp_mem, NULL))) return 0;
++    vci.image = g_tmp;
++    if (!VK_OK(vkCreateImageView(g_vk.dev, &vci, NULL, &g_tmp_view))) {
++        vmaDestroyImage(g_vk.vma, g_tmp, g_tmp_mem);
++        g_tmp = VK_NULL_HANDLE;
++        return 0;
++    }
++    g_tmp_w = w;
++    g_tmp_h = h;
++    g_tmp_layout = VK_IMAGE_LAYOUT_UNDEFINED;
++    LOG("vulkan: FSR 1 EASU + RCAS, attenuation %.2f stops, output %ux%u\n", FSR_SHARPNESS, w, h);
++    return 1;
++}
++
++static int pipeline_make(VkFormat format) {
++    VkShaderModule vs, fs_easu, fs_rcas;
++    VkPipelineShaderStageCreateInfo st[2] = {{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
++                                              .stage = VK_SHADER_STAGE_VERTEX_BIT,
++                                              .pName = "main"},
++                                             {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
++                                              .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
++                                              .pName = "main"}};
++    VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
++    VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
++                                                 .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
++    VkPipelineViewportStateCreateInfo vp = {
++        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
++    VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
++                                                 .polygonMode = VK_POLYGON_MODE_FILL,
++                                                 .cullMode = VK_CULL_MODE_NONE,
++                                                 .lineWidth = 1};
++    VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
++                                               .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
++    /* the passes write every pixel of their rectangle: no blend */
++    VkPipelineColorBlendAttachmentState ba = {.blendEnable = VK_FALSE, .colorWriteMask = 0xF};
++    VkPipelineColorBlendStateCreateInfo cb = {
++        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &ba};
++    VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
++    VkPipelineDynamicStateCreateInfo ds = {
++        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = dyn};
++    VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
++                                        .colorAttachmentCount = 1,
++                                        .pColorAttachmentFormats = &format};
++    VkGraphicsPipelineCreateInfo gci = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
++                                        .pNext = &ri,
++                                        .stageCount = 2,
++                                        .pStages = st,
++                                        .pVertexInputState = &vi,
++                                        .pInputAssemblyState = &ia,
++                                        .pViewportState = &vp,
++                                        .pRasterizationState = &rs,
++                                        .pMultisampleState = &ms,
++                                        .pColorBlendState = &cb,
++                                        .pDynamicState = &ds,
++                                        .layout = g_easu_layout};
++    int ok;
++    if (g_easu_pipe && g_rcas_pipe && g_pipe_format == format) return 1;
++    if (g_easu_pipe) vkDestroyPipeline(g_vk.dev, g_easu_pipe, NULL); /* vk_finish ran when the swapchain changed */
++    if (g_rcas_pipe) vkDestroyPipeline(g_vk.dev, g_rcas_pipe, NULL);
++    g_easu_pipe = g_rcas_pipe = VK_NULL_HANDLE;
++    vs = vk_module_spv(fsr_vert_spv, fsr_vert_spv_size / 4);
++    fs_easu = vk_module_spv(fsr_frag_spv, fsr_frag_spv_size / 4);
++    fs_rcas = vk_module_spv(fsr_rcas_spv, fsr_rcas_spv_size / 4);
++    st[0].module = vs;
++    st[1].module = fs_easu;
++    ok = vs && fs_easu && fs_rcas &&
++         VK_OK(vkCreateGraphicsPipelines(g_vk.dev, vk_pipeline_cache(), 1, &gci, NULL, &g_easu_pipe));
++    if (ok) {
++        st[1].module = fs_rcas;
++        gci.layout = g_rcas_layout;
++        ok = VK_OK(vkCreateGraphicsPipelines(g_vk.dev, vk_pipeline_cache(), 1, &gci, NULL, &g_rcas_pipe));
++    }
++    if (vs) vkDestroyShaderModule(g_vk.dev, vs, NULL);
++    if (fs_easu) vkDestroyShaderModule(g_vk.dev, fs_easu, NULL);
++    if (fs_rcas) vkDestroyShaderModule(g_vk.dev, fs_rcas, NULL);
++    g_pipe_format = format;
++    if (!ok) {
++        if (g_easu_pipe) vkDestroyPipeline(g_vk.dev, g_easu_pipe, NULL);
++        if (g_rcas_pipe) vkDestroyPipeline(g_vk.dev, g_rcas_pipe, NULL);
++        g_easu_pipe = g_rcas_pipe = VK_NULL_HANDLE;
++    }
++    return ok;
++}
++
++/* Called after the swapchain's work has finished. */
++void vk_fsr_swapchain_gone(void) {
++    if (g_tmp) {
++        vkDestroyImageView(g_vk.dev, g_tmp_view, NULL);
++        vmaDestroyImage(g_vk.vma, g_tmp, g_tmp_mem);
++        g_tmp = VK_NULL_HANDLE;
++        g_tmp_view = VK_NULL_HANDLE;
++        g_tmp_w = g_tmp_h = 0;
++    }
++}
++
++/* src: the frame, in SHADER_READ_ONLY_OPTIMAL, its view level 0; uv: the used rectangle (u, v, width, height) in the
++   image's UV; iw, ih: that rectangle in texels; dst: the rectangle (x, y, width, height) in the swapchain image,
++   which is in TRANSFER_DST_OPTIMAL and is left in it. flip: the frame is stored bottom-up. 0: the pass did not run,
++   and the caller blits instead. */
++int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih, VkImage sc,
++                const i32 dst[4]) {
++    EasuPush ep;
++    RcasPush rp;
++    VkDescriptorSet set, tset;
++    VkImageView scv = vk_sc_view(sc);
++    float iwr, ihr, owr, ohr, ix, iy;
++    if (!view || !scv || !iw || !ih || dst[2] <= 0 || dst[3] <= 0) return 0;
++    if (!layout_make() || !pipeline_make(g_vk.sc_format)) return 0;
++    if (!tmp_make((u32)dst[2], (u32)dst[3])) return 0;
++    set = set_new(g_easu_dsl, view);
++    tset = set_new(g_rcas_dsl, g_tmp_view);
++    if (!set || !tset) return 0;
++    iwr = (float)iw, ihr = (float)ih, owr = (float)dst[2], ohr = (float)dst[3];
++    /* AMD's con0 to con3 for a frame of iw x ih texels drawn into dst[2] x dst[3] pixels (ffx_fsr1.h,
++       FsrEasuCon) */
++    ep.con0[0] = iwr / owr;
++    ep.con0[1] = ihr / ohr;
++    ep.con0[2] = 0.5f * ep.con0[0] - 0.5f;
++    ep.con0[3] = 0.5f * ep.con0[1] - 0.5f;
++    ix = 1.0f / iwr;
++    iy = 1.0f / ihr;
++    ep.con1[0] = ix;
++    ep.con1[1] = iy;
++    ep.con1[2] = ix;
++    ep.con1[3] = -iy;
++    ep.con2[0] = -ix;
++    ep.con2[1] = 2.0f * iy;
++    ep.con2[2] = ix;
++    ep.con2[3] = 2.0f * iy;
++    ep.con3[0] = 0;
++    ep.con3[1] = 4.0f * iy;
++    ep.con3[2] = 0;
++    ep.con3[3] = 0;
++    memcpy(ep.rect, uv, 4 * sizeof(float));
++    ep.dst[0] = 0;
++    ep.dst[1] = 0;
++    ep.dst[2] = owr;
++    ep.dst[3] = ohr;
++    ep.flags[0] = flip ? 1.0f : 0.0f;
++    ep.flags[1] = ep.flags[2] = ep.flags[3] = 0.0f;
++    rp.sharp[0] = exp2f(-FSR_SHARPNESS);
++    rp.sharp[1] = rp.sharp[2] = rp.sharp[3] = 0.0f;
++    rp.size[0] = owr;
++    rp.size[1] = ohr;
++    rp.size[2] = rp.size[3] = 0.0f;
++    rp.dst[0] = (float)dst[0];
++    rp.dst[1] = (float)dst[1];
++    rp.dst[2] = rp.dst[3] = 0.0f;
++    /* EASU into the intermediate image: the frame's pixels to the window rectangle's */
++    vk_barrier(cb, g_tmp, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_NONE, 0, g_tmp_layout,
++               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    g_tmp_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
++    {
++        VkRenderingAttachmentInfo at = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
++                                        .imageView = g_tmp_view,
++                                        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                                        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
++                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
++        VkRect2D area = {{0, 0}, {(u32)dst[2], (u32)dst[3]}};
++        VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
++                              .renderArea = area,
++                              .layerCount = 1,
++                              .colorAttachmentCount = 1,
++                              .pColorAttachments = &at};
++        VkViewport vp = {0, 0, owr, ohr, 0, 1};
++        rec_CmdBeginRendering(cb, &ri);
++        vk_render_forget_state();
++        rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_easu_pipe);
++        rec_CmdSetViewport(cb, 0, 1, &vp);
++        rec_CmdSetScissor(cb, 0, 1, &area);
++        rec_CmdPushConstants(cb, g_easu_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof ep, &ep);
++        rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_easu_layout, 0, 1, &set, 0, NULL);
++        rec_CmdDraw(cb, 3, 1, 0, 0);
++        rec_CmdEndRendering(cb);
++    }
++    vk_barrier(cb, g_tmp, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
++               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
++               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++    g_tmp_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++    /* RCAS into the swapchain image's rectangle */
++    {
++        VkRenderingAttachmentInfo at;
++        VkRenderingInfo ri;
++        VkRect2D area = {{dst[0], dst[1]}, {(u32)dst[2], (u32)dst[3]}};
++        VkViewport vp = {(float)dst[0], (float)dst[1], owr, ohr, 0, 1};
++        vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
++                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++        at = (VkRenderingAttachmentInfo){.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
++                                         .imageView = scv,
++                                         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                                         .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
++                                         .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
++        ri = (VkRenderingInfo){.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
++                               .renderArea = area,
++                               .layerCount = 1,
++                               .colorAttachmentCount = 1,
++                               .pColorAttachments = &at};
++        rec_CmdBeginRendering(cb, &ri);
++        vk_render_forget_state();
++        rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_rcas_pipe);
++        rec_CmdSetViewport(cb, 0, 1, &vp);
++        rec_CmdSetScissor(cb, 0, 1, &area);
++        rec_CmdPushConstants(cb, g_rcas_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof rp, &rp);
++        rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_rcas_layout, 0, 1, &tset, 0, NULL);
++        rec_CmdDraw(cb, 3, 1, 0, 0);
++        rec_CmdEndRendering(cb);
++    }
++    vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
++               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++    /* back for the next frame's EASU */
++    vk_barrier(cb, g_tmp, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
++               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
++               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    g_tmp_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
++    return 1;
++}
+diff --git a/src/nx/gpu/vk/fsr_spv.h b/src/nx/gpu/vk/fsr_spv.h
+new file mode 100644
+index 0000000..988738e
+--- /dev/null
++++ b/src/nx/gpu/vk/fsr_spv.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   Copyright 2026 the ScarletNX contributors */
++/* The FSR 1 pass's SPIR-V (shaders/fsr.vert, shaders/fsr.frag and shaders/fsr_rcas.frag). The words are in files the
++   build makes from those shaders with glslang (cmake/glsl.cmake): nothing compiled is checked in. */
++#ifndef SNX_FSR_SPV_H
++#define SNX_FSR_SPV_H
++#include "common/cpu/aarch64/cpu.h"
++
++extern const u32 fsr_vert_spv[];
++extern const u64 fsr_vert_spv_size; /* in bytes */
++extern const u32 fsr_frag_spv[];
++extern const u64 fsr_frag_spv_size; /* in bytes */
++extern const u32 fsr_rcas_spv[];
++extern const u64 fsr_rcas_spv_size; /* in bytes */
++
++#endif
+diff --git a/src/nx/gpu/vk/renderer.c b/src/nx/gpu/vk/renderer.c
+index 754242b..e6c3fb9 100644
+--- a/src/nx/gpu/vk/renderer.c
++++ b/src/nx/gpu/vk/renderer.c
+@@ -28,6 +28,73 @@ static Surf* g_cpu_img;
+ static Surf* g_last;
+ static u32 g_last_x, g_last_y, g_last_w, g_last_h;
+ static u32 g_last_transform;
++/* Optional CPU-side presentation timings, updated only under vk_lock. These are call durations, not GPU times. */
++typedef struct {
++    u64 count, sum_ns, max_ns;
++} PresentCallStats;
++typedef struct {
++    u64 ok, not_ready, timeout, suboptimal, out_of_date, surface_lost, other;
++    VkResult last;
++} PresentResultStats;
++static struct {
++    u64 frames;
++    PresentCallStats cmd, acquire, queue, present;
++    PresentResultStats acquire_result, present_result;
++} g_present_stats;
++static u64 g_present_stats_frames;
++static int g_present_stats_on = -1;
++static int present_stats_on(void) {
++    if (g_present_stats_on < 0) {
++        const char* env = getenv("SNX_PRESENT_STATS");
++        g_present_stats_on = env && *env && strcmp(env, "0") != 0;
++    }
++    return g_present_stats_on;
++}
++static void present_call_note(PresentCallStats* s, u64 start) {
++    u64 ns = plat_ns() - start;
++    s->count++;
++    s->sum_ns += ns;
++    if (ns > s->max_ns) s->max_ns = ns;
++}
++static void present_result_note(PresentResultStats* s, VkResult result) {
++    s->last = result;
++    switch (result) {
++        case VK_SUCCESS: s->ok++; break;
++        case VK_NOT_READY: s->not_ready++; break;
++        case VK_TIMEOUT: s->timeout++; break;
++        case VK_SUBOPTIMAL_KHR: s->suboptimal++; break;
++        case VK_ERROR_OUT_OF_DATE_KHR: s->out_of_date++; break;
++        case VK_ERROR_SURFACE_LOST_KHR: s->surface_lost++; break;
++        default: s->other++; break;
++    }
++}
++static void present_stats_frame(void) {
++    g_present_stats_frames++;
++    if (++g_present_stats.frames != 600) return;
++    LOG("present-stats: guest=%llu window=600 call=count/sum_us/max_us cmd=%llu/%llu/%llu "
++        "acquire=%llu/%llu/%llu rec_queue=%llu/%llu/%llu present=%llu/%llu/%llu\n",
++        (unsigned long long)g_present_stats_frames,
++        (unsigned long long)g_present_stats.cmd.count, (unsigned long long)(g_present_stats.cmd.sum_ns / 1000),
++        (unsigned long long)(g_present_stats.cmd.max_ns / 1000),
++        (unsigned long long)g_present_stats.acquire.count, (unsigned long long)(g_present_stats.acquire.sum_ns / 1000),
++        (unsigned long long)(g_present_stats.acquire.max_ns / 1000),
++        (unsigned long long)g_present_stats.queue.count, (unsigned long long)(g_present_stats.queue.sum_ns / 1000),
++        (unsigned long long)(g_present_stats.queue.max_ns / 1000),
++        (unsigned long long)g_present_stats.present.count, (unsigned long long)(g_present_stats.present.sum_ns / 1000),
++        (unsigned long long)(g_present_stats.present.max_ns / 1000));
++    const PresentResultStats* a = &g_present_stats.acquire_result;
++    const PresentResultStats* p = &g_present_stats.present_result;
++    LOG("present-stats: guest=%llu rc=ok/not_ready/timeout/suboptimal/out_of_date/surface_lost/other "
++        "acquire=%llu/%llu/%llu/%llu/%llu/%llu/%llu last=%d present=%llu/%llu/%llu/%llu/%llu/%llu/%llu last=%d\n",
++        (unsigned long long)g_present_stats_frames,
++        (unsigned long long)a->ok, (unsigned long long)a->not_ready, (unsigned long long)a->timeout,
++        (unsigned long long)a->suboptimal, (unsigned long long)a->out_of_date,
++        (unsigned long long)a->surface_lost, (unsigned long long)a->other, (int)a->last,
++        (unsigned long long)p->ok, (unsigned long long)p->not_ready, (unsigned long long)p->timeout,
++        (unsigned long long)p->suboptimal, (unsigned long long)p->out_of_date,
++        (unsigned long long)p->surface_lost, (unsigned long long)p->other, (int)p->last);
++    memset(&g_present_stats, 0, sizeof g_present_stats);
++}
+ static void vkr_before_write(u64 gva, u64 size) {
+     if (size) vk_release_need(gva, size);
+     vk_buf_before_write(gva, size);
+@@ -264,8 +331,11 @@ static void flip_src(VkImageBlit* b, u32 transform) {
+    the image presented. A game's frame (game) also moves the per-present bookkeeping, and without src shows nothing.
+    Under vk_lock */
+ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
++    int stats = game && present_stats_on();
+     /* the size the swapchain was made for, not the extent the surface clamped it to: that can stay different */
+     int ww, wh, srgb = src ? is_srgb(src->f.vk) : g_sc_srgb, shown = backend_window_shown();
++    /* upscaler=1: FSR 1 EASU + RCAS in place of the blit's bilinear tap */
++    int fsr = __atomic_load_n(&g_settings.upscaler, __ATOMIC_RELAXED) != 0;
+     backend_window_size(&ww, &wh);
+     if (shown && (g_lost || backend_window_generation() != g_generation)) {
+         vk_finish();
+@@ -287,11 +357,18 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
+     u32 idx = 0;
+     int recreate = 0;
+     if (shown && (src || !game) && (g_vk.swapchain || (!tried && vk_swapchain_create(srgb)))) {
++        u64 call_start = stats ? plat_ns() : 0;
+         VkCommandBuffer cb = vk_cmd(); /* waits for this frame slot, so its acquire semaphore is free */
++        if (stats) present_call_note(&g_present_stats.cmd, call_start);
+         VkSemaphore acq = g_acquired[vk_frame_id() % VK_FRAMES];
+         /* no wait: vk_lock is held (guest threads mapping memory take it too), and the game's pace is present_pace's.
+            Every image still on the display or queued for it (FIFO behind) leaves this frame unshown */
++        if (stats) call_start = plat_ns();
+         VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, 0, acq, VK_NULL_HANDLE, &idx);
++        if (stats) {
++            present_call_note(&g_present_stats.acquire, call_start);
++            present_result_note(&g_present_stats.acquire_result, r);
++        }
+         if (r == VK_NOT_READY || r == VK_TIMEOUT) {
+             /* the game faster than the display (vsync=1 with fps_limit over its refresh, or a 59.94 Hz one) */
+             static u64 dropped;
+@@ -307,8 +384,10 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
+             signal = g_vk.sc_done[idx];
+             VkImage sc = g_vk.sc_images[idx];
+             if (src)
+-                vk_surf_use(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+-                            VK_ACCESS_2_TRANSFER_READ_BIT);
++                vk_surf_use(cb, src,
++                            fsr ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++                            fsr ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_2_BLIT_BIT,
++                            fsr ? VK_ACCESS_2_SHADER_SAMPLED_READ_BIT : VK_ACCESS_2_TRANSFER_READ_BIT);
+             /* the submit waits for the acquire at the clear, the image's first use */
+             vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_CLEAR_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+@@ -339,14 +418,28 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
+                     dw = (u32)((u64)ch * fw / fh);
+                 }
+                 i32 dx = (i32)(cx + (cw - dw) / 2), dy = (i32)(cy + (ch - dh) / 2);
+-                VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+-                                    .srcOffsets = {{(i32)g_last_x, (i32)g_last_y, 0},
+-                                                   {(i32)(g_last_x + g_last_w), (i32)(g_last_y + g_last_h), 1}},
+-                                    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+-                                    .dstOffsets = {{dx, dy, 0}, {dx + (i32)dw, dy + (i32)dh, 1}}};
+-                flip_src(&blit, transform); /* render targets stay in guest order */
+-                rec_CmdBlitImage(cb, src->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sc,
+-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
++                int drawn = 0;
++                if (fsr && src->att && src->sw && src->sh) {
++                    /* the frame's rectangle in its image's UV, and the rectangle it goes to in the swapchain image */
++                    float uv[4] = {(float)g_last_x / (float)src->sw, (float)g_last_y / (float)src->sh,
++                                   (float)g_last_w / (float)src->sw, (float)g_last_h / (float)src->sh};
++                    i32 dst[4] = {dx, dy, (i32)dw, (i32)dh};
++                    drawn = vk_fsr_draw(cb, src->att, (transform & 2) != 0, uv, g_last_w, g_last_h, sc, dst);
++                }
++                if (!drawn) {
++                    /* FSR may have declined after the source was prepared for sampling. */
++                    if (fsr)
++                        vk_surf_use(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++                                    VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
++                    VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
++                                        .srcOffsets = {{(i32)g_last_x, (i32)g_last_y, 0},
++                                                       {(i32)(g_last_x + g_last_w), (i32)(g_last_y + g_last_h), 1}},
++                                        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
++                                        .dstOffsets = {{dx, dy, 0}, {dx + (i32)dw, dy + (i32)dh, 1}}};
++                    flip_src(&blit, transform); /* render targets stay in guest order */
++                    rec_CmdBlitImage(cb, src->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sc,
++                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
++                }
+             }
+             {
+                 int safe[4] = {(int)cx, (int)cy, (int)cw, (int)ch};
+@@ -454,8 +547,17 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
+                                .swapchainCount = 1,
+                                .pSwapchains = &g_vk.swapchain,
+                                .pImageIndices = &idx};
++        u64 call_start = stats ? plat_ns() : 0;
+         vk_rec_queue(g_vk.gfx); /* the present waits on the frame's submission's semaphore */
++        if (stats) {
++            present_call_note(&g_present_stats.queue, call_start);
++            call_start = plat_ns();
++        }
+         VkResult r = vkQueuePresentKHR(g_vk.gfx, &pi);
++        if (stats) {
++            present_call_note(&g_present_stats.present, call_start);
++            present_result_note(&g_present_stats.present_result, r);
++        }
+         if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && !g_vk.sc_turned))
+             recreate = 1;
+         else if (r == VK_ERROR_SURFACE_LOST_KHR)
+@@ -471,6 +573,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
+         g_vk.sc_lost = 0;
+         g_lost = 1;
+     }
++    if (stats) present_stats_frame(); /* every game show counts, including frames without a swapchain image */
+ }
+ 
+ /* the game queued a buffer for display: show it, letterboxed to the window. A frame that can't be shown (minimized,
+diff --git a/src/nx/gpu/vk/shaders/fsr.frag b/src/nx/gpu/vk/shaders/fsr.frag
+new file mode 100644
+index 0000000..0ed0905
+--- /dev/null
++++ b/src/nx/gpu/vk/shaders/fsr.frag
+@@ -0,0 +1,140 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Copyright 2026 the ScarletNX contributors
++// FSR 1 EASU: the presented frame, enlarged into the swapchain image at the draw's viewport (gpu/vk/fsr.c).
++// Ported from AMD FidelityFX FSR 1 (ffx_fsr1.h, MIT licence): FsrEasuF and its FsrEasuTapF / FsrEasuSetF helpers,
++// the scalar (32-bit) path. The twelve taps and the gradient it follows are AMD's; only the coordinates differ: this
++// shader reads a rectangle of a larger image, given in rect and mapped to image UV by uvp().
++#version 450
++layout(set = 0, binding = 0) uniform sampler2D img;
++layout(push_constant) uniform Pc {
++    vec4 con0;  // output pixel to a position in the source rectangle
++    vec4 con1;
++    vec4 con2;
++    vec4 con3;
++    vec4 rect;  // xy: the source rectangle's origin in image UV; zw: its size in image UV
++    vec4 dst;   // xy: the draw's origin in framebuffer pixels; zw: its size
++    vec4 flags; // x: the source is flipped vertically
++} pc;
++layout(location = 0) out vec4 o;
++
++// a position in the source rectangle (0 to 1) in the image's UV
++vec2 uvp(vec2 p) {
++    return pc.rect.xy + p * pc.rect.zw;
++}
++vec4 red(vec2 p) { return textureGather(img, uvp(p), 0); }
++vec4 grn(vec2 p) { return textureGather(img, uvp(p), 1); }
++vec4 blu(vec2 p) { return textureGather(img, uvp(p), 2); }
++
++// one tap of the 12-tap kernel, with AMD's approximation of a Lanczos2 window
++void tapF(inout vec3 aC, inout float aW, vec2 off, vec2 dir, vec2 len, float lob, float clp, vec3 c) {
++    vec2 v;
++    v.x = off.x * dir.x + off.y * dir.y;
++    v.y = off.x * (-dir.y) + off.y * dir.x;
++    v *= len;
++    float d2 = v.x * v.x + v.y * v.y;
++    d2 = min(d2, clp);
++    float wB = 2.0 / 5.0 * d2 - 1.0;
++    float wA = lob * d2 - 1.0;
++    wB *= wB;
++    wA *= wA;
++    wB = 25.0 / 16.0 * wB - (25.0 / 16.0 - 1.0);
++    float w = wB * wA;
++    aC += c * w;
++    aW += w;
++}
++
++// the gradient and its length from one corner of the 2x2 the output pixel falls in
++void setF(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE) {
++    float dc = lD - lC;
++    float cb = lC - lB;
++    float lenX = max(abs(dc), abs(cb));
++    lenX = 1.0 / max(lenX, 1e-8);
++    float dirX = lD - lB;
++    dir.x += dirX * w;
++    lenX = clamp(abs(dirX) * lenX, 0.0, 1.0);
++    lenX *= lenX;
++    len += lenX * w;
++    float ec = lE - lC;
++    float ca = lC - lA;
++    float lenY = max(abs(ec), abs(ca));
++    lenY = 1.0 / max(lenY, 1e-8);
++    float dirY = lE - lA;
++    dir.y += dirY * w;
++    lenY = clamp(abs(dirY) * lenY, 0.0, 1.0);
++    lenY *= lenY;
++    len += lenY * w;
++}
++
++vec3 easu(vec2 ip) {
++    // the position of 'f' in the source rectangle, and the fraction into its pixel
++    vec2 pp = ip * pc.con0.xy + pc.con0.zw;
++    vec2 fp = floor(pp);
++    pp -= fp;
++    // the four gather points: 2x2 texels each, twelve taps of the kernel
++    vec2 p0 = fp * pc.con1.xy + pc.con1.zw;
++    vec2 p1 = p0 + pc.con2.xy;
++    vec2 p2 = p0 + pc.con2.zw;
++    vec2 p3 = p0 + pc.con3.xy;
++    vec4 bczzR = red(p0), bczzG = grn(p0), bczzB = blu(p0);
++    vec4 ijfeR = red(p1), ijfeG = grn(p1), ijfeB = blu(p1);
++    vec4 klhgR = red(p2), klhgG = grn(p2), klhgB = blu(p2);
++    vec4 zzonR = red(p3), zzonG = grn(p3), zzonB = blu(p3);
++    // the luminance the gradient follows (a rough one: red, green and half the blue)
++    vec4 bczzL = bczzB * 0.5 + (bczzR * 0.5 + bczzG);
++    vec4 ijfeL = ijfeB * 0.5 + (ijfeR * 0.5 + ijfeG);
++    vec4 klhgL = klhgB * 0.5 + (klhgR * 0.5 + klhgG);
++    vec4 zzonL = zzonB * 0.5 + (zzonR * 0.5 + zzonG);
++    float bL = bczzL.x, cL = bczzL.y;
++    float iL = ijfeL.x, jL = ijfeL.y, fL = ijfeL.z, eL = ijfeL.w;
++    float kL = klhgL.x, lL = klhgL.y, hL = klhgL.z, gL = klhgL.w;
++    float oL = zzonL.z, nL = zzonL.w;
++    // the gradient, weighted by how near each corner of the 2x2 the output pixel is
++    vec2 dir = vec2(0.0);
++    float len = 0.0;
++    setF(dir, len, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);
++    setF(dir, len, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);
++    setF(dir, len, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);
++    setF(dir, len, pp.x * pp.y, gL, jL, kL, lL, oL);
++    // normalize it, and shape the length
++    float dirR = dir.x * dir.x + dir.y * dir.y;
++    bool zro = dirR < 1.0 / 32768.0;
++    dirR = inversesqrt(max(dirR, 1.0 / 32768.0));
++    dirR = zro ? 1.0 : dirR;
++    dir.x = zro ? 1.0 : dir.x;
++    dir *= dirR;
++    len = len * 0.5;
++    len *= len;
++    // the kernel stretches along the edge and shortens across it
++    float stretch = (dir.x * dir.x + dir.y * dir.y) / max(abs(dir.x), abs(dir.y));
++    vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
++    float lob = 0.5 + ((1.0 / 4.0 - 0.04) - 0.5) * len;
++    float clp = 1.0 / lob;
++    // the four nearest texels, to ring the result in
++    vec3 min4 = min(min(vec3(ijfeR.z, ijfeG.z, ijfeB.z), vec3(klhgR.w, klhgG.w, klhgB.w)),
++                    min(vec3(ijfeR.y, ijfeG.y, ijfeB.y), vec3(klhgR.x, klhgG.x, klhgB.x)));
++    vec3 max4 = max(max(vec3(ijfeR.z, ijfeG.z, ijfeB.z), vec3(klhgR.w, klhgG.w, klhgB.w)),
++                    max(vec3(ijfeR.y, ijfeG.y, ijfeB.y), vec3(klhgR.x, klhgG.x, klhgB.x)));
++    vec3 aC = vec3(0.0);
++    float aW = 0.0;
++    tapF(aC, aW, vec2(0.0, -1.0) - pp, dir, len2, lob, clp, vec3(bczzR.x, bczzG.x, bczzB.x));
++    tapF(aC, aW, vec2(1.0, -1.0) - pp, dir, len2, lob, clp, vec3(bczzR.y, bczzG.y, bczzB.y));
++    tapF(aC, aW, vec2(-1.0, 1.0) - pp, dir, len2, lob, clp, vec3(ijfeR.x, ijfeG.x, ijfeB.x));
++    tapF(aC, aW, vec2(0.0, 1.0) - pp, dir, len2, lob, clp, vec3(ijfeR.y, ijfeG.y, ijfeB.y));
++    tapF(aC, aW, vec2(0.0, 0.0) - pp, dir, len2, lob, clp, vec3(ijfeR.z, ijfeG.z, ijfeB.z));
++    tapF(aC, aW, vec2(-1.0, 0.0) - pp, dir, len2, lob, clp, vec3(ijfeR.w, ijfeG.w, ijfeB.w));
++    tapF(aC, aW, vec2(1.0, 1.0) - pp, dir, len2, lob, clp, vec3(klhgR.x, klhgG.x, klhgB.x));
++    tapF(aC, aW, vec2(2.0, 1.0) - pp, dir, len2, lob, clp, vec3(klhgR.y, klhgG.y, klhgB.y));
++    tapF(aC, aW, vec2(2.0, 0.0) - pp, dir, len2, lob, clp, vec3(klhgR.z, klhgG.z, klhgB.z));
++    tapF(aC, aW, vec2(1.0, 0.0) - pp, dir, len2, lob, clp, vec3(klhgR.w, klhgG.w, klhgB.w));
++    tapF(aC, aW, vec2(1.0, 2.0) - pp, dir, len2, lob, clp, vec3(zzonR.z, zzonG.z, zzonB.z));
++    tapF(aC, aW, vec2(0.0, 2.0) - pp, dir, len2, lob, clp, vec3(zzonR.w, zzonG.w, zzonB.w));
++    return min(max4, max(min4, aC / aW));
++}
++
++void main() {
++    // the output pixel, counted from the draw's origin
++    vec2 ip = floor(gl_FragCoord.xy - pc.dst.xy);
++    // Mirror output pixels so the gather's component order and the EASU kernel stay in source order.
++    if (pc.flags.x > 0.5) ip.y = pc.dst.w - 1.0 - ip.y;
++    o = vec4(easu(ip), 1.0);
++}
+diff --git a/src/nx/gpu/vk/shaders/fsr.vert b/src/nx/gpu/vk/shaders/fsr.vert
+new file mode 100644
+index 0000000..f446da2
+--- /dev/null
++++ b/src/nx/gpu/vk/shaders/fsr.vert
+@@ -0,0 +1,8 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Copyright 2026 the ScarletNX contributors
++// The presented frame enlarged into the swapchain image (gpu/vk/fsr.c): one triangle over the viewport
++#version 450
++void main() {
++    vec2 p = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));
++    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
++}
+diff --git a/src/nx/gpu/vk/shaders/fsr_rcas.frag b/src/nx/gpu/vk/shaders/fsr_rcas.frag
+new file mode 100644
+index 0000000..920caed
+--- /dev/null
++++ b/src/nx/gpu/vk/shaders/fsr_rcas.frag
+@@ -0,0 +1,69 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Copyright 2026 the ScarletNX contributors
++// FSR 1 RCAS: the EASU output sharpened by its ring, into the swapchain image (gpu/vk/fsr.c).
++// Ported from AMD FidelityFX FSR 1 (ffx_fsr1.h, MIT licence), FsrRcasF, the scalar path. The input is the EASU
++// output at the swapchain's own size, so every tap is an exact texel (texelFetch, no filtering).
++#version 450
++layout(set = 0, binding = 0) uniform sampler2D img;
++layout(push_constant) uniform Pc {
++    vec4 sharp; // x: the lobe scale, exp2(-sharpness); the rest unused
++    vec4 size;  // xy: the input's size in texels
++    vec4 dst;   // xy: the draw's origin in framebuffer pixels
++} pc;
++layout(location = 0) out vec4 o;
++
++#define RCAS_LIMIT (0.25 - 1.0 / 16.0)
++
++vec3 texel(ivec2 p) {
++    ivec2 s = ivec2(pc.size.xy);
++    return texelFetch(img, clamp(p, ivec2(0), s - 1), 0).rgb;
++}
++
++vec3 rcas(vec3 b, vec3 d, vec3 e, vec3 f, vec3 h) {
++    float bR = b.r, bG = b.g, bB = b.b;
++    float dR = d.r, dG = d.g, dB = d.b;
++    float eR = e.r, eG = e.g, eB = e.b;
++    float fR = f.r, fG = f.g, fB = f.b;
++    float hR = h.r, hG = h.g, hB = h.b;
++    // luma times two
++    float bL = bB * 0.5 + (bR * 0.5 + bG);
++    float dL = dB * 0.5 + (dR * 0.5 + dG);
++    float eL = eB * 0.5 + (eR * 0.5 + eG);
++    float fL = fB * 0.5 + (fR * 0.5 + fG);
++    float hL = hB * 0.5 + (hR * 0.5 + hG);
++    // noise detection: flat rings are not sharpened
++    float nz = 0.25 * bL + 0.25 * dL + 0.25 * fL + 0.25 * hL - eL;
++    float hi = max(max(max(bL, dL), max(eL, fL)), hL);
++    float lo = min(min(min(bL, dL), min(eL, fL)), hL);
++    nz = clamp(abs(nz) / max(hi - lo, 1.0 / 1024.0), 0.0, 1.0);
++    nz = -0.5 * nz + 1.0;
++    // the ring's range
++    float mn4R = min(min(bR, dR), min(fR, hR));
++    float mn4G = min(min(bG, dG), min(fG, hG));
++    float mn4B = min(min(bB, dB), min(fB, hB));
++    float mx4R = max(max(bR, dR), max(fR, hR));
++    float mx4G = max(max(bG, dG), max(fG, hG));
++    float mx4B = max(max(bB, dB), max(fB, hB));
++    float hitMinR = min(mn4R, eR) / max(4.0 * mx4R, 1e-8);
++    float hitMinG = min(mn4G, eG) / max(4.0 * mx4G, 1e-8);
++    float hitMinB = min(mn4B, eB) / max(4.0 * mx4B, 1e-8);
++    float hitMaxR = (1.0 - max(mx4R, eR)) / min(4.0 * mn4R - 4.0, -1e-8);
++    float hitMaxG = (1.0 - max(mx4G, eG)) / min(4.0 * mn4G - 4.0, -1e-8);
++    float hitMaxB = (1.0 - max(mx4B, eB)) / min(4.0 * mn4B - 4.0, -1e-8);
++    float lobeR = max(-hitMinR, hitMaxR);
++    float lobeG = max(-hitMinG, hitMaxG);
++    float lobeB = max(-hitMinB, hitMaxB);
++    float lobe = max(-RCAS_LIMIT, min(max(max(lobeR, lobeG), lobeB), 0.0)) * pc.sharp.x;
++    lobe *= nz;
++    float rcpL = 1.0 / (4.0 * lobe + 1.0);
++    return vec3((lobe * bR + lobe * dR + lobe * hR + lobe * fR + eR) * rcpL,
++                (lobe * bG + lobe * dG + lobe * hG + lobe * fG + eG) * rcpL,
++                (lobe * bB + lobe * dB + lobe * hB + lobe * fB + eB) * rcpL);
++}
++
++void main() {
++    ivec2 p = ivec2(floor(gl_FragCoord.xy - pc.dst.xy));
++    o = vec4(rcas(texel(p + ivec2(0, -1)), texel(p + ivec2(-1, 0)), texel(p), texel(p + ivec2(1, 0)),
++                  texel(p + ivec2(0, 1))),
++             1.0);
++}
+diff --git a/src/nx/gpu/vk/ui.c b/src/nx/gpu/vk/ui.c
+index 60c0347..5e3a794 100644
+--- a/src/nx/gpu/vk/ui.c
++++ b/src/nx/gpu/vk/ui.c
+@@ -216,7 +216,7 @@ static void atlas_upload(VkCommandBuffer cb) {
+ }
+ 
+ /* the swapchain image's view, made once per image */
+-static VkImageView sc_view(VkImage sc) {
++VkImageView vk_sc_view(VkImage sc) {
+     u32 i;
+     for (i = 0; i < VK_SC_MAX; ++i)
+         if (g_sc_img[i] == sc) return g_sc_view[i];
+@@ -267,7 +267,7 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]) {
+     overlay_draw(&list, sw, sh);
+     ui_unlock();
+     n = list.n;
+-    if (!n || !g_atlas || !pipeline_make(g_vk.sc_format) || !(view = sc_view(sc))) return;
++    if (!n || !g_atlas || !pipeline_make(g_vk.sc_format) || !(view = vk_sc_view(sc))) return;
+     v = (Vertex*)vk_stage((u64)n * 6 * sizeof(Vertex), 4, &buf, &off);
+     if (!v) return;
+     for (i = 0; i < n; ++i) {
+diff --git a/src/nx/gpu/vk/vk.h b/src/nx/gpu/vk/vk.h
+index 9aa697c..8e0280a 100644
+--- a/src/nx/gpu/vk/vk.h
++++ b/src/nx/gpu/vk/vk.h
+@@ -619,6 +619,11 @@ void vk_render_end(void); /* ends the dynamic rendering pass, if one is open */
+    safe is the picture's part clear of the system's bars (gpu/vk/ui.c) */
+ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]);
+ void vk_ui_swapchain_gone(void); /* its images' views go before the swapchain does */
++VkImageView vk_sc_view(VkImage sc); /* a swapchain image's view, made once per image */
++/* gpu/vk/fsr.c: FSR 1 EASU, the frame enlarged into the swapchain image in place of the blit (upscaler=1) */
++int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih, VkImage sc,
++                const i32 dst[4]);
++void vk_fsr_swapchain_gone(void); /* its sets name the old images' views: made again */
+ void vk_render_clear(GpuChannel* ch, u32 v);
+ VkViewport vk_render_viewport(const u32* r);
+ int vk_render_depth_clamp(const u32* r);
+diff --git a/src/nx/runtime/present.c b/src/nx/runtime/present.c
+index a39e36a..7e28dce 100644
+--- a/src/nx/runtime/present.c
++++ b/src/nx/runtime/present.c
+@@ -1,109 +1,161 @@
+-/* SPDX-License-Identifier: GPL-3.0-or-later
+-   Copyright 2026 the ScarletNX contributors */
+-/* vi's buffers on the display, and the game's pace: how long vi holds back the game's next buffer */
+-#include "nx/runtime/main.h"
+-#include "nx/runtime/cheats.h"
+-#include "nx/gpu/gpu.h"
+-#include "nx/gpu/renderer.h"
+-#include "nx/hle/services/nvdrv.h"
+-#include "nx/hle/services/vi.h"
+-#include "nx/memory/mem.h"
+-#include "nx/runtime/options.h"
+-#include "nx/runtime/platform/log.h"
+-#include "nx/runtime/platform/plat.h"
+-
+-int g_frames;
+-
+-void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4],
+-                    u32 transform) {
+-    u64 a = nvmap_addr_by_id(nvmap_id);
+-    if (!a) {
+-        WARN_LIMIT(5, "vi: buffer of nvmap id %u has no memory, not shown\n", nvmap_id);
+-        return;
+-    }
+-    /* the flips are the display's: the guest's buffer is never turned */
+-    g_renderer->present_buffer(a + offset, w, h, pitch, layout, bhl, fmt, crop, transform);
+-    __atomic_add_fetch(&g_frames, 1, __ATOMIC_RELAXED);
+-    cheats_frame(); /* the cheats run once per frame shown, as dmnt's run on the console */
+-}
+-
+-/* Several threads may queue frames, so the schedule is under a lock; the wait itself is outside it. Called on the
+-   game's thread from vi's DequeueBuffer: the GPU thread never waits for the display. As Ryujinx's SurfaceFlinger
+-   paces a swap interval of 0, the game's pace with interval 0 does not wait at all */
+-static PMutex g_pace_lock = PMUTEX_INIT;
+-static u64 g_pace_last; /* when the frame before was due, 0 before the first */
+-
+-void present_pace(u32 interval) {
+-    int fps = __atomic_load_n(&g_opt_fps, __ATOMIC_RELAXED);
+-    u64 refresh, period, now, next;
+-    if (!fps || (fps == SNX_FPS_GAME && !interval)) return;
+-    refresh = 1000000000u / (fps == SNX_FPS_GAME ? (u64)VI_REFRESH_HZ : (u64)fps);
+-    period = fps == SNX_FPS_GAME ? refresh * interval : refresh;
+-    pm_lock(&g_pace_lock);
+-    now = plat_ns();
+-    next = g_pace_last + period;
+-    /* a schedule more than a refresh behind (a load, a pause) starts again from now: no burst to catch up */
+-    if (!g_pace_last || now > next + refresh) next = now;
+-    g_pace_last = next;
+-    pm_unlock(&g_pace_lock);
+-    if (next > now) plat_sleep_ns((i64)(next - now));
+-}
+-
+-/* ---- buffers no render target holds, read on the CPU ---- */
+-
+-enum { NV_LAYOUT_BLOCK_LINEAR = 3 }; /* libnx's NvLayout: 1 pitch, 2 tiled, 3 block linear */
+-
+-/* Android's pixel formats as vi gets them: 1 RGBA8888, 2 RGBX8888, 4 RGB565, 5 BGRA8888, 6 RGBA5551, 7 RGBA4444 */
+-static u32 bytes_per_pixel(u32 fmt) { return fmt == 4 || fmt == 6 || fmt == 7 ? 2 : 4; }
+-static u32 expand(u32 v, unsigned bits) { return bits == 4 ? v * 17 : bits == 5 ? v << 3 | v >> 2 : v << 2 | v >> 4; }
+-static u32 to_rgba8(u32 fmt, u32 p) {
+-    switch (fmt) {
+-        case 2: return p | 0xFF000000u;
+-        case 4:
+-            return expand(p >> 11 & 31, 5) | expand(p >> 5 & 63, 6) << 8 | expand(p & 31, 5) << 16 | 0xFF000000u;
+-        case 5: return (p & 0xFF00FF00u) | (p >> 16 & 0xFFu) | (p & 0xFFu) << 16;
+-        case 6:
+-            return expand(p >> 11 & 31, 5) | expand(p >> 6 & 31, 5) << 8 | expand(p >> 1 & 31, 5) << 16 |
+-                   (p & 1 ? 0xFF000000u : 0);
+-        case 7:
+-            return expand(p >> 12 & 15, 4) | expand(p >> 8 & 15, 4) << 8 | expand(p >> 4 & 15, 4) << 16 |
+-                   expand(p & 15, 4) << 24;
+-        default: return p;
+-    }
+-}
+-
+-/* Each row's pixels are read into the end of out's row block and widened forward in place: a 2-byte pixel i is read
+-   from beyond where pixel i is written, so no temporary buffer is needed */
+-void vi_convert_cpu(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, u32* out) {
+-    u32 bpp = bytes_per_pixel(fmt), row_bytes = w * bpp, stride = pitch > row_bytes ? pitch : row_bytes;
+-    u32 rows = layout == NV_LAYOUT_BLOCK_LINEAR ? (h + (8u << bhl) - 1) & ~((8u << bhl) - 1) : h;
+-    u32 x, y;
+-    if (!w || !h) return;
+-    if (a >= AS_SIZE || (u64)stride * rows > AS_SIZE - a) {
+-        WARN_LIMIT(5, "vi: buffer at %llx runs outside guest memory, not shown\n", (unsigned long long)a);
+-        memset(out, 0, (size_t)w * h * 4);
+-        return;
+-    }
+-    for (y = 0; y < h; y++) {
+-        u8* row = (u8*)(out + (size_t)y * w);
+-        u8* in = row + (size_t)w * 4 - row_bytes;
+-        if (layout == NV_LAYOUT_BLOCK_LINEAR)
+-            for (x = 0; x < row_bytes; x += 16) {
+-                u32 n = row_bytes - x < 16 ? row_bytes - x : 16;
+-                memcpy(in + x, g_mem + a + bl_offset(x, y, 0, stride, h, bhl, 0), n);
+-            }
+-        else
+-            memcpy(in, g_mem + a + (u64)y * stride, row_bytes);
+-        for (x = 0; x < w; x++) {
+-            u32 p;
+-            if (bpp == 2) {
+-                u16 v;
+-                memcpy(&v, in + 2 * x, 2);
+-                p = v;
+-            } else
+-                memcpy(&p, in + 4 * x, 4);
+-            p = to_rgba8(fmt, p);
+-            memcpy(row + 4 * x, &p, 4);
+-        }
+-    }
+-}
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   Copyright 2026 the ScarletNX contributors */
++/* vi's buffers on the display, and the game's pace: how long vi holds back the game's next buffer */
++#include <stdlib.h>
++#include <string.h>
++#include "nx/runtime/main.h"
++#include "nx/runtime/cheats.h"
++#include "nx/gpu/gpu.h"
++#include "nx/gpu/renderer.h"
++#include "nx/hle/services/nvdrv.h"
++#include "nx/hle/services/vi.h"
++#include "nx/memory/mem.h"
++#include "nx/runtime/options.h"
++#include "nx/runtime/platform/log.h"
++#include "nx/runtime/platform/plat.h"
++
++int g_frames;
++
++void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4],
++                    u32 transform) {
++    u64 a = nvmap_addr_by_id(nvmap_id);
++    if (!a) {
++        WARN_LIMIT(5, "vi: buffer of nvmap id %u has no memory, not shown\n", nvmap_id);
++        return;
++    }
++    /* the flips are the display's: the guest's buffer is never turned */
++    g_renderer->present_buffer(a + offset, w, h, pitch, layout, bhl, fmt, crop, transform);
++    __atomic_add_fetch(&g_frames, 1, __ATOMIC_RELAXED);
++    cheats_frame(); /* the cheats run once per frame shown, as dmnt's run on the console */
++}
++
++/* Several threads may queue frames, so the schedule is under a lock; the wait itself is outside it. Called on the
++   game's thread from vi's DequeueBuffer: the GPU thread never waits for the display. As Ryujinx's SurfaceFlinger
++   paces a swap interval of 0, the game's pace with interval 0 does not wait at all */
++static PMutex g_pace_lock = PMUTEX_INIT;
++static u64 g_pace_last; /* when the frame before was due, 0 before the first */
++/* Optional scheduling diagnostics share the existing lock; printing happens after the original sleep. */
++typedef struct {
++    u64 calls, initial, resets, late_count, late_sum_ns, late_max_ns, sleeps, sleep_sum_ns, sleep_max_ns;
++} PaceStats;
++static PaceStats g_pace_stats;
++static u64 g_pace_stats_calls;
++static int g_pace_stats_on = -1;
++
++void present_pace(u32 interval) {
++    int fps = __atomic_load_n(&g_opt_fps, __ATOMIC_RELAXED);
++    u64 refresh, period, now, next;
++    if (!fps || (fps == SNX_FPS_GAME && !interval)) return;
++    refresh = 1000000000u / (fps == SNX_FPS_GAME ? (u64)VI_REFRESH_HZ : (u64)fps);
++    period = fps == SNX_FPS_GAME ? refresh * interval : refresh;
++    PaceStats report;
++    u64 report_calls = 0;
++    pm_lock(&g_pace_lock);
++    if (g_pace_stats_on < 0) {
++        const char* env = getenv("SNX_PRESENT_STATS");
++        g_pace_stats_on = env && *env && strcmp(env, "0") != 0;
++    }
++    now = plat_ns();
++    next = g_pace_last + period;
++    if (g_pace_stats_on) {
++        g_pace_stats.calls++;
++        g_pace_stats_calls++;
++        if (!g_pace_last)
++            g_pace_stats.initial++;
++        else {
++            if (now > next + refresh) g_pace_stats.resets++;
++            if (now > next) {
++                u64 late = now - next;
++                g_pace_stats.late_count++;
++                g_pace_stats.late_sum_ns += late;
++                if (late > g_pace_stats.late_max_ns) g_pace_stats.late_max_ns = late;
++            }
++        }
++    }
++    /* a schedule more than a refresh behind (a load, a pause) starts again from now: no burst to catch up */
++    if (!g_pace_last || now > next + refresh) next = now;
++    g_pace_last = next;
++    if (g_pace_stats_on) {
++        if (next > now) {
++            u64 sleep = next - now;
++            g_pace_stats.sleeps++;
++            g_pace_stats.sleep_sum_ns += sleep;
++            if (sleep > g_pace_stats.sleep_max_ns) g_pace_stats.sleep_max_ns = sleep;
++        }
++        if (g_pace_stats.calls == 600) {
++            report = g_pace_stats;
++            report_calls = g_pace_stats_calls;
++            memset(&g_pace_stats, 0, sizeof g_pace_stats);
++        }
++    }
++    pm_unlock(&g_pace_lock);
++    if (next > now) plat_sleep_ns((i64)(next - now));
++    if (report_calls)
++        LOG("pace-stats: calls=%llu window=%llu fps=%d interval=%u period_us=%llu initial=%llu resets=%llu "
++            "count/sum_us/max_us late=%llu/%llu/%llu requested_sleep=%llu/%llu/%llu\n",
++            (unsigned long long)report_calls, (unsigned long long)report.calls, fps, interval,
++            (unsigned long long)(period / 1000), (unsigned long long)report.initial,
++            (unsigned long long)report.resets, (unsigned long long)report.late_count,
++            (unsigned long long)(report.late_sum_ns / 1000), (unsigned long long)(report.late_max_ns / 1000),
++            (unsigned long long)report.sleeps, (unsigned long long)(report.sleep_sum_ns / 1000),
++            (unsigned long long)(report.sleep_max_ns / 1000));
++}
++
++/* ---- buffers no render target holds, read on the CPU ---- */
++
++enum { NV_LAYOUT_BLOCK_LINEAR = 3 }; /* libnx's NvLayout: 1 pitch, 2 tiled, 3 block linear */
++
++/* Android's pixel formats as vi gets them: 1 RGBA8888, 2 RGBX8888, 4 RGB565, 5 BGRA8888, 6 RGBA5551, 7 RGBA4444 */
++static u32 bytes_per_pixel(u32 fmt) { return fmt == 4 || fmt == 6 || fmt == 7 ? 2 : 4; }
++static u32 expand(u32 v, unsigned bits) { return bits == 4 ? v * 17 : bits == 5 ? v << 3 | v >> 2 : v << 2 | v >> 4; }
++static u32 to_rgba8(u32 fmt, u32 p) {
++    switch (fmt) {
++        case 2: return p | 0xFF000000u;
++        case 4:
++            return expand(p >> 11 & 31, 5) | expand(p >> 5 & 63, 6) << 8 | expand(p & 31, 5) << 16 | 0xFF000000u;
++        case 5: return (p & 0xFF00FF00u) | (p >> 16 & 0xFFu) | (p & 0xFFu) << 16;
++        case 6:
++            return expand(p >> 11 & 31, 5) | expand(p >> 6 & 31, 5) << 8 | expand(p >> 1 & 31, 5) << 16 |
++                   (p & 1 ? 0xFF000000u : 0);
++        case 7:
++            return expand(p >> 12 & 15, 4) | expand(p >> 8 & 15, 4) << 8 | expand(p >> 4 & 15, 4) << 16 |
++                   expand(p & 15, 4) << 24;
++        default: return p;
++    }
++}
++
++/* Each row's pixels are read into the end of out's row block and widened forward in place: a 2-byte pixel i is read
++   from beyond where pixel i is written, so no temporary buffer is needed */
++void vi_convert_cpu(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, u32* out) {
++    u32 bpp = bytes_per_pixel(fmt), row_bytes = w * bpp, stride = pitch > row_bytes ? pitch : row_bytes;
++    u32 rows = layout == NV_LAYOUT_BLOCK_LINEAR ? (h + (8u << bhl) - 1) & ~((8u << bhl) - 1) : h;
++    u32 x, y;
++    if (!w || !h) return;
++    if (a >= AS_SIZE || (u64)stride * rows > AS_SIZE - a) {
++        WARN_LIMIT(5, "vi: buffer at %llx runs outside guest memory, not shown\n", (unsigned long long)a);
++        memset(out, 0, (size_t)w * h * 4);
++        return;
++    }
++    for (y = 0; y < h; y++) {
++        u8* row = (u8*)(out + (size_t)y * w);
++        u8* in = row + (size_t)w * 4 - row_bytes;
++        if (layout == NV_LAYOUT_BLOCK_LINEAR)
++            for (x = 0; x < row_bytes; x += 16) {
++                u32 n = row_bytes - x < 16 ? row_bytes - x : 16;
++                memcpy(in + x, g_mem + a + bl_offset(x, y, 0, stride, h, bhl, 0), n);
++            }
++        else
++            memcpy(in, g_mem + a + (u64)y * stride, row_bytes);
++        for (x = 0; x < w; x++) {
++            u32 p;
++            if (bpp == 2) {
++                u16 v;
++                memcpy(&v, in + 2 * x, 2);
++                p = v;
++            } else
++                memcpy(&p, in + 4 * x, 4);
++            p = to_rgba8(fmt, p);
++            memcpy(row + 4 * x, &p, 4);
++        }
++    }
++}
+diff --git a/src/nx/runtime/settings.txt b/src/nx/runtime/settings.txt
+index 39fe8a7..d344417 100644
+--- a/src/nx/runtime/settings.txt
++++ b/src/nx/runtime/settings.txt
+@@ -95,6 +95,13 @@ setting Resolution scale
+     default 1
+     startup
+     help The scale of the game's 3D rendering, 0.25 to 4: 1 = the console's, 2 = double, 0.5 = half
++setting Upscaler
++    key upscaler
++    int 0 1
++    default 0
++    words Bilinear|FSR 1
++    help 0 = bilinear scaling; 1 = FSR 1 EASU scaling followed by mild RCAS sharpening,
++    help at the same internal resolution (no frame generation)
+ setting Shadows
+     key shadows
+     int 0 1
