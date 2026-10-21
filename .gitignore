@@ -1,4 +1,9 @@
 
+# Local inputs, releases and all disposable build/test outputs.
+/local/
+/out/
+/dist/
+
 # Local metering/game assets, docs and tooling cached locally.
 .DS_Store
 Thumbs.db
@@ -21,6 +26,15 @@ Thumbs.db
 *.o
 *.a
 *.dex
+*.exe
+*.dll
+*.obj
+*.lib
+*.pdb
+*.spv
+*.romfs
+*.tar
+*.gz
 *.log
 *.log.old
 __pycache__/
@@ -51,6 +65,7 @@ cache/
 reference/eden/
 reference/extract/
 reference/d2r-mobile/
+reference/ScarletNX-src/
 d3-android/gpu/third_party/
 d3-android/gpu/gen/
 d3-android/gpu/probe/.spv_tmp/
@@ -60,3 +75,7 @@ d3-android/gpu/probe/.spv_tmp/
 /d3-android/gpu/probe/*.txt
 /d3-android/gpu/probe/*.png
 /d3-android/tools/resource_recovery/xci-index.json
+
+# Editor/agent diagnostic caches are not project sources.
+/.serena/logs/
+/.claude/

@@ -9,4 +9,4 @@
 Makefile text eol=lf
 
 # Archival snapshots must retain the exact bytes recorded in PROVENANCE.txt.
-recovery/**/source-candidates/** -text
+reference/legacy-recovery/** -text
