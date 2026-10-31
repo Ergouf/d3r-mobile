@@ -2,7 +2,7 @@
 
 状态：设计稿，未改代码。B0 地址基线、Frida 探针和已确认的 PC 输入字符串见 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)。目标是把《暗黑破坏神 III》Switch 版在 ScarletNX 运行时里做成“键鼠可玩”，并给出两条路线：A. 手柄级保底；B. 按 d2r-mobile 的做法接回原生 PC 输入层。本稿针对 Windows 运行时；Android 的 `d3-android` 输入链路不同，只复用思路，接入点需另做。
 
-2026-11-01 进度：A+ 鼠标层已实现（`mouse_steer=1`，`0002-mouse-steer.patch`）：主菜单左键确认“继续”可进入第一章，游戏内鼠标位置驱动 1P 左摇杆。它仍是 Npad 语义，不是原生 PC 输入层；原生 B3 仍卡在 UI 脚本 VM 的事件入口/上下文，证据见 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md) 第 12 节。
+2026-11-01 进度：A+ 鼠标层已实现（`mouse_steer=1`，`0002-mouse-steer.patch`）：片头结束后左键一次进主菜单、再左键一次读条进入新崔斯特姆，游戏内鼠标位置驱动 1P 左摇杆；`0003` 同时关闭了鼠标触发的手指触摸，避免左键被当成触摸点开“英雄资料”。它仍是 Npad 语义，不是原生 PC 输入层；原生 B3 仍卡在 UI 脚本 VM 的事件入口/上下文，而且发现 fixed ELF 的 text 与运行时 guest 代码不一致，代码地址基线需要从运行时重新建立，证据见 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md) 第 12、13 节。
 
 ## 1. 结论
 

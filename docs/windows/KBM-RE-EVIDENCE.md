@@ -395,3 +395,22 @@ BEX64, 0xc0000409, faulting module unknown, offset 0x20421f7ca11
 ### 13.3 触摸与鼠标冲突
 
 `mouse_steer=1` 且 `touch=2` 时，左键会同时被 SDL 触摸路径送给游戏，主菜单上表现为“点角色 → 英雄资料”，而不是 A 确认。已在 `sdl3.c` 里让 `mouse_steer` 关闭 `SDL_EVENT_FINGER_*`，并把 `touch` 设为 0 或保持 2 都不再触发触摸；左键恢复为 A，主菜单“继续”可正常进入游戏。
+
+### 13.4 代码地址基线不一致（重要）
+
+用 Frida 读运行时 `g_mem`（`snx_module` 的 `main.base` 为 `0x8005000`）后确认：
+
+- `g_mem + 0x8dcf212` 是 `"UI_HUD_ClickPredicate"`，字符串地址与文档一致；
+- `g_mem + 0x8a49690` 的字节是 `e1 03 15 32 ...`，**不是** fixed ELF 在 `0xa49690` 的 djb2（`09 00 40 39 ...`）；
+- `g_mem + 0x8366870` 是 `sub sp, sp, #0x160` 的函数序言，而 fixed ELF 在 `0x366870` 是 `stlxr` 中段指令。
+
+结论：**fixed ELF 的代码段与当前安装的 `_code.dll` 的 guest 代码不对应**（rodata 字符串对应，text 不对应）。因此第 9 节里“UI handler 是 continuation block”的结论需要从运行时 `g_mem` 重新反汇编确认；之前基于 ELF 的代码地址不能继续用于调用目标。下一步应先从运行时 dump 一段 `g_mem` 代码，或确认 `local/assets/exefs_update/main.nso0` 与安装的 `_code.dll` 是同一版本，再重建 ELF。
+
+### 13.5 开始菜单点击已验收
+
+`mouse_steer=1`、`touch=2`、`0003` 的触摸门控生效后：
+
+1. 启动游戏，片头结束后在“按任意键”画面左键一次 → 进入主菜单，`继续` 被选中；
+2. 再左键一次 → 读条进入新崔斯特姆（第一章），没有出现“英雄资料”弹窗。
+
+截图：`out/windows/kbm/b2/70-click1.png`（主菜单）、`71-click2.png`（新崔斯特姆）。这仍是 A+（鼠标→A/左摇杆）路径，不是原生 PC UI 点击。
