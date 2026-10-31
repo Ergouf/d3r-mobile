@@ -454,3 +454,16 @@ UI 表仍然有效：`0x987bf20` 的条目 6 是 `UIConsole_MainMenu_Accept`，h
 1. 用 `find_cpu.py` 找到游戏线程的 `CPU.disp`，解析 `disp[(0x8366870 - code_lo) >> 2]` 的实际 host 函数；
 2. hook 该 host 函数，在主菜单按 A，拿到调用栈和参数；
 3. 确认参数（`x0` 控件/上下文，`w1` 玩家或按钮）后，用 `native_input` 桥调用。
+
+### 14.4 disp 槽与首个 hook 结果
+
+`tools/d3-re/trace_ui_disp.py` 直接读运行时 `g_disp` 和 `g_code_lo`，解析 `disp[(pc-code_lo)>>2]` 的 host 函数并 hook。对 `0x8366870`：
+
+- disp 槽里的 host 仍是 `0x7fffd939e9e0`（与 AOT entry 相同），说明该函数没有被 JIT 另行编译；
+- 在主菜单按 A 进入游戏时，hook 仍未命中。
+
+所以从开始画面“继续”进入游戏走的不是 `UIConsole_MainMenu_Accept`，至少不是直接经这张表调用；暂停菜单里该项要先把焦点从右侧英雄头像移到左侧列表再按 A。下一步应：
+
+1. 在暂停菜单用左摇杆/鼠标把焦点移到列表，再 hook `0x8366870`；
+2. 若仍不命中，hook 表项 6/7/8 和 `UIStartScreen_Console_OnButtonPress`，逐个定位开始画面真正的回调；
+3. 找到后确认 `(x0,w1)` 参数，再用 `native_input` 桥调用。
