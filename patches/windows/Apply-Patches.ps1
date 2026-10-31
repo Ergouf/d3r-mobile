@@ -18,6 +18,15 @@ if ($patchMetadata.PSObject.Properties.Name -contains 'extra_patches') {
     $patchList += $patchMetadata.extra_patches
 }
 
+# A later patch can touch a file an earlier one did, so the earlier one no longer reverses cleanly on its own. When the
+# last patch reverses, the whole series is applied.
+$lastPatch = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot $patchList[-1].patch)).Path
+$lastReverse = & git -C $patchSource apply --reverse --check --ignore-whitespace --whitespace=nowarn $lastPatch 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host ('All Windows source patches are already applied: ' + ($patchList.patch -join ', ') + '.')
+    return
+}
+
 $applied = @()
 foreach ($entry in $patchList) {
     $patchFile = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot $entry.patch)).Path

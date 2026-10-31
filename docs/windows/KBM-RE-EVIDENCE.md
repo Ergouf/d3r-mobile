@@ -368,3 +368,30 @@ BEX64, 0xc0000409, faulting module unknown, offset 0x20421f7ca11
 - 暂停菜单：B 可关闭；但菜单导航是 D-pad 边沿触发，持续偏转的左摇杆只能移动一格，鼠标不能像指针一样逐项选择。这是 A+ 的硬限制，也是继续做原生 UI 注入的理由。
 
 原生 B3 仍缺：UI VM 的事件入口/上下文，以及运行时内游戏线程调用桥。A+ 只作为可玩兜底，不算原生交付。
+
+## 13. B2：运行时内 guest 调用桥（2026-11-01）
+
+### 13.1 设计
+
+新增 `runtime/native_input.c/.h`：
+
+- `native_input_queue(pc, args)` 把一次 guest 调用放进单槽队列；
+- `native_input_run(c)` 在**游戏线程**的 `rt_poll` 里取队列，复制当前 `CPU`，设置 `x0..x7`、`x30=0`、独立 guest 栈，然后经 `snx_lookup` 逐块执行到 `pc==0`；
+- `g_busy` 防止注入函数内部的 SVC/分支再次进入；
+- 栈由 `kmem_alloc(256 KiB, MS_STACK, PERM_RW)` 分配。
+
+`rt_poll` 在生成代码的后向分支上被调用，是游戏线程上可用的安全点；`snx_svc` 也加了同样的入口，但实测游戏的 AOT 代码直接走 `g_svc64`，不经过 `snx_svc`。
+
+### 13.2 实测结果
+
+- 桥初始化成功：`native: bridge ready (stack 138003ff00)`。
+- 600 帧后排队自检，桥在游戏线程执行，`steps=1` 返回，游戏没有崩溃：
+  `native: djb2 self-test 09a65438 (want 908be1d4)`。
+- 说明调用链（队列、游戏线程、CPU 复制、独立栈、`snx_lookup`）已跑通，但 `0x8a49690` 这个入口的返回值与预期 djb2 不符，自检目标还需要确认；不能据此宣称 UI 调用已可用。
+- 另一次测试把 `"A"` 写进 `g_mem + kmem_alloc 地址`，游戏在另一线程以 `invalid memory access` 崩溃；`kmem_alloc` 的地址不能直接用 `g_mem[]` 当普通 guest 内存写。
+
+当前 `native_input_tick()` 是空实现，桥保持休眠，不影响默认启动和 A+ 鼠标层。
+
+### 13.3 触摸与鼠标冲突
+
+`mouse_steer=1` 且 `touch=2` 时，左键会同时被 SDL 触摸路径送给游戏，主菜单上表现为“点角色 → 英雄资料”，而不是 A 确认。已在 `sdl3.c` 里让 `mouse_steer` 关闭 `SDL_EVENT_FINGER_*`，并把 `touch` 设为 0 或保持 2 都不再触发触摸；左键恢复为 A，主菜单“继续”可正常进入游戏。

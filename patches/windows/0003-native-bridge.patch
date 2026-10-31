@@ -1,0 +1,283 @@
+diff --git a/src/nx/CMakeLists.txt b/src/nx/CMakeLists.txt
+index b2a6b9f..3dd9b4d 100644
+--- a/src/nx/CMakeLists.txt
++++ b/src/nx/CMakeLists.txt
+@@ -28,6 +28,7 @@ function(snx_component name)
+ endfunction()
+ 
+ snx_component(core runtime/main.c runtime/arm.c runtime/loader.c runtime/rtapi.c runtime/clock.c runtime/crash.c runtime/options.c
++              runtime/native_input.c
+               runtime/startup.c runtime/gdbstub.c runtime/present.c runtime/guest_jit.c
+               runtime/cheats.c)
+ target_link_libraries(snx_core PRIVATE snx_driver snx_lz4 snx_build_info)
+@@ -86,13 +87,17 @@ include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
+ snx_shaderdec(snx_shader)
+ snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/record.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
+                  gpu/vk/buffer.c gpu/vk/writeback.c gpu/vk/pipeline.c gpu/vk/pipeline_file.c gpu/vk/render.c gpu/vk/release.c gpu/vk/query.c gpu/vk/compute.c
+-                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
++                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/vk/fsr.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
+                  "${volk_SOURCE_DIR}/volk.c")
+ # the ASTC decoder's and the VIC composition's SPIR-V, compiled from their GLSL at build time (cmake/glsl.cmake). The
+ # VIC shader is built twice: for word aligned rows, and for the rest (gpu/video/vic_compose.glsl)
+ include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
+ snx_glsl_spirv(snx_vk SOURCE gpu/texture/astc.comp NAME astc_spv HEADER nx/gpu/texture/astc_spv.h)
+ snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_spv HEADER nx/gpu/video/vic_spv.h)
++# the FSR 1 EASU pass's triangle and its upscale (gpu/vk/fsr.c)
++snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr.vert NAME fsr_vert_spv HEADER nx/gpu/vk/fsr_spv.h)
++snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr.frag NAME fsr_frag_spv HEADER nx/gpu/vk/fsr_spv.h)
++snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr_rcas.frag NAME fsr_rcas_spv HEADER nx/gpu/vk/fsr_spv.h)
+ snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_unaligned_spv HEADER nx/gpu/video/vic_spv.h
+                DEFINES VIC_UNALIGNED)
+ set(components core kernel hle video gpu platform shader vk)
+diff --git a/src/nx/hle/svc/svc.c b/src/nx/hle/svc/svc.c
+index e622f19..9a11896 100644
+--- a/src/nx/hle/svc/svc.c
++++ b/src/nx/hle/svc/svc.c
+@@ -12,6 +12,7 @@
+ #include "nx/hle/hle.h"
+ #include "nx/runtime/arm.h"
+ #include "nx/runtime/clock.h"
++#include "nx/runtime/native_input.h"
+ 
+ #define R_BADPERM      0xD801 /* InvalidNewMemoryPermission */
+ #define R_OUTOFHANDLES 0xD201 /* OutOfHandles */
+@@ -534,7 +535,12 @@ static void svc32_unknown(SnxArmCPU* a, u32 imm) {
+     svc_end(t, &in, n, 0, a->r[0], a->r[1]);
+ }
+ 
+-void snx_svc(CPU* c, u32 imm) { (imm < SNX_SVC_COUNT ? g_svc64[imm] : svc64_unknown)(c, imm); }
++void snx_svc(CPU* c, u32 imm) {
++    /* the injection bridge runs here: this is the game thread, with its own CPU, TLS and thread, and the call gets a
++       separate guest stack. Its SVCs come back through this function but the bridge refuses to nest */
++    if (native_input_pending()) native_input_run(c);
++    (imm < SNX_SVC_COUNT ? g_svc64[imm] : svc64_unknown)(c, imm);
++}
+ void snx_svc32(SnxArmCPU* a, u32 imm) { (imm < SNX_SVC_COUNT ? g_svc32[imm] : svc32_unknown)(a, imm); }
+ 
+ /* ============================================================ the handlers, in hos.svc's order */
+diff --git a/src/nx/runtime/main.c b/src/nx/runtime/main.c
+index aa5e08c..51938b2 100644
+--- a/src/nx/runtime/main.c
++++ b/src/nx/runtime/main.c
+@@ -22,6 +22,7 @@
+ #include "nx/runtime/clock.h"
+ #include "nx/runtime/gdbstub.h"
+ #include "nx/runtime/loader.h"
++#include "nx/runtime/native_input.h"
+ #include "nx/runtime/options.h"
+ #include "nx/runtime/rtapi.h"
+ #include "nx/runtime/startup.h"
+@@ -306,6 +307,7 @@ static void frontend_loop(void) {
+     while (!g_quit) {
+         int shown;
+         video_poll();
++        native_input_tick();
+         hid_update();
+         vi_vsync_tick();
+         if (++tick % 60 == 0) ini_poll(0);
+@@ -425,6 +427,7 @@ int snx_main(int argc, char** argv) {
+     load_hints();
+     if (loader_load()) fatal("Could not load the game executables. See the .log for details.");
+     kernel_load_symbols();
++    native_input_init();
+     nvn_trace_init();
+     /* after the trace, which says whether calls must go through the slots it wraps. The JIT compiles A64: a 32-bit
+        game's blocks are arm.c's, and its hints are A32 block keys the JIT must not warm-compile */
+diff --git a/src/nx/runtime/native_input.c b/src/nx/runtime/native_input.c
+new file mode 100644
+index 0000000..bcc6611
+--- /dev/null
++++ b/src/nx/runtime/native_input.c
+@@ -0,0 +1,112 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   Copyright 2026 the ScarletNX contributors */
++#include "nx/runtime/native_input.h"
++#include "nx/runtime/loader.h"
++#include "nx/runtime/arm.h"
++#include "nx/runtime/main.h"
++#include "nx/runtime/rtapi.h"
++#include "nx/runtime/platform/log.h"
++#include "nx/memory/mem.h"
++#include "common/filesystem/host.h"
++#include <string.h>
++
++/* the game's djb2 (h = h * 33 + c) and the UI_HUD_ClickPredicate string: a pure
++   function with no stack or TLS, so it proves the bridge without touching game state */
++#define SELFTEST_PC  0x8a49690ull /* FUN_00a49690 */
++#define SELFTEST_ARG 0x8dcf212ull /* "UI_HUD_ClickPredicate" */
++#define SELFTEST_WANT 0x908be1d4u
++
++#define NATIVE_STACK_SIZE (256u * 1024u)
++#define NATIVE_MAX_STEPS  200000
++
++static u64 g_stack_top;
++static int g_selftest_done;
++static int g_busy;
++static PMutex g_lock = PMUTEX_INIT;
++static int g_have;
++static u64 g_pc;
++static u64 g_args[8];
++
++int native_input_pending(void) { return __atomic_load_n(&g_have, __ATOMIC_ACQUIRE); }
++
++int native_input_queue(u64 pc, const u64 args[8]) {
++    int queued = 0;
++    pm_lock(&g_lock);
++    if (!g_have) {
++        g_pc = pc;
++        if (args)
++            memcpy(g_args, args, sizeof g_args);
++        else
++            memset(g_args, 0, sizeof g_args);
++        __atomic_store_n(&g_have, 1, __ATOMIC_RELEASE);
++        queued = 1;
++    }
++    pm_unlock(&g_lock);
++    return queued;
++}
++
++static int native_input_take(u64* pc, u64 args[8]) {
++    int have;
++    pm_lock(&g_lock);
++    have = g_have;
++    if (have) {
++        *pc = g_pc;
++        memcpy(args, g_args, sizeof g_args);
++        __atomic_store_n(&g_have, 0, __ATOMIC_RELEASE);
++    }
++    pm_unlock(&g_lock);
++    return have;
++}
++
++void native_input_init(void) {
++    u64 base;
++    if (g_arm_mod) return; /* the 32-bit path has its own CPU state */
++    base = kmem_alloc(NATIVE_STACK_SIZE, MS_STACK, PERM_RW);
++    if (!base) {
++        WARN("native: no guest stack for the injection bridge\n");
++        return;
++    }
++    g_stack_top = base + NATIVE_STACK_SIZE - 0x100;
++    LOG("native: bridge ready (stack %llx)\n", (unsigned long long)g_stack_top);
++}
++
++void native_input_tick(void) {
++    /* The self-test is off until its target is confirmed: the first run reached the game's code and returned, but the
++       djb2 value did not match, and writing a test string through g_mem at a kmem_alloc address crashed another thread.
++       Keep the bridge dormant; a UI action is queued here once B3 has a verified entry point. */
++    (void)g_stack_top;
++}
++
++void native_input_run(CPU* c) {
++    CPU n;
++    u64 pc, args[8];
++    int steps = 0;
++    if (g_busy || !g_stack_top || !native_input_take(&pc, args)) return;
++    g_busy = 1;
++    n = *c;
++    memcpy(n.x, args, sizeof args);
++    n.x[30] = 0; /* returning to 0 ends the call */
++    n.x[31] = g_stack_top;
++    n.pc = pc;
++    n.poll = 0; /* never hand this core away in the middle of a nested call */
++    if (pc == SELFTEST_PC && !g_selftest_done)
++        LOG("native: self-test call x0=%llx bytes=%02x %02x %02x %02x sp=%llx\n", (unsigned long long)n.x[0],
++            n.x[0] < (1ull << 32) ? g_mem[n.x[0]] : 0, n.x[0] + 1 < (1ull << 32) ? g_mem[n.x[0] + 1] : 0,
++            n.x[0] + 2 < (1ull << 32) ? g_mem[n.x[0] + 2] : 0, n.x[0] + 3 < (1ull << 32) ? g_mem[n.x[0] + 3] : 0,
++            (unsigned long long)n.x[31]);
++    while (n.pc && steps < NATIVE_MAX_STEPS) {
++        GuestFn f = snx_lookup(&n, n.pc);
++        if (!f) {
++            WARN("native: no code at %llx\n", (unsigned long long)n.pc);
++            break;
++        }
++        f(&n, n.pc);
++        steps++;
++    }
++    if (pc == SELFTEST_PC && !g_selftest_done) {
++        u32 got = (u32)n.x[0];
++        g_selftest_done = 1;
++        LOG("native: djb2('A') self-test %u (want 65), steps %d%s\n", got, steps, got == 65 ? "" : " MISMATCH");
++    }
++    g_busy = 0;
++}
+diff --git a/src/nx/runtime/native_input.h b/src/nx/runtime/native_input.h
+new file mode 100644
+index 0000000..9b06a1c
+--- /dev/null
++++ b/src/nx/runtime/native_input.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   Copyright 2026 the ScarletNX contributors */
++/* A call from the runtime into the game's own guest code, run on the game thread.
++
++   The UI table's handlers are continuation blocks inside the game's script VM, and
++   calling guest code from a host thread with a copied CPU crashes (BEX64 in JIT).
++   This bridge therefore queues a call on whichever thread posts it and runs it at
++   the next SVC the game thread makes: the CPU, TLS and thread are the game's own,
++   and only the stack is a fresh one from the kernel region. Nested SVCs from the
++   called function do not re-enter it. */
++#ifndef SNX_NATIVE_INPUT_H
++#define SNX_NATIVE_INPUT_H
++#include "common/cpu/aarch64/cpu.h"
++
++/* Allocates the scratch guest stack and queues a self-test call (djb2 over the
++   UI_HUD_ClickPredicate string); called once after the game is loaded. */
++void native_input_init(void);
++
++/* 1 when the call was queued (one slot: a call already waiting makes this 0) */
++int native_input_queue(u64 pc, const u64 args[8]);
++int native_input_pending(void);
++
++/* Called from the frontend each frame: once the game has shown some frames, queues the self-test, so the bridge is not
++   exercised in the middle of boot */
++void native_input_tick(void);
++
++/* Runs the queued call on the game thread, at the SVC entry. Safe to call on
++   every SVC: it returns at once when nothing waits or a call is already running. */
++void native_input_run(CPU* c);
++
++#endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 6196862..c634815 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -944,7 +944,11 @@ void video_poll(void) {
+             case SDL_EVENT_FINGER_DOWN:
+             case SDL_EVENT_FINGER_MOTION:
+             case SDL_EVENT_FINGER_UP:
+-            case SDL_EVENT_FINGER_CANCELED: touch_finger(&e); break;
++            case SDL_EVENT_FINGER_CANCELED:
++                /* with the mouse driving player 1, the touch screen stays off: a finger would otherwise reach the
++                   game's touch UI at the same time as the mouse */
++                if (!mouse_steer_on()) touch_finger(&e);
++                break;
+             case SDL_EVENT_MOUSE_BUTTON_DOWN:
+             case SDL_EVENT_MOUSE_BUTTON_UP:
+                 if (mouse_steer_on() && e.button.which != SDL_TOUCH_MOUSEID) {
+diff --git a/src/nx/runtime/rtapi.c b/src/nx/runtime/rtapi.c
+index 90d9745..9e246a0 100644
+--- a/src/nx/runtime/rtapi.c
++++ b/src/nx/runtime/rtapi.c
+@@ -7,6 +7,7 @@
+ #include "nx/runtime/guest_jit.h"
+ #include "nx/runtime/loader.h"
+ #include "nx/runtime/main.h"
++#include "nx/runtime/native_input.h"
+ #include "nx/runtime/platform/log.h"
+ #include "nx/runtime/platform/plat.h"
+ #include <stdio.h>
+@@ -167,7 +168,12 @@ static void rt_wfe(CPU* c) {
+     plat_yield();
+     core_enter(t);
+ }
+-static void rt_poll(CPU* c) { core_poll((KThread*)c->thread); }
++static void rt_poll(CPU* c) {
++    /* a safe point on the game thread: the injection bridge's queued call runs here, on a copy of this CPU with its
++       own guest stack, before the core is handed on */
++    if (native_input_pending()) native_input_run(c);
++    core_poll((KThread*)c->thread);
++}
+ 
+ /* snx_lookup found no function for pc: the JIT's code, which a call into code the game mapped (an NRO) finds without a
+    wait once compiled. A pc without code yet waits for its compile off its guest core, so the core's other threads run

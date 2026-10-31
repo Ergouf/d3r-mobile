@@ -30,6 +30,19 @@
         "src/nx/runtime/platform/backend/sdl3.c": "5b193b7f6321fb156a0697587db6f3f56db345a1c0f89f19ed4b92b86e480741",
         "src/nx/runtime/settings.txt": "6c6cd5da57c03859b9d53a152dee3f4cbeca3b40197c8e1db6798f4e453b9f21"
       }
+    },
+    {
+      "patch": "0003-native-bridge.patch",
+      "patch_sha256": "c5705e73f9eaeb6137366fcf7aeee94c08c692b0904bcfe9324f2b60700f32ad",
+      "changed_files_lf_sha256": {
+        "src/nx/CMakeLists.txt": "528aed3990336ec7aca6f04e6834615b6527848db94251f43a13bf1d9db2e700",
+        "src/nx/hle/svc/svc.c": "584a8ec38c0ae30662d985eb223c0e0c28d404b14db46510496918c249fae3a0",
+        "src/nx/runtime/main.c": "741420979423342ad0b4bbc58027a020fe5ab5bce2d685e2306409929933a5b7",
+        "src/nx/runtime/rtapi.c": "e4e387b8cee683c2bebe47b52502c6782e32283730abc61e6f644ebbf7f96cf6",
+        "src/nx/runtime/native_input.c": "7b838baccf8b3a0a0446850f9774fb7355a052a72e6fc0736ca9a82b6438c84e",
+        "src/nx/runtime/native_input.h": "a5207095506d0977e48ef71c5ac7f0847ffec6616242bf88bf5d5494cdec35f7",
+        "src/nx/runtime/platform/backend/sdl3.c": "abb41678d52b7b2eb76b54760f5ce2316d9545fc5b6f0264fbfe58407ee4ca3b"
+      }
     }
   ]
 }

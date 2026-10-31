@@ -9,6 +9,8 @@
 
 `0002-mouse-steer.patch` 在 `0001` 之后应用，加入 `mouse_steer` 设置：鼠标位置驱动 1P 左摇杆，左键 A、右键 B、中键 X、侧键 Y/L；开启时鼠标不再当触摸屏。它只改 `src/nx/runtime/platform/backend/sdl3.c` 和 `src/nx/runtime/settings.txt`，默认关闭，不影响手柄和原有键盘映射。
 
+`0003-native-bridge.patch` 在 `0002` 之后应用，加入运行时内的 guest 调用桥（`runtime/native_input.c/.h`、`main.c`、`rtapi.c`、`svc.c`、`CMakeLists.txt`）：队列 + 在游戏线程的 `rt_poll` 上执行 + 独立 guest 栈。自检默认关闭，桥不改变默认行为；`mouse_steer` 同时关闭手指触摸事件，避免鼠标点击又被游戏当成触摸。
+
 补丁包含 EASU/RCAS 着色器和 Vulkan 集成、异步录制描述符兼容、图像布局回退、资源寿命与翻转修复，以及 `upscaler` 设置、着色器构建规则、`vk_sc_view` 导出、全屏启动前隐藏窗口、显示后再进入全屏，和默认关闭的 `SNX_PRESENT_STATS` 呈现节奏统计（由环境变量开启，仅用于诊断）。包含 9 个已有文件的修改和 5 个新增文件；没有把临时构建、缓存、密钥或游戏资源写入补丁。
 
 在主项目根目录准备上游检出并应用：
