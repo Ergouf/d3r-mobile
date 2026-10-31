@@ -140,6 +140,24 @@ Notes:
 - `CPU.mem + absolute_guest_address` reads guest memory; module-relative
   addresses must be offset by `0x8005000`.
 
+## 6. Static xrefs and the guest-call boundary
+
+`find_xrefs.py` scans the fixed ELF for code that builds a module address
+(`ADRP+ADD`, `ADRP+LDR`, `ADR`) and for direct `BL`/`B` targets:
+
+```powershell
+python tools/d3-re/find_xrefs.py --string ControlScheme --exact
+python tools/d3-re/find_xrefs.py 0x3cc4c0 0x39cdb0
+```
+
+It found the djb2 hash lookup (`FUN_003cc4c0`) and the widget constructor that
+resolves UI callbacks by name. The callback addresses in the UI table are
+continuation blocks inside the UI script VM, not callable function entries.
+
+`call_guest.py` copies a live CPU and runs a guest function through `CPU.disp`.
+It is a boundary probe only: calling from a Frida thread with a copied stack
+crashed the game (`BEX64`, `0xc0000409`). A real injection bridge must run on
+the game thread with a dedicated guest stack.
 
 ## Safety
 

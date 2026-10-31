@@ -3,7 +3,7 @@
   "origin": "https://github.com/scarletnx/ScarletNX.git",
   "base_commit": "dbf8915965367e8a9616b19e5a0c1eddafaf28f3",
   "patch": "0001-fsr1-present-stats.patch",
-  "patch_sha256": "a1c5565df64e2d5a923f3170ab4a5d1b619994ef31792c69480d733d2b65d438",
+  "patch_sha256": "e367ab818b6eb30cb1b1e5297ec94a413a3591af85ef29f685806a76695c41b2",
   "changed_files_lf_sha256": {
     "src/nx/CMakeLists.txt": "54188f5f91592047556e3d3a76fa74136c82a2144c71ba0ba24ea02ea5e030a3",
     "src/nx/gpu/vk/cmd.c": "5a53cc6968763bc480756387805aa6b4c521b06d74dbbf7a626c3868e3b37269",
@@ -16,9 +16,20 @@
     "src/nx/gpu/vk/shaders/fsr_rcas.frag": "f6cff018b09ab98811fa0fe1e8f5b8d891d1030302389c6223e21f13ac0b02db",
     "src/nx/gpu/vk/ui.c": "27c6e68ac490dd2eee89b625077505cbf4944f5456bddf1cbbae183d99031b01",
     "src/nx/gpu/vk/vk.h": "2ecaf635fe7ac55d1adc75b22778b0dc353e6ece8d9939dfa30209fef4d283a6",
+    "src/nx/runtime/platform/backend/sdl3.c": "e954c58e86218108a94bda9013c943324ac7b356403ed5521fa4f30c92bfebab",
     "src/nx/runtime/present.c": "54d889b3729796f8b57976ad62eaefe0b944230cc74b2a00bfa5912654f556c2",
     "src/nx/runtime/settings.txt": "c9eab50291afdb7838ca95c8fa528cfc4f21fab6f157cdf061aeeff07838cdd7"
   },
-  "verification": "git archive base + git apply --check, apply; all 13 resulting files equal current source after LF normalization; worktree index restored to unstaged",
-  "runtime_release_sha256": "02097a2aacd693c6f7cb113069e342da65ad23378b329bf98d44e35c902033a7"
+  "verification": "base patch applies to base commit; extra patches apply in order on top; 0002 reproduces the two changed files after LF normalization",
+  "runtime_release_sha256": "194e5b59ca8b8d155faf0c242ce2c5bb3d6910a6e3a28a268924aed50e9878e5",
+  "extra_patches": [
+    {
+      "patch": "0002-mouse-steer.patch",
+      "patch_sha256": "8481be149aab47dc8741aaf89f32216b23f4245ff50cbc9e981a32a152bd45a6",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "5b193b7f6321fb156a0697587db6f3f56db345a1c0f89f19ed4b92b86e480741",
+        "src/nx/runtime/settings.txt": "6c6cd5da57c03859b9d53a152dee3f4cbeca3b40197c8e1db6798f4e453b9f21"
+      }
+    }
+  ]
 }

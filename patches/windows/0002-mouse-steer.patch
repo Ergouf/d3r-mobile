@@ -1,0 +1,160 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 1d40b9b..6196862 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -5,6 +5,7 @@
+    options (seconds, frames, shot, shot_every, press_len, script: platform/unattended.c). */
+ #include "nx/runtime/main.h"
+ #include "nx/runtime/options.h"
++#include <math.h>
+ #include "nx/hle/hle.h" /* g_hle.hid: the players and the touch screen hid samples */
+ #include "nx/hle/services/hid.h"
+ #include "nx/hle/kernel/kernel.h"
+@@ -43,6 +44,20 @@ static u64 keys_held;
+ static u64 g_menu_held;      /* keyboard, scripted and on-screen buttons held while the menu had them */
+ static u64 g_menu_held_pad0; /* No1's physical pad, tracked separately so a replacement has fresh presses */
+ static u64 g_menu_held_extra[SNX_GAMEPADS - 1];
++/* the mouse as player 1's controller (mouse_steer): its place drives the left stick, its buttons A/B/X/Y */
++static u64 g_mouse_buttons;
++static float g_mouse_x = -1.0f, g_mouse_y = -1.0f;
++static int mouse_steer_on(void) { return g_settings.mouse_steer && !g_opt_headless; }
++static u64 mouse_button_bit(u8 button) {
++    switch (button) {
++        case SDL_BUTTON_LEFT: return 1ull << 0;   /* A */
++        case SDL_BUTTON_RIGHT: return 1ull << 1;  /* B */
++        case SDL_BUTTON_MIDDLE: return 1ull << 2; /* X */
++        case SDL_BUTTON_X1: return 1ull << 3;     /* Y */
++        case SDL_BUTTON_X2: return 1ull << 6;     /* L */
++        default: return 0;
++    }
++}
+ static int g_fullscreen;
+ static void set_fullscreen(int on);
+ static int g_shot_req;
+@@ -299,7 +314,11 @@ void video_init(const char* title) {
+     snprintf(g_title, sizeof g_title, "%s", title);
+     backend_window_size(&w, &h);
+     snprintf(header, sizeof header, "%s - %s", title, snx_build_info());
+-    g_win = SDL_CreateWindow(header, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
++    /* an interactive fullscreen start: stay hidden until fullscreen, so the 1280x720 window the renderer starts
++       with (the .ini's size, before the game presents) is never seen */
++    int start_fullscreen = g_settings.fullscreen && !unattended_active();
++    g_win = SDL_CreateWindow(header, w, h,
++                             SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | (start_fullscreen ? SDL_WINDOW_HIDDEN : 0));
+     if (!g_win) fatal("SDL could not open a Vulkan window: %s", SDL_GetError());
+     snx_window_icon(g_win);
+     overlay_set_display_scale(SDL_GetWindowDisplayScale(g_win));
+@@ -313,7 +332,10 @@ void video_init(const char* title) {
+         fatal("Vulkan could not start (see the log). ScarletNX needs a GPU and driver with Vulkan 1.3.");
+     LOG("renderer: Vulkan\n");
+     /* not for an unattended run: nobody is at the screen, and it would cover the desktop of whoever is */
+-    if (g_settings.fullscreen && !unattended_active()) set_fullscreen(1);
++    if (start_fullscreen) {
++        set_fullscreen(1);
++        if (!SDL_ShowWindow(g_win)) WARN("video: could not show the window: %s\n", SDL_GetError());
++    }
+ #ifdef _WIN32
+     /* keep the display and the system awake while playing (it was set with the crash handler, headless runs too) */
+     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+@@ -338,6 +360,8 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
+                           "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick\n"
+                           "  X / Space = A    Z = B    C = X    V = Y\n"
+                           "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
++                          "Mouse steer (mouse_steer=1): the pointer is the left stick, left = A, right = B, middle = X,\n"
++                          "back = Y; in a menu it moves the selection and the left button confirms.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = quit";
+ 
+@@ -923,7 +947,25 @@ void video_poll(void) {
+             case SDL_EVENT_FINGER_CANCELED: touch_finger(&e); break;
+             case SDL_EVENT_MOUSE_BUTTON_DOWN:
+             case SDL_EVENT_MOUSE_BUTTON_UP:
+-            case SDL_EVENT_MOUSE_MOTION: touch_mouse(&e); break;
++                if (mouse_steer_on() && e.button.which != SDL_TOUCH_MOUSEID) {
++                    /* the buttons are player 1's: left A, right B, middle X, back Y, forward L */
++                    u64 bit = mouse_button_bit(e.button.button);
++                    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
++                        g_mouse_buttons |= bit;
++                    else
++                        g_mouse_buttons &= ~bit;
++                    break;
++                }
++                touch_mouse(&e);
++                break;
++            case SDL_EVENT_MOUSE_MOTION:
++                if (mouse_steer_on() && e.motion.which != SDL_TOUCH_MOUSEID) {
++                    g_mouse_x = e.motion.x;
++                    g_mouse_y = e.motion.y;
++                    break;
++                }
++                touch_mouse(&e);
++                break;
+             case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                 g_fullscreen = 1;
+                 wsafe_set();
+@@ -950,6 +992,7 @@ void video_poll(void) {
+             case SDL_EVENT_KEY_UP: keys_held &= ~keymap(e.key.scancode); break;
+             case SDL_EVENT_WINDOW_FOCUS_LOST:
+                 keys_held = 0;
++                g_mouse_buttons = 0;
+                 ui_lock();
+                 vpad_release();
+                 overlay_pointers_reset(); /* lifts that come without their presses don't tap the menu */
+@@ -971,6 +1014,25 @@ void video_poll(void) {
+     u64 pb;
+     input_key_sticks(k, st);
+     i32 lx = st[0], ly = st[1], rx = st[2], ry = st[3];
++    /* the mouse as player 1's left stick: the direction from the middle of the window, as far as the pointer is
++       out. The stick's own keys win while they are held, so WASD still works next to the pointer */
++    if (mouse_steer_on() && g_mouse_x >= 0 && !st[0] && !st[1]) {
++        int ww = 1280, wh = 720;
++        float dx, dy, len, dead, radius, mag;
++        SDL_GetWindowSize(g_win, &ww, &wh);
++        dx = g_mouse_x - (float)ww * 0.5f;
++        dy = g_mouse_y - (float)wh * 0.5f;
++        len = sqrtf(dx * dx + dy * dy);
++        dead = (float)(ww < wh ? ww : wh) * 0.05f;
++        radius = (float)(ww < wh ? ww : wh) * 0.30f;
++        if (len > dead) {
++            mag = (len - dead) / (radius - dead);
++            if (mag > 1.0f) mag = 1.0f;
++            lx = (i32)(dx / len * mag * 32767.0f);
++            ly = (i32)(-dy / len * mag * 32767.0f);
++        }
++    }
++    nonpad |= g_mouse_buttons;
+     pm_lock(&g_hle.hid.input_lock);
+     /* Each SDL slot is one guest Npad. Keyboard, scripted and on-screen input also drive No1. */
+     static u32 previous_ids[SNX_GAMEPADS];
+diff --git a/src/nx/runtime/settings.txt b/src/nx/runtime/settings.txt
+index 39fe8a7..0bb4651 100644
+--- a/src/nx/runtime/settings.txt
++++ b/src/nx/runtime/settings.txt
+@@ -95,6 +95,13 @@ setting Resolution scale
+     default 1
+     startup
+     help The scale of the game's 3D rendering, 0.25 to 4: 1 = the console's, 2 = double, 0.5 = half
++setting Upscaler
++    key upscaler
++    int 0 1
++    default 0
++    words Bilinear|FSR 1
++    help 0 = bilinear scaling; 1 = FSR 1 EASU scaling followed by mild RCAS sharpening,
++    help at the same internal resolution (no frame generation)
+ setting Shadows
+     key shadows
+     int 0 1
+@@ -225,6 +232,13 @@ setting Touch screen
+     set backend_touch_mode_set
+     words Off|Fingers|Mouse too
+     help The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off
++setting Mouse steer
++    key mouse_steer
++    int 0 1
++    default 0
++    words Off|On
++    help 1 = the mouse's place drives player 1's left stick, its left button A, right B, middle X and back Y.
++    help The touch screen is off while it is on; in a menu the pointer moves the selection and the left button confirms
+ 
+ table g_vpad_shown_ini
+ setting Control shown

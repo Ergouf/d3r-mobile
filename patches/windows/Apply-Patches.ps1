@@ -6,28 +6,48 @@ param(
 $ErrorActionPreference = 'Stop'
 $patchSource = (Resolve-Path -LiteralPath $SourcePath).Path
 $patchMetadata = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'base.json') -Raw | ConvertFrom-Json
-$patchFile = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot $patchMetadata.patch)).Path
-$patchHash = (Get-FileHash -LiteralPath $patchFile -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($patchHash -ine $patchMetadata.patch_sha256) { throw 'Patch checksum differs from base.json.' }
 $patchHead = & git -C $patchSource rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'SourcePath must be a ScarletNX Git checkout.' }
 if ($patchHead.Trim() -ne $patchMetadata.base_commit) {
     throw "Expected ScarletNX commit $($patchMetadata.base_commit); found $patchHead."
 }
 
-$patchCheck = & git -C $patchSource apply --check --whitespace=nowarn $patchFile 2>&1
-if ($LASTEXITCODE -ne 0) {
-    $patchReverse = & git -C $patchSource apply --reverse --check --whitespace=nowarn $patchFile 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host 'The complete Windows FSR patch is already applied.'
-        return
+# The base patch first, then each extra patch on top of the previous result.
+$patchList = @([pscustomobject]@{ patch = $patchMetadata.patch; patch_sha256 = $patchMetadata.patch_sha256 })
+if ($patchMetadata.PSObject.Properties.Name -contains 'extra_patches') {
+    $patchList += $patchMetadata.extra_patches
+}
+
+$applied = @()
+foreach ($entry in $patchList) {
+    $patchFile = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot $entry.patch)).Path
+    $patchHash = (Get-FileHash -LiteralPath $patchFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($patchHash -ine $entry.patch_sha256) { throw "Patch checksum differs from base.json: $($entry.patch)" }
+
+    $patchCheck = & git -C $patchSource apply --check --ignore-whitespace --whitespace=nowarn $patchFile 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $patchReverse = & git -C $patchSource apply --reverse --check --ignore-whitespace --whitespace=nowarn $patchFile 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "$($entry.patch) is already applied."
+            continue
+        }
+        throw ('Patch cannot be safely applied; source files were not changed: ' + $entry.patch + [Environment]::NewLine +
+            ($patchCheck -join [Environment]::NewLine))
     }
-    throw ('Patch cannot be safely applied; source files were not changed.' + [Environment]::NewLine + ($patchCheck -join [Environment]::NewLine))
+    if ($CheckOnly) {
+        Write-Host "$($entry.patch): checksum and git apply --check passed."
+        continue
+    }
+    & git -C $patchSource apply --ignore-whitespace --whitespace=nowarn $patchFile
+    if ($LASTEXITCODE -ne 0) { throw "git apply failed: $($entry.patch)" }
+    $applied += $entry.patch
 }
 if ($CheckOnly) {
-    Write-Host 'Patch checksum, base commit and git apply --check passed; source files were not changed.'
+    Write-Host 'All Windows patches passed their checks; source files were not changed.'
     return
 }
-& git -C $patchSource apply --whitespace=nowarn $patchFile
-if ($LASTEXITCODE -ne 0) { throw 'git apply failed.' }
-Write-Host 'Windows FSR source patch applied. Build with tools/windows-dev/Build.ps1.'
+if ($applied.Count) {
+    Write-Host ('Windows source patches applied: ' + ($applied -join ', ') + '. Build with tools/windows-dev/Build.ps1.')
+} else {
+    Write-Host 'All Windows source patches are already applied.'
+}

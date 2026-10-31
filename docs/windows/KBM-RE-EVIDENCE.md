@@ -315,3 +315,56 @@ python tools/d3-re/dump_script_table.py --filter Cursor
 - 未写存档、未改 `_code.dll`、未改安装目录 exe。
 - Frida 探针默认 spawn 后 kill；`--keep` 才会留下进程。
 - 所有二进制分析产物在 `out/`（git-ignored）。
+
+## 12. B2 前置：UI 回调边界与外部调用失败（2026-11-01）
+
+### 12.1 UI 回调是状态机 continuation
+
+`UIConsole_MainMenu_Accept`（guest `0x8366870`）、`UIStartScreen_Console_OnButtonPress`（`0x836a400`）、`UIHeroSelect_PlayHero`（`0x835c880`）在 fixed ELF 中反汇编后都落在函数中段：
+
+- `0x836870` 处是 `stlxr`，前面没有 prologue；
+- `0x836a400` 处直接读 `[x19,#0x1394]`，依赖调用方预置 `x19`；
+- 它们是 UI 脚本 VM（`FUN_003dafb0` 一类）内部的 continuation block，不是可普通调用的函数入口。
+
+结论：不能把表里的 handler 当 `void (*)(void*)` 直接调用；必须经过 UI VM 的事件分发，或找到 VM 的入口/上下文。
+
+### 12.2 外部线程调 guest 函数会崩
+
+`tools/d3-re/call_guest.py` 会复制 live CPU、设置 `pc/x0..x7/x30/sp`，再经 `CPU.disp` 逐块执行。用它从 Frida 线程调用纯函数 `FUN_00a49790`（djb2）时，游戏以：
+
+```text
+BEX64, 0xc0000409, faulting module unknown, offset 0x20421f7ca11
+```
+
+崩在 JIT 代码。原因是没有在游戏线程、没有合法 guest 栈/TLS，且 `cpu.thread` 指向另一个正在运行的 KThread。
+
+结论：注入桥必须：
+
+1. 在游戏线程上执行（例如 SVC 处理入口）；
+2. 用 `kmem_alloc` 分配的独立 guest 栈；
+3. 复制当前线程 CPU（保留 `tpidrro`/`thread`）；
+4. 设置递归保护，避免注入函数内部的 SVC 再次触发注入。
+
+### 12.3 工具
+
+- `tools/d3-re/find_xrefs.py`：fixed ELF 的 AArch64 xref 扫描（ADRP+ADD/LDR、ADR、BL/B），已用 `LeftClickToMove` 的已知 xref `0x4e3154` 验证。
+- `tools/d3-re/call_guest.py`：外部 guest 调用探针（仅用于确认边界，不用于正式注入）。
+- `tools/windows-dev/Post-GameInput.ps1`：向游戏窗口 PostMessage 键鼠，不需要前台；方向键带 extended 标志。
+- `tools/windows-dev/Capture-Window.ps1`：`PrintWindow` 抓窗口，不抢焦点；Vulkan 窗口可能返回旧帧，状态确认以桌面抓图为准。
+
+### 12.4 构建环境
+
+- 仓库路径 `D:\workspace\Diablo(fegnjl)` 含括号，`settingsgen` 的 cmd 命令行会被截断；用 junction `D:\workspace\Diablo-kbm` 构建。
+- OpenSSL 外部工程在 `-j18` 下会因依赖文件竞争失败；用 `make -j1 build_libs` 补跑后，整体构建可继续。
+- 构建产物：`out/windows/build-kbm/scarletnx.exe`。
+
+### 12.5 A+ 鼠标层（interim，不是原生 PC 输入）
+
+已在 `0002-mouse-steer.patch` 实现并验证：
+
+- `mouse_steer=1`：鼠标相对窗口中心的方向和距离驱动 1P 左摇杆；左键 A、右键 B、中键 X、侧键 Y/L；开启时鼠标不再当触摸屏。
+- 主菜单：左键确认“继续”，进入第一章角色（截图 `out/windows/kbm/b2/15-after-postclick.png`、`16-ingame.png`）。
+- 游戏内：鼠标移到右下，角色向东南移动（`27-mouse-se.png`）。
+- 暂停菜单：B 可关闭；但菜单导航是 D-pad 边沿触发，持续偏转的左摇杆只能移动一格，鼠标不能像指针一样逐项选择。这是 A+ 的硬限制，也是继续做原生 UI 注入的理由。
+
+原生 B3 仍缺：UI VM 的事件入口/上下文，以及运行时内游戏线程调用桥。A+ 只作为可玩兜底，不算原生交付。
