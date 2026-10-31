@@ -85,10 +85,10 @@ index aa5e08c..51938b2 100644
         game's blocks are arm.c's, and its hints are A32 block keys the JIT must not warm-compile */
 diff --git a/src/nx/runtime/native_input.c b/src/nx/runtime/native_input.c
 new file mode 100644
-index 0000000..bcc6611
+index 0000000..4fe9ed6
 --- /dev/null
 +++ b/src/nx/runtime/native_input.c
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,124 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later
 +   Copyright 2026 the ScarletNX contributors */
 +#include "nx/runtime/native_input.h"
@@ -99,6 +99,7 @@ index 0000000..bcc6611
 +#include "nx/runtime/platform/log.h"
 +#include "nx/memory/mem.h"
 +#include "common/filesystem/host.h"
++#include <stdlib.h>
 +#include <string.h>
 +
 +/* the game's djb2 (h = h * 33 + c) and the UI_HUD_ClickPredicate string: a pure
@@ -113,6 +114,7 @@ index 0000000..bcc6611
 +static u64 g_stack_top;
 +static int g_selftest_done;
 +static int g_busy;
++static int g_test_ui; /* SNX_NATIVE_TEST=1: queue one UIConsole_MainMenu_Accept call */
 +static PMutex g_lock = PMUTEX_INIT;
 +static int g_have;
 +static u64 g_pc;
@@ -158,14 +160,21 @@ index 0000000..bcc6611
 +        return;
 +    }
 +    g_stack_top = base + NATIVE_STACK_SIZE - 0x100;
-+    LOG("native: bridge ready (stack %llx)\n", (unsigned long long)g_stack_top);
++    g_test_ui = getenv("SNX_NATIVE_TEST") != NULL;
++    LOG("native: bridge ready (stack %llx%s)\n", (unsigned long long)g_stack_top, g_test_ui ? ", test UI" : "");
 +}
 +
 +void native_input_tick(void) {
-+    /* The self-test is off until its target is confirmed: the first run reached the game's code and returned, but the
-+       djb2 value did not match, and writing a test string through g_mem at a kmem_alloc address crashed another thread.
-+       Keep the bridge dormant; a UI action is queued here once B3 has a verified entry point. */
-+    (void)g_stack_top;
++    /* Off by default. With SNX_NATIVE_TEST=1, once the game has shown 3000 frames, queue one call to the runtime's
++       UIConsole_MainMenu_Accept (0x8366870) with x0=0, x1=0: a probe of the handler's real arguments. */
++    u64 args[8] = {0, 0, 0, 0, 0, 0, 0, 0};
++    static int queued;
++    if (!g_test_ui || queued || !g_stack_top) return;
++    if (__atomic_load_n(&g_frames, __ATOMIC_RELAXED) < 3000) return;
++    if (native_input_queue(0x8366870, args)) {
++        queued = 1;
++        LOG("native: UI accept probe queued after %d frames\n", g_frames);
++    }
 +}
 +
 +void native_input_run(CPU* c) {
@@ -198,6 +207,9 @@ index 0000000..bcc6611
 +        u32 got = (u32)n.x[0];
 +        g_selftest_done = 1;
 +        LOG("native: djb2('A') self-test %u (want 65), steps %d%s\n", got, steps, got == 65 ? "" : " MISMATCH");
++    } else {
++        LOG("native: call %llx returned, steps %d, x0=%llx\n", (unsigned long long)pc, steps,
++            (unsigned long long)n.x[0]);
 +    }
 +    g_busy = 0;
 +}
