@@ -107,6 +107,12 @@ module offset `0x1874720`):
 python tools/d3-re/dump_ui_table.py --table-offset 0x1874720 --game-script "5000:1,15000:1,25000:1,35000:1,45000:400" --spawn-wait 55
 ```
 
+Dump the Power script-function table from the fixed ELF:
+
+```powershell
+python tools/d3-re/dump_script_table.py --filter Cursor
+```
+
 Hook guest functions and post a key through the game window:
 
 ```powershell

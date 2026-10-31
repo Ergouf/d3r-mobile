@@ -230,13 +230,85 @@ guest 0x9874720:
 - 已确认 `0x81fb910`、`0x8366870`、`0x81fb920` 等 UI handler 是 AOT 函数。
 - `FUN_0039cdb0`（旧名 `FUN_0039ceb0`）与 `FUN_003cc4c0`（旧名 `FUN_003cc5c0`）在当前运行中 `disp = 0`，说明它们没有被编译/执行，可能是未使用或已内联路径。
 
+### 9.6 Power 脚本函数表（已定位）
+
+在 fixed ELF 的 module offset `0xd69d00` 找到脚本函数表，条目 `0x30` 字节：
+
+```c
+struct ScriptFn {          // 0x30 bytes
+    u32 name_off;          // +0x00, module-relative string offset
+    u32 pad;
+    u64 runtime_slot;      // +0x08, BSS slot, filled with absolute function ptr
+    u32 flags;             // +0x10, 0x403
+    u32 pad;
+    u64 func_off;          // +0x18, module-relative function offset
+    u64 next_name_slot;     // +0x20
+    u32 flags2;            // +0x28, 0x403
+    u32 pad;
+};
+```
+
+函数绝对地址：
+
+```text
+guest = 0x8005000 + func_off
+```
+
+当前解析到 `2426` 条有效条目。已确认的关键函数：
+
+| 名称 | func_off | 绝对 guest |
+| --- | --- | --- |
+| `PowerCursorSnapToGround` | `0x8ea220` | `0x88ef220` |
+| `PowerCursorSetToActor` | `0x8ea4c0` | `0x88ef4c0` |
+| `PowerCursorSetToOpenLocationNearActor` | `0x8ea8e0` | `0x88ef8e0` |
+| `PowerCursorSetToOpenLocationNearCursor` | `0x8eac10` | `0x88f0c10` |
+| `PowerCursorSetToLeftStick` | `0x914370` | `0x8919370` |
+| `PowerCursorSetToRightStick` | `0x9143e0` | `0x89193e0` |
+
+`PowerCursorSetToOpenLocationNearCursor` 的反编译签名：
+
+```c
+// 2 args:  (int cursorIndex1, int cursorIndex2)
+// 3 args:  (int cursorIndex1, int cursorIndex2, actor)
+int func(arglist);
+// -> FUN_009c3f50(index1, index2, actor_or_0)
+```
+
+它内部按索引查 `+0x170` 的 cursor 数组（数量在 `+0x180`），不是直接吃屏幕坐标。因此它更接近“把光标设到两个 cursor 附近的空地”，不是“鼠标点地面”。
+
+脚本参数对象格式（`FUN_00b196e0` / `FUN_00b19f80` / `FUN_00b1a2b0`）：
+
+```c
+struct ScriptArgList {   // x0
+    u64 unk0;            // +0x00
+    u64 unk8;            // +0x08
+    ScriptArg* begin;    // +0x10
+    ScriptArg* end;      // +0x18
+};
+struct ScriptArg {       // 16 bytes each
+    double number;       // +0x00
+    u32 type;            // +0x08, 3 = number
+    u32 pad;
+};
+// argc = (end - begin) / 16
+```
+
+这意味着可以构造参数对象直接调用这些脚本函数；但 `SetToOpenLocationNearCursor` 的两个整数是 **cursor 索引**，不是屏幕坐标。
+
+工具：
+
+```powershell
+python tools/d3-re/dump_script_table.py --filter Cursor
+```
+
 ## 10. 下一步（B1b 剩余 / B2 入口）
 
 1. 找 PC UI 命令分发器：`UI_HUD_ClickPredicate` 表项由谁调用、如何准备 `x19/x20` 和事件参数。
 2. 追 `FUN_003dafb0` 的状态机入口，确认 `0x83db4e0` 的调用条件；目标是用 UI 命令注入一次“HUD 点击”。
-3. 找世界点击入口：优先看 `PowerCursor*`、`ActionBinding`、HUD 点击后的动作分发；`LeftClickToMove` 目前只是字符串 ID `0x6d7`。
-4. 在不写游戏内存的前提下，先做“调用 UI 命令 + 读结果”的探针。
-5. 完成 B1b 后提交，再进 B2 的 `input_native=0` 运行时骨架。
+3. 利用已定位的脚本函数表，构造 `ScriptArgList` 调用 `PowerCursor*` 函数，验证 Power cursor 是否可设置、是否能触发角色移动/交互。
+4. 找屏幕坐标 → world/cursor 的转换函数；`SetToOpenLocationNearCursor` 的两个整数是 cursor 索引，不能直接当鼠标坐标。
+5. 找 `LeftClickToMove` 的 action binding 表：它是字符串 ID `0x6d7`，动作表可能存 ID/哈希，而不是字符串指针。
+6. 完成后进 B2 的 `input_native=0` 运行时骨架。
 
 ## 11. 安全
 
