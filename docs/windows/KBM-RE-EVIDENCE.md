@@ -529,3 +529,29 @@ vtable 槽 `0x83b7fc0` 是模拟量输入处理：
 它说明 UI 对象的输入方法是 `(this, 输入参数)` 形式，并通过 vtable 继续委托；但 `+0xb0` 是对象 vtable 的槽，不是回调槽。菜单的“按键事件”入口仍需继续找同类方法中接收按键/事件码的那个。
 
 当前功能验收不变：A+ 键鼠可点击开始菜单并进入第一章；原生 PC UI 层仍未完成。
+
+## 15. 原生 UI 调用桥首次成功执行（2026-11-01）
+
+`native_input` 桥 + `sdl3.c` 的调试热键让游戏线程执行了真实 UI handler：
+
+| 热键 | 调用 | 结果 |
+| --- | --- | --- |
+| F8 | `UIConsole_MainMenu_Accept(0x8366870, x0=0, x1=0)` | 返回，`steps=1`，`x0=0`，无崩溃、无可见变化 |
+| F9 | `UIHeroSelect_PlayHero(0x835c880, x0=0, x1=0)` | 返回，`steps=1`，`x0=0`，无崩溃、无可见变化 |
+
+日志：
+
+```text
+native: F8 queued UIConsole_MainMenu_Accept(0,0)
+native: call 8366870 returned, steps 1, x0=0
+native: F9 queued UIHeroSelect_PlayHero(0,0)
+native: call 835c880 returned, steps 1, x0=0
+```
+
+这说明：
+
+- 运行时内、游戏线程、独立 guest 栈的调用桥**可用**；
+- UI handler 可以用 `x0=0` 安全调用，但不会产生动作，说明它需要真实的控件/上下文参数；
+- 开始画面“继续”不走 `UIConsole_MainMenu_Accept` / `UIHeroSelect_PlayHero`（hook 未命中），仍需找到它真正的回调/脚本命令。
+
+热键默认只是调试入口，不影响正常键鼠；`mouse_steer` 的 A+ 路径仍是当前可玩方案。
