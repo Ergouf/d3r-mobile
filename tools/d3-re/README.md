@@ -24,12 +24,20 @@ Expected input: `local/assets/exefs_update/main.nso0` (build
 ## 2. Build a Ghidra-loadable AArch64 ELF
 
 ```powershell
-python tools/d3-re/build_main_elf.py main.bin --out out/windows/kbm/b0/d3_main.elf
+python tools/d3-re/build_main_elf.py main.bin --out out/windows/kbm/b0/d3_main_fixed.elf
 ```
 
-The NSO's 0x100-byte header is not part of the guest image. The script lays out
-`.text` / `.rodata` / `.data` / `.bss` at the NSO's memory offsets so addresses
-line up with the runtime's guest addresses.
+The `hactool --uncompressed` image keeps the NSO0 header, and each segment's
+file offset is normally its memory offset plus 0x100. The script parses the
+header and places `.text` / `.rodata` / `.data` / `.bss` at their **memory**
+offsets, so a Ghidra address is the module-relative offset:
+
+```text
+Ghidra address = absolute guest address - 0x8005000
+```
+
+The older `d3_main.elf` (built without stripping the header) was shifted by
+0x100; use `d3_main_fixed.elf` for all new analysis.
 
 ## 3. Read guest state with Frida
 
@@ -74,13 +82,58 @@ runs `FindUiRefs.java` afterwards.
 
 ```powershell
 .\tools\d3-re\ghidra_analyze.ps1 `
-  -Elf .\out\windows\kbm\b0\d3_main.elf `
+  -Elf .\out\windows\kbm\b0\d3_main_fixed.elf `
   -GhidraHome C:\tools\ghidra_12.1.4_PUBLIC `
   -JavaHome C:\tools\jdk-21
 ```
 
 The B0 acceptance is the Frida probe plus the ELF; the Ghidra run is the B1
 input. Do not treat a partial Ghidra analysis as evidence of absence.
+
+## 5. B1b runtime probes
+
+All probes are read-only; they spawn a throwaway game unless `--pid` is given.
+
+Dump the Console UI callback table:
+
+```powershell
+python tools/d3-re/dump_ui_table.py --json out/windows/kbm/b1/ui_table.json
+```
+
+Dump another 24-byte-entry table (for example the transient PC UI table seen at
+module offset `0x1874720`):
+
+```powershell
+python tools/d3-re/dump_ui_table.py --table-offset 0x1874720 --game-script "5000:1,15000:1,25000:1,35000:1,45000:400" --spawn-wait 55
+```
+
+Hook guest functions and post a key through the game window:
+
+```powershell
+python tools/d3-re/trace_ui.py --guest 0x81fb910 --key space
+```
+
+Watch inventory handlers while the game loads:
+
+```powershell
+python tools\d3-re\probe_inventory.py --seconds 58 --post-at 48
+```
+
+Resolve a guest address through `CPU.disp` (AOT/JIT host function) and inspect
+`CPU.mem`:
+
+```powershell
+python tools\d3-re\find_cpu.py --guest 0x8366870 --guest 0x81fb910
+```
+
+Notes:
+
+- UI handlers in the tables commonly point into a function, not to its entry;
+  `DumpAt.java` prints the containing function when possible.
+- `PostMessage(WM_KEYDOWN/UP)` works even when the game window is not focused.
+- `CPU.mem + absolute_guest_address` reads guest memory; module-relative
+  addresses must be offset by `0x8005000`.
+
 
 ## Safety
 

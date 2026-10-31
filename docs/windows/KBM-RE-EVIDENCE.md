@@ -69,17 +69,17 @@ D3 的 main 模块**没有**导入/调用 `GetMouseStates` / `GetKeyboardStates`
 hactool -t nso --uncompressed=main.bin main.nso0
 
 # 2) 生成 Ghidra 可加载 ELF
-python tools/d3-re/build_main_elf.py main.bin --out out/windows/kbm/b0/d3_main.elf
+python tools/d3-re/build_main_elf.py main.bin --out out/windows/kbm/b0/d3_main_fixed.elf
 
 # 3) Frida 读 guest 字符串（spawn 一个临时进程，读完即杀）
 python tools/d3-re/frida_probe.py --json
 
 # 4) Ghidra（8G 堆）
-.\tools\d3-re\ghidra_analyze.ps1 -Elf .\out\windows\kbm\b0\d3_main.elf `
+.\tools\d3-re\ghidra_analyze.ps1 -Elf .\out\windows\kbm\b0\d3_main_fixed.elf `
   -GhidraHome <ghidra_12.1.4_PUBLIC> -JavaHome <jdk-21>
 ```
 
-B0 验收：`frida_probe.py --json` 能打印上表 guest 地址和字符串值；`d3_main.elf` 能被 `llvm-readelf` 识别为 AArch64 ELF。
+B0 验收：`frida_probe.py --json` 能打印上表 guest 地址和字符串值；`d3_main_fixed.elf` 能被 `llvm-readelf` 识别为 AArch64 ELF。
 
 ## 6. 未完成 / B1 入口
 
@@ -120,14 +120,125 @@ struct UiEntry {          // 0x18 bytes
 python tools/d3-re/dump_ui_table.py --json out/windows/kbm/b1/ui_table.json
 ```
 
-## 8. 下一步（B1 剩余 / B2 入口）
+## 8. 地址基线修正（B1b，重要）
 
-- 找 `LeftClickToMove` / `RightClickAttack` 的**动作表**；它们不在上面的 UI 回调表里。
-- 找 UI 根控件/Widget 查询函数：Ghidra 已见 `FUN_00347df0`、`FUN_00330ee0`、`FUN_00330560`、`FUN_003327b0` 等路径查找候选；下一步确认签名。
-- 用 Frida 读 widget 树，验证 `FUN_0039ceb0` 的 `+0xa8/+0xb0` handler 何时被调用。
-- 在不写游戏内存的前提下，先做“读 widget + 读 handler”探针。
+之前的 `d3_main.elf` 直接从带 `0x100` 字节 NSO 头的镜像构建，导致：
 
-## 9. 安全
+- Ghidra 代码地址 = 真实 guest 地址 **+0x100**
+- Ghidra 反编译里的字符串整体偏移，字符串引用可能指向错误的字节
+- 旧文档里的函数地址不能直接当作 guest 地址
+
+已修正 `tools/d3-re/build_main_elf.py`：按 NSO 头解析 `text/ro/data` 的 `file_off` 与 `mem_off`，生成：
+
+- `out/windows/kbm/b0/d3_main_fixed.elf`
+- SHA-256 `B397AF8FC1389A30B8D051DE524E0DA83B4E03345604EBAB4376A34CF20D9DB0`
+- 新 Ghidra 项目 `D3MainFixed`，分析完成：`2273` 条相关字符串、`2942` 条引用
+
+修正后的地址关系：
+
+```text
+Ghidra 地址 = guest 模块内偏移
+绝对 guest 地址 = 0x8005000 + Ghidra 地址
+```
+
+例：
+
+- `FUN_003bad24` → 绝对 guest `0x83bad24`
+- `FUN_003b9820` → 绝对 guest `0x83b9820`
+- UI handler `0x81fb910` → Ghidra `0x1fb910`
+
+## 9. B1b 新发现
+
+### 9.1 `LeftClickToMove` 只是字符串表条目
+
+修正后 Ghidra 中只有一处引用：
+
+```text
+STRING 0xdc485b "LeftClickToMove"
+  REF 0x4e3154  FUN_004d5380
+```
+
+`FUN_004d5380` 是全局字符串表初始化器，把 `LeftClickToMove` 以 ID `0x6d7` 注册：
+
+```c
+FUN_004e5e50(3, 2, 0x6d7, 0x3f, "LeftClickToMove", 2);
+```
+
+结论：`LeftClickToMove` 不是动作函数入口，直接找字符串 xref 找不到动作分发。
+
+### 9.2 `UI_HUD_ClickPredicate` 的运行时表项
+
+`UI_HUD_ClickPredicate` 在 guest `0x8dcf212`。运行时在 PC UI 表里找到一条 24 字节表项：
+
+```text
+guest 0x9874720:
+  +0x00 name    = 0x8dcf212  "UI_HUD_ClickPredicate"
+  +0x08 hash    = 0x908be1d4  (djb2)
+  +0x10 handler = 0x83db4e0
+```
+
+该表项所在表是**临时/按屏幕存在**的：HUD 不活跃时，同一地址会变成 `0xffffffff` 空桶标记。表项格式与 Console UI 表相同（24 字节 `{name, hash, handler}`）。
+
+`0x83db4e0` 不是函数入口，而是 `FUN_003dafb0` 内部的一个 continuation block（状态机/命令块），依赖调用方预置的 `x19/x20` 等寄存器。不能直接当普通函数调用。
+
+同表后续条目还有：
+
+- `UI_InvOpen_OnClick` handler `0x83db500`
+- 其他若干 UI 命令/字符串
+
+这说明游戏确实有 **PC UI 命令/回调表**，`UI_HUD_ClickPredicate` 是其中一个命令/回调。
+
+### 9.3 `%s_Mouseover` 是控件状态路径，不是鼠标分发
+
+`%s_Mouseover` 在 guest `0x8dc41be`，引用在 `FUN_003f6470`。该函数实际构造：
+
+```c
+"Tab_Stash%02d"
+"%s_Unselected"
+"%s_Mouseover"
+"%s_Selected"
+```
+
+然后调用 `FUN_003a2c40(widget, unselected, mouseover, selected)` 设置控件的三种视觉状态路径。它是**控件状态路径设置器**，不是鼠标事件处理器。
+
+### 9.4 动态输入与 UI 状态机
+
+- `PostMessage(WM_KEYDOWN/UP)` 到游戏窗口可以稳定驱动 UI，即使窗口不在前台。
+- 物品栏的 `UIInventory_OnButton1`（guest `0x81fb910`）是 `FUN_001fb4d0` 内部的状态机 continuation block，任意按键都会进入同一个块。
+- 抓到调用链（按最近的 AOT 入口映射）：
+
+```text
+0x81fb910  (handler block)
+  <- 0x83bad24 附近
+  <- 0x83bae00 附近
+  <- 0x8331d50
+  <- 0x82b9120
+  <- 0x82b9724
+  <- 0x8046650
+  <- 0x84cda68
+  <- 0x8005a1c
+```
+
+- `FUN_003b9820(key, player)` 比较键码与玩家绑定字段 `+0x134c/+0x135c/...`。
+- `FUN_003b8630` 遍历 `DAT_0186ef50 + 0x30` 的按键事件链表并调用 `FUN_00419c80`。
+- 这条链属于**按键绑定/设置界面**，不是世界动作执行层。
+
+### 9.5 CPU / JIT dispatch 探针
+
+- `CPU.mem` 偏移 `0x350`，是 guest 地址 0 的宿主基址；`mem + 绝对 guest 地址` 可读模块内存。
+- `CPU.disp` 偏移 `0x358`，`code_lo/code_hi` 偏移 `0x360/0x368`，可查任意 guest 地址当前实际 host 函数。
+- 已确认 `0x81fb910`、`0x8366870`、`0x81fb920` 等 UI handler 是 AOT 函数。
+- `FUN_0039cdb0`（旧名 `FUN_0039ceb0`）与 `FUN_003cc4c0`（旧名 `FUN_003cc5c0`）在当前运行中 `disp = 0`，说明它们没有被编译/执行，可能是未使用或已内联路径。
+
+## 10. 下一步（B1b 剩余 / B2 入口）
+
+1. 找 PC UI 命令分发器：`UI_HUD_ClickPredicate` 表项由谁调用、如何准备 `x19/x20` 和事件参数。
+2. 追 `FUN_003dafb0` 的状态机入口，确认 `0x83db4e0` 的调用条件；目标是用 UI 命令注入一次“HUD 点击”。
+3. 找世界点击入口：优先看 `PowerCursor*`、`ActionBinding`、HUD 点击后的动作分发；`LeftClickToMove` 目前只是字符串 ID `0x6d7`。
+4. 在不写游戏内存的前提下，先做“调用 UI 命令 + 读结果”的探针。
+5. 完成 B1b 后提交，再进 B2 的 `input_native=0` 运行时骨架。
+
+## 11. 安全
 
 - 未写存档、未改 `_code.dll`、未改安装目录 exe。
 - Frida 探针默认 spawn 后 kill；`--keep` 才会留下进程。

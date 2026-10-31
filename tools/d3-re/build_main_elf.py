@@ -5,9 +5,13 @@ hactool --uncompressed is the supported way to produce the input image:
 
   hactool -t nso --uncompressed=main.bin main.nso0
 
-This wrapper exists because Ghidra imports an ELF with program headers far more
-reliably than a raw NSO. It does not modify the game; the output is analysis
-scratch data and belongs under out/windows/kbm/.
+The image keeps the NSO0 header, and each segment's file offset is not its
+memory offset (text file offset is normally 0x100).  The ELF must place each
+segment at the *memory* offset, otherwise Ghidra sees every address shifted by
+0x100 and every string reference points at the wrong bytes.
+
+This wrapper only reads the game file; its output is analysis scratch data and
+belongs under out/windows/kbm/.
 """
 from __future__ import annotations
 
@@ -16,32 +20,59 @@ import struct
 from pathlib import Path
 
 PAGE = 0x1000
-TEXT_MEM = 0
-RO_MEM = 0xC73000
-DATA_MEM = 0x1098000
 
 
 def align(value: int, alignment: int = PAGE) -> int:
     return (value + alignment - 1) & ~(alignment - 1)
 
 
-def build(image: bytes, out: Path) -> None:
-    text_size = 0xC72B90
-    ro_size = 0x4249C4
-    data_size = 0xC4A14
-    bss_size = 0x94A000
-    if len(image) < DATA_MEM + data_size:
-        raise SystemExit(f"image is too small: {len(image):#x}")
+def read_header(image: bytes) -> dict:
+    if image[:4] != b"NSO0":
+        raise SystemExit("input is not an NSO0 image (expected hactool --uncompressed output)")
+    if len(image) < 0x100:
+        raise SystemExit("input is shorter than the NSO header")
+    flags = struct.unpack_from("<I", image, 0x0C)[0]
+    text_file, text_mem, text_size = struct.unpack_from("<III", image, 0x10)
+    mod_name = struct.unpack_from("<I", image, 0x1C)[0]
+    ro_file, ro_mem, ro_size = struct.unpack_from("<III", image, 0x20)
+    # The Switch NSO header has one reserved word at 0x2C before the data
+    # segment's file/memory/size fields (0x30/0x34/0x38); bss_size is 0x3C.
+    data_file, data_mem, data_size = struct.unpack_from("<III", image, 0x30)
+    bss_size = struct.unpack_from("<I", image, 0x3C)[0]
+    return {
+        "flags": flags,
+        "text": (text_file, text_mem, text_size),
+        "ro": (ro_file, ro_mem, ro_size),
+        "data": (data_file, data_mem, data_size),
+        "bss_size": bss_size,
+        "mod_name": mod_name,
+    }
 
-    text_file = 0x1000
-    ro_file = align(text_file + text_size)
-    data_file = align(ro_file + ro_size)
+
+def build(image: bytes, out: Path) -> None:
+    h = read_header(image)
+    segments = []
+    for name in ("text", "ro", "data"):
+        file_off, mem_off, size = h[name]
+        if file_off + size > len(image):
+            raise SystemExit(f"{name} segment lies outside the image: {file_off:#x}+{size:#x} > {len(image):#x}")
+        segments.append((name, file_off, mem_off, size))
+    bss_mem = h["data"][1] + h["data"][2]
+    bss_size = h["bss_size"]
+
+    # Lay the segments out in the ELF file at page-aligned offsets, keeping the
+    # program headers' virtual addresses equal to the NSO memory offsets.
+    file_cursor = PAGE
+    layout = []
+    for name, file_off, mem_off, size in segments:
+        file_cursor = align(file_cursor)
+        layout.append((name, file_off, mem_off, size, file_cursor))
+        file_cursor += size
     shstr = b"\0.text\0.rodata\0.data\0.bss\0.shstrtab\0"
-    shstr_file = align(data_file + data_size)
+    shstr_file = align(file_cursor)
     total = shstr_file + len(shstr)
     buf = bytearray(total)
 
-    # ELF64 header, little endian, ET_EXEC, AArch64.
     ident = b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8)
     phoff = 64
     phnum = 4
@@ -51,17 +82,17 @@ def build(image: bytes, out: Path) -> None:
         "<16sHHIQQQIHHHHHH", buf, 0, ident, 2, 183, 1, 0, phoff, shoff, 0,
         64, 56, phnum, 64, shnum, 5,
     )
-    buf[text_file:text_file + text_size] = image[:text_size]
-    buf[ro_file:ro_file + ro_size] = image[RO_MEM:RO_MEM + ro_size]
-    buf[data_file:data_file + data_size] = image[DATA_MEM:DATA_MEM + data_size]
+
+    for name, file_off, mem_off, size, elf_off in layout:
+        buf[elf_off:elf_off + size] = image[file_off:file_off + size]
+
     buf[shstr_file:shstr_file + len(shstr)] = shstr
 
-    phdrs = [
-        (1, 5, text_file, TEXT_MEM, TEXT_MEM, text_size, text_size, PAGE),
-        (1, 4, ro_file, RO_MEM, RO_MEM, ro_size, ro_size, PAGE),
-        (1, 6, data_file, DATA_MEM, DATA_MEM, data_size, data_size, PAGE),
-        (1, 6, 0, DATA_MEM + data_size, DATA_MEM + data_size, 0, bss_size, PAGE),
-    ]
+    phdrs = []
+    for name, file_off, mem_off, size, elf_off in layout:
+        flags = {"text": 5, "ro": 4, "data": 6}[name]
+        phdrs.append((1, flags, elf_off, mem_off, mem_off, size, size, PAGE))
+    phdrs.append((1, 6, 0, bss_mem, bss_mem, 0, bss_size, PAGE))
     for i, ph in enumerate(phdrs):
         struct.pack_into("<IIQQQQQQ", buf, phoff + i * 56, *ph)
 
@@ -71,10 +102,10 @@ def build(image: bytes, out: Path) -> None:
 
     sections = [
         sh(0, 0, 0, 0, 0, 0),
-        sh(1, 1, 6, TEXT_MEM, text_file, text_size),
-        sh(7, 1, 2, RO_MEM, ro_file, ro_size),
-        sh(15, 1, 3, DATA_MEM, data_file, data_size),
-        sh(21, 8, 3, DATA_MEM + data_size, 0, bss_size),
+        sh(1, 1, 6, h["text"][1], layout[0][4], h["text"][2]),
+        sh(7, 1, 2, h["ro"][1], layout[1][4], h["ro"][2]),
+        sh(15, 1, 3, h["data"][1], layout[2][4], h["data"][2]),
+        sh(21, 8, 3, bss_mem, 0, bss_size),
         sh(26, 3, 0, 0, shstr_file, len(shstr)),
     ]
     for i, section in enumerate(sections):
@@ -83,8 +114,9 @@ def build(image: bytes, out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(buf)
     print(f"wrote {out} ({len(buf)} bytes)")
-    print(f"text={TEXT_MEM:#x}+{text_size:#x} ro={RO_MEM:#x}+{ro_size:#x} "
-          f"data={DATA_MEM:#x}+{data_size:#x} bss={DATA_MEM + data_size:#x}+{bss_size:#x}")
+    for name, file_off, mem_off, size, elf_off in layout:
+        print(f"{name:4s} file={file_off:#x} mem={mem_off:#x} size={size:#x} elf_off={elf_off:#x}")
+    print(f"bss  mem={bss_mem:#x} size={bss_size:#x}")
 
 
 def main() -> None:

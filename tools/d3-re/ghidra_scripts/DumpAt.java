@@ -23,7 +23,7 @@ public class DumpAt extends GhidraScript {
         for (Function callee : f.getCalledFunctions(monitor)) println("  " + callee.getName() + " @" + callee.getEntryPoint());
         DecompInterface ifc = new DecompInterface();
         ifc.openProgram(currentProgram);
-        DecompileResults res = ifc.decompileFunction(f, 120, monitor);
+        DecompileResults res = ifc.decompileFunction(f, 600, monitor);
         if (res != null && res.decompileCompleted()) {
             println("--- C ---");
             println(res.getDecompiledFunction().getC());

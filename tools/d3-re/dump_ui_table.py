@@ -72,22 +72,30 @@ def main() -> None:
     parser.add_argument("--cwd", default=DEFAULT_CWD)
     parser.add_argument("--json", type=Path)
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--table-offset", type=lambda s: int(s, 0), default=TABLE_OFFSET)
+    parser.add_argument("--max-entries", type=int, default=MAX_ENTRIES)
+    parser.add_argument("--spawn-wait", type=float, default=10.0)
+    parser.add_argument("--game-script", default=None, help="extra runtime --script= value for the spawned game")
     args = parser.parse_args()
 
     device = frida.get_local_device()
     pid = args.pid
     spawned = False
     if pid is None:
-        pid = device.spawn([args.exe], cwd=args.cwd)
+        argv = [args.exe]
+        if args.game_script:
+            argv.append(f"--script={args.game_script}")
+            argv.append("--press_len=300")
+        pid = device.spawn(argv, cwd=args.cwd)
         spawned = True
         device.resume(pid)
-        time.sleep(10)
+        time.sleep(args.spawn_wait)
 
     session = device.attach(pid)
     script = session.create_script(
-        JS.replace("TABLE_OFFSET", hex(TABLE_OFFSET))
+        JS.replace("TABLE_OFFSET", hex(args.table_offset))
           .replace("ENTRY_SIZE", hex(ENTRY_SIZE))
-          .replace("MAX_ENTRIES", str(MAX_ENTRIES))
+          .replace("MAX_ENTRIES", str(args.max_entries))
     )
     result = []
     script.on("message", lambda message, data: result.append(message.get("payload", {})))
