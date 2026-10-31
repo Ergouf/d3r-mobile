@@ -414,3 +414,43 @@ BEX64, 0xc0000409, faulting module unknown, offset 0x20421f7ca11
 2. 再左键一次 → 读条进入新崔斯特姆（第一章），没有出现“英雄资料”弹窗。
 
 截图：`out/windows/kbm/b2/70-click1.png`（主菜单）、`71-click2.png`（新崔斯特姆）。这仍是 A+（鼠标→A/左摇杆）路径，不是原生 PC UI 点击。
+
+## 14. 运行时代码 dump 与 UI handler 重新分析（2026-11-01）
+
+### 14.1 工具
+
+`tools/d3-re/dump_runtime_code.py --pid <pid> --out out/windows/kbm/b2/runtime` 经 Frida 从运行时 `g_mem`（`snx_module` 的 `main.base` 加上各段偏移）直接 dump：
+
+- `runtime_text.bin`（13,052,816 字节，guest `0x8005000`）；
+- `runtime_rodata.bin`；
+- `runtime_data.bin`；
+- `runtime_info.json`。
+
+`g_mem` 的符号偏移按当前 `scarletnx.exe` 取（`llvm-nm ... | findstr " g_mem$"`，本次 `0x17aef20`）；换构建要重取。
+
+### 14.2 结论：UI handler 是可调用函数
+
+运行时 `0x8366870`（`UIConsole_MainMenu_Accept`）的实际代码：
+
+```text
+0x8366870  sub sp, sp, #0x160
+0x8366874  stp x28, x23, [sp, #0x120]
+...
+0x8366888  mov w19, w1          ; 第二参数（玩家/按钮）
+0x836688c  bl #0x8170130
+0x83668ac  bl #0x832d180
+0x83668e0  ...
+0x8366924  br x8                ; 按 [ctx+0x1e0] 的状态跳转
+```
+
+它是**真正的函数入口**，不是状态机中段。第 12.1 节“handler 是 continuation block”的结论来自与运行时不一致的 fixed ELF，应作废；以本节和 `g_mem` dump 为准。
+
+UI 表仍然有效：`0x987bf20` 的条目 6 是 `UIConsole_MainMenu_Accept`，handler `0x8366870`，24 字节一条。
+
+### 14.3 当前阻塞
+
+在 AOT entry 上 hook `0x8366870`，在主菜单按 A 没有被命中；UI 系统很可能通过 JIT 后的 `CPU.disp` 槽调用，而不是 AOT entry。下一步：
+
+1. 用 `find_cpu.py` 找到游戏线程的 `CPU.disp`，解析 `disp[(0x8366870 - code_lo) >> 2]` 的实际 host 函数；
+2. hook 该 host 函数，在主菜单按 A，拿到调用栈和参数；
+3. 确认参数（`x0` 控件/上下文，`w1` 玩家或按钮）后，用 `native_input` 桥调用。
