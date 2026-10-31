@@ -1,8 +1,8 @@
 // Find UI/action strings and their references in the current program.
 // Run through tools/d3-re/ghidra_analyze.ps1.
 import ghidra.app.script.GhidraScript;
-import ghidra.program.model.data.Data;
-import ghidra.program.model.data.DataIterator;
+import ghidra.program.model.listing.Data;
+import ghidra.program.model.listing.DataIterator;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.symbol.Reference;

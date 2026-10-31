@@ -91,7 +91,43 @@ B0 验收：`frida_probe.py --json` 能打印上表 guest 地址和字符串值�
   - 键盘动作/文本输入。
 - 下一步是只读探针：先读全局/函数指针，不写游戏内存。
 
-## 7. 安全
+## 7. B1：UI 回调注册表（已定位）
+
+运行中的 UI 回调表在 guest `0x987bf20`（`main.base + 0x1876f20`，BSS），宿主视图偏移 `0x1876f20`。条目 24 字节：
+
+```c
+struct UiEntry {          // 0x18 bytes
+    const char* name;     // +0x00, guest pointer
+    u32 hash;             // +0x08
+    u32 pad;
+    void* handler;        // +0x10, guest code pointer
+};
+```
+
+已确认：
+
+- `FUN_00a49790` 是名字哈希：`h = h * 0x21 + c`（djb2，32 位）。
+- `FUN_003c9a70` 是启动时的表初始化器，写入 `0x1876f20` 起的条目。
+- `FUN_003cc5c0` 按名字哈希查表并返回 handler；调用者是 `FUN_0039ceb0` 和 `FUN_003b1e70`。
+- `FUN_0039ceb0` 把两个回调 handler 存到 widget 的 `+0xa8` / `+0xb0`；`FUN_003b1e70` 是 UI 更新/分发的候选。
+- 例：条目 1 `UIStackSplit_Console_OnAccept` 的 handler 是 `FUN_0022dc30`（guest `0x8232c50`）。
+- 运行时导出 328 条：`UIStackSplit_Console_*`、`UIConsole_MainMenu_*`、`UIInventory_*`、`UIHeroSelect_*` 等。
+- 当前表里**没有** `UIGameMenu_*` / `UIStartScreen_*` 这类 PC 回调；说明这个表是 Console UI 的注册表，PC 布局/回调需要 B7 再确认。
+
+复现：
+
+```powershell
+python tools/d3-re/dump_ui_table.py --json out/windows/kbm/b1/ui_table.json
+```
+
+## 8. 下一步（B1 剩余 / B2 入口）
+
+- 找 `LeftClickToMove` / `RightClickAttack` 的**动作表**；它们不在上面的 UI 回调表里。
+- 找 UI 根控件/Widget 查询函数：Ghidra 已见 `FUN_00347df0`、`FUN_00330ee0`、`FUN_00330560`、`FUN_003327b0` 等路径查找候选；下一步确认签名。
+- 用 Frida 读 widget 树，验证 `FUN_0039ceb0` 的 `+0xa8/+0xb0` handler 何时被调用。
+- 在不写游戏内存的前提下，先做“读 widget + 读 handler”探针。
+
+## 9. 安全
 
 - 未写存档、未改 `_code.dll`、未改安装目录 exe。
 - Frida 探针默认 spawn 后 kill；`--keep` 才会留下进程。
