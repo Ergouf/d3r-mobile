@@ -1,5 +1,7 @@
 # D3 原生键鼠：RE 证据（B0）
 
+> 2026-11-01 方法复核：第 16 节及 [KBM-METHOD-ASSESSMENT.md](KBM-METHOD-ASSESSMENT.md) 为当前结论。历史“fixed ELF text 不一致”来自基址换算错误；旧 hook ABI 与 xref 覆盖也存在缺陷，不再据旧零命中排除原生路线。历史实验原文保留。
+
 日期：2026-10-31。范围：Windows ScarletNX 运行时。B0 只做地址基线和探针，不改游戏/运行时。
 
 ## 1. 输入身份
@@ -555,3 +557,17 @@ native: call 835c880 returned, steps 1, x0=0
 - 开始画面“继续”不走 `UIConsole_MainMenu_Accept` / `UIHeroSelect_PlayHero`（hook 未命中），仍需找到它真正的回调/脚本命令。
 
 热键默认只是调试入口，不影响正常键鼠；`mouse_steer` 的 A+ 路径仍是当前可玩方案。
+
+## 16. 代码、工具与有限实机复核（2026-11-01）
+
+详见 [方法评估](KBM-METHOD-ASSESSMENT.md) 和更新后的 [交接](KBM-HANDOVER.md)。
+
+1. 新 dump 的 text 13,052,816 字节、rodata 4,344,260 字节，与当前 fixed ELF 对应节及 b2 dump 全部逐字节相同。旧比较把 main 基址 0x8005000 按 0x8000000 换算，偏了 0x5000；第 13.4 节的版本不匹配解释撤回。guest 0x8366870 的正确 ELF 模块偏移是 0x361870，确为函数序言。
+2. Windows x64 上 GuestFn 的 ABI 是 (CPU*, guest entry)。旧 trace_ui_all/disp/vtable 读取宿主 context.x0 会失败且消息处理会漏报；trace_ui_widgets 把 CPU* 当控件。第 14–15 节及原交接的零命中、参数/线程安全推断须按正确探针重审，不能直接作路线排除证据。
+3. 新观察器在 4 秒内捕获 UI 方法 0x83baa90 的 327 次调用，解码错误 0；得到有效对象、vtable、TLS、guest LR 与线程。后续对象过滤观测为 720 次总调用、240 次匹配，保存 2 个样本。此方法只是观测锚点，尚未确认鼠标事件入口。
+4. 旧 xref_runtime.py 在 0x800500c 停止，只扫 12 字节。修复后一次批量扫描 49.838 秒覆盖 13,052,816 字节，恢复 LeftClickToMove 的 1 处候选引用及方法 0x83baa90 的 11 处直接调用；已用动态 LR 0x83af070 对上 0x83af06c 的 BL。线性扫描不覆盖间接调用语义，不等同完整 CFG。
+5. 注册表 5,694 条目的指定对象查询耗 11–12 ms。主菜单对象在标题/片头也已注册，不能把注册表当当前可见按钮清单。
+6. Terra 实测的单次 Space 在宿主 keymap 中同毫秒按下/抬起，可能被帧采样抵消；一次片头点击没有可归因的菜单结果。主菜单、城镇与完整原生输入均未验收。
+7. 原生调用桥未验证 UI 主线程亲和性、跨线程串行化和实际返回判据；空参数返回仍不能证明业务功能安全。保留原生唯一方向，不退回手柄映射。
+
+本机证据位于 out/windows/kbm/assessment-20261101/；关键结果已纳入报告，原始 dump、JSON、截图不提交。

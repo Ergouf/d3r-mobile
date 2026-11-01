@@ -1,7 +1,48 @@
 # D3 native keyboard/mouse RE tools
 
-B0 workspace for the native keyboard/mouse investigation of Diablo III on the
-Windows ScarletNX runtime. Nothing here patches the game or writes save data.
+Native keyboard/mouse investigation of Diablo III on the Windows ScarletNX
+runtime. See docs/windows/KBM-METHOD-ASSESSMENT.md for the 2026-11-01 live audit.
+Only native mouse/keyboard semantics are in scope; no Npad mapping fallback.
+
+## Current workflow
+
+Start/connect Serena and activate the relevant source project before code work,
+as required by the repository AGENTS.md. The ignored reference/ScarletNX-src
+checkout must be activated separately for its symbols.
+
+All game/window launch, input and visual checks belong to GPT-6.1 Terra.
+Prefer attaching to an existing, version-checked PID. Historical tools below
+may spawn or send input; do not run those paths as read-only probes.
+
+Use the bounded observer instead of the old context/constructor tracers:
+
+```powershell
+python tools/d3-re/assess_runtime.py --pid <pid> --out out/windows/kbm/probe.json --name root.normallayer.consolestart_main --slots 19 --seconds 4
+python tools/d3-re/assess_runtime.py --pid <pid> --out out/windows/kbm/dump.json --dump
+python tools/d3-re/xref_runtime.py 0x83baa90 0x914f840 --json out/windows/kbm/xrefs.json
+```
+
+assess_runtime.py never sends UI input or calls game business functions. It
+temporarily instruments host code and detaches in finally; it records errors,
+runtime hashes, register context, thread identity, and observation counts.
+Use --object <guest-pointer> to filter GuestFn samples, and --keyboard only
+when coordinating one external input with Terra. RVA defaults are tied to the
+runtime SHA-256 in the handover; rederive them with llvm-nm after a rebuild.
+
+Important corrections:
+
+- The current fixed ELF text and rodata exactly match the runtime. The previous
+  mismatch claim subtracted 0x8000000 instead of the real main base 0x8005000.
+- GuestFn is (CPU*, guest_entry) on the x64 host. Read guest x0 from CPU.x[0],
+  and translate guest object memory through g_mem. Host context.x0 is absent.
+- trace_ui_all.py, trace_ui_disp.py and trace_ui_vtable.py have that wrong host
+  register assumption; trace_ui_widgets.py mistakes CPU* for a widget. Do not
+  treat their old missing hits or object samples as negative evidence.
+- xref_runtime.py now skips embedded undecodable data, handles memory operands
+  and reports coverage. The old implementation stopped after 12 bytes.
+- A same-poll key down/up can cancel before the runtime publishes held input.
+  An automation API returning success is not proof of a guest action.
+
 
 ## Prerequisites
 
@@ -134,8 +175,8 @@ python tools\d3-re\find_cpu.py --guest 0x8366870 --guest 0x81fb910
 
 Notes:
 
-- UI handlers in the tables commonly point into a function, not to its entry;
-  `DumpAt.java` prints the containing function when possible.
+- Handler entry/continuation claims from the old baseline are obsolete.
+  Inspect the correctly rebased bytes and prove the ABI/context for each target.
 - `PostMessage(WM_KEYDOWN/UP)` works even when the game window is not focused.
 - `CPU.mem + absolute_guest_address` reads guest memory; module-relative
   addresses must be offset by `0x8005000`.
@@ -151,8 +192,8 @@ python tools/d3-re/find_xrefs.py 0x3cc4c0 0x39cdb0
 ```
 
 It found the djb2 hash lookup (`FUN_003cc4c0`) and the widget constructor that
-resolves UI callbacks by name. The callback addresses in the UI table are
-continuation blocks inside the UI script VM, not callable function entries.
+resolves UI callbacks by name. Some historical continuation-block conclusions came from incorrect address
+conversion and are withdrawn; each callback needs independent ABI/context proof.
 
 `call_guest.py` copies a live CPU and runs a guest function through `CPU.disp`.
 It is a boundary probe only: calling from a Frida thread with a copied stack
