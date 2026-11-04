@@ -1,5 +1,5 @@
 diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
-index 1d40b9b..6196862 100644
+index 48172e9..6196862 100644
 --- a/src/nx/runtime/platform/backend/sdl3.c
 +++ b/src/nx/runtime/platform/backend/sdl3.c
 @@ -5,6 +5,7 @@
@@ -31,32 +31,7 @@ index 1d40b9b..6196862 100644
  static int g_fullscreen;
  static void set_fullscreen(int on);
  static int g_shot_req;
-@@ -299,7 +314,11 @@ void video_init(const char* title) {
-     snprintf(g_title, sizeof g_title, "%s", title);
-     backend_window_size(&w, &h);
-     snprintf(header, sizeof header, "%s - %s", title, snx_build_info());
--    g_win = SDL_CreateWindow(header, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
-+    /* an interactive fullscreen start: stay hidden until fullscreen, so the 1280x720 window the renderer starts
-+       with (the .ini's size, before the game presents) is never seen */
-+    int start_fullscreen = g_settings.fullscreen && !unattended_active();
-+    g_win = SDL_CreateWindow(header, w, h,
-+                             SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | (start_fullscreen ? SDL_WINDOW_HIDDEN : 0));
-     if (!g_win) fatal("SDL could not open a Vulkan window: %s", SDL_GetError());
-     snx_window_icon(g_win);
-     overlay_set_display_scale(SDL_GetWindowDisplayScale(g_win));
-@@ -313,7 +332,10 @@ void video_init(const char* title) {
-         fatal("Vulkan could not start (see the log). ScarletNX needs a GPU and driver with Vulkan 1.3.");
-     LOG("renderer: Vulkan\n");
-     /* not for an unattended run: nobody is at the screen, and it would cover the desktop of whoever is */
--    if (g_settings.fullscreen && !unattended_active()) set_fullscreen(1);
-+    if (start_fullscreen) {
-+        set_fullscreen(1);
-+        if (!SDL_ShowWindow(g_win)) WARN("video: could not show the window: %s\n", SDL_GetError());
-+    }
- #ifdef _WIN32
-     /* keep the display and the system awake while playing (it was set with the crash handler, headless runs too) */
-     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
-@@ -338,6 +360,8 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
+@@ -345,6 +360,8 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
                            "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick\n"
                            "  X / Space = A    Z = B    C = X    V = Y\n"
                            "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
@@ -65,7 +40,7 @@ index 1d40b9b..6196862 100644
                            "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
                            "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = quit";
  
-@@ -923,7 +947,25 @@ void video_poll(void) {
+@@ -930,7 +947,25 @@ void video_poll(void) {
              case SDL_EVENT_FINGER_CANCELED: touch_finger(&e); break;
              case SDL_EVENT_MOUSE_BUTTON_DOWN:
              case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -92,7 +67,7 @@ index 1d40b9b..6196862 100644
              case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
                  g_fullscreen = 1;
                  wsafe_set();
-@@ -950,6 +992,7 @@ void video_poll(void) {
+@@ -957,6 +992,7 @@ void video_poll(void) {
              case SDL_EVENT_KEY_UP: keys_held &= ~keymap(e.key.scancode); break;
              case SDL_EVENT_WINDOW_FOCUS_LOST:
                  keys_held = 0;
@@ -100,7 +75,7 @@ index 1d40b9b..6196862 100644
                  ui_lock();
                  vpad_release();
                  overlay_pointers_reset(); /* lifts that come without their presses don't tap the menu */
-@@ -971,6 +1014,25 @@ void video_poll(void) {
+@@ -978,6 +1014,25 @@ void video_poll(void) {
      u64 pb;
      input_key_sticks(k, st);
      i32 lx = st[0], ly = st[1], rx = st[2], ry = st[3];
@@ -127,24 +102,10 @@ index 1d40b9b..6196862 100644
      /* Each SDL slot is one guest Npad. Keyboard, scripted and on-screen input also drive No1. */
      static u32 previous_ids[SNX_GAMEPADS];
 diff --git a/src/nx/runtime/settings.txt b/src/nx/runtime/settings.txt
-index 39fe8a7..0bb4651 100644
+index d344417..0bb4651 100644
 --- a/src/nx/runtime/settings.txt
 +++ b/src/nx/runtime/settings.txt
-@@ -95,6 +95,13 @@ setting Resolution scale
-     default 1
-     startup
-     help The scale of the game's 3D rendering, 0.25 to 4: 1 = the console's, 2 = double, 0.5 = half
-+setting Upscaler
-+    key upscaler
-+    int 0 1
-+    default 0
-+    words Bilinear|FSR 1
-+    help 0 = bilinear scaling; 1 = FSR 1 EASU scaling followed by mild RCAS sharpening,
-+    help at the same internal resolution (no frame generation)
- setting Shadows
-     key shadows
-     int 0 1
-@@ -225,6 +232,13 @@ setting Touch screen
+@@ -232,6 +232,13 @@ setting Touch screen
      set backend_touch_mode_set
      words Off|Fingers|Mouse too
      help The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off

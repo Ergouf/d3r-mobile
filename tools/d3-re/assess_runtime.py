@@ -3,7 +3,7 @@
 
 GuestFn has host ABI (CPU*, guest_entry). ARM64 registers live in CPU.x,
 not in Frida's x64 host context. Hooks are temporary and removed on detach.
-RVA defaults apply only to the SHA-256 recorded in KBM-HANDOVER.md.
+RVA defaults apply only to the SHA-256 recorded in docs/windows/HANDOFF-20261104-CURRENT.md.
 """
 from __future__ import annotations
 
@@ -166,12 +166,12 @@ def main() -> None:
     parser.add_argument('--dump', action='store_true', help='Save runtime segments beside the JSON')
     parser.add_argument('--samples', type=int, default=3)
     parser.add_argument('--g-mem', type=lambda x: int(x, 0), default=0x17AEF20)
-    parser.add_argument('--g-disp', type=lambda x: int(x, 0), default=0x12910D0)
+    parser.add_argument('--g-disp', type=lambda x: int(x, 0), default=0x12910E0)
     parser.add_argument('--g-code-lo', type=lambda x: int(x, 0), default=0x17AF028)
     parser.add_argument('--g-code-hi', type=lambda x: int(x, 0), default=0x17AF030)
-    parser.add_argument('--keymap', type=lambda x: int(x, 0), default=0x96900)
-    parser.add_argument('--snx-svc', type=lambda x: int(x, 0), default=0x17DD10)
-    parser.add_argument('--expected-runtime-sha256', default='254fb541e06b3490eaddb41f49da6ba4872b5e5604e0648a2e354f76784f3aba',
+    parser.add_argument('--keymap', type=lambda x: int(x, 0), default=0x96B70)
+    parser.add_argument('--snx-svc', type=lambda x: int(x, 0), default=0x17DF80)
+    parser.add_argument('--expected-runtime-sha256', default='f64723c0d627cd91e553fc739f042136b5d3004397b3b8148ec53294140458a7',
                         help='Expected runtime fingerprint; update explicitly after rederiving all RVAs')
     args = parser.parse_args()
     if not 0 <= args.seconds <= 60 or not 1 <= args.samples <= 10:

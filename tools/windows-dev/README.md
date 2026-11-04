@@ -68,6 +68,10 @@ python .\tools\windows-dev\package_fsr_release.py --source <完整资源包.zip>
 
 方向键会自动带 extended 标志。`Capture-Window.ps1` 用 `PrintWindow` 抓窗口，不抢焦点；Vulkan 窗口可能返回旧帧，状态确认以桌面抓图（`Capture-Screen.ps1`）为准。
 
+`Real-Input.ps1` 用真实键鼠事件驱动已聚焦的游戏窗口（`-Key`/`-HoldMs`，以及需另行授权的 `-Click`/`-Move`），供 `probe_player_scan.py` 的行走采样使用；它不再放在被忽略的 `out/` 下。后台窗口收不到真实鼠标事件是预期行为，不要用它替代原生指针验收。
+
+当前 KBM 轮次使用脚本注入，不执行 `Real-Input.ps1` 或 computer-use。`Launch-Background.ps1` 默认 `--mouse_steer=0 --touch=0`，仍为小窗口、后台、非置顶。原生地板点击使用 `tools/d3-re/probe_pointer_click.py` 从 SDL 队列注入，`verify_pointer_world.py` 观察世界目标和玩家到达；当前操作矩阵见 `docs/windows/KBM-INPUT-GUIDE.md`，交接边界见 `docs/windows/HANDOFF-20261104-CURRENT.md`。
+
 仓库路径含括号（例如 `Diablo(fegnjl)`）时，`settingsgen` 的 cmd 命令行会被截断。请建一个无括号 junction 并在那里构建：
 
 ```powershell

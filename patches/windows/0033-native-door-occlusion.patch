@@ -1,0 +1,73 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 3abd316..d4b25fd 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1227,7 +1227,8 @@ static int assist_target(const CPU* cpu, u64 table, u64 player_object, const Wor
+ /* Known door/portal SNOs and the click-time projection fallback.  The camera
+    ray sometimes misses a doorway's thin collider even when the click is right
+    on the door; this gate accepts a click within 24 px of the projected door
+-   and 8 world units of the player, then submits the game's operate record.
++   and 120 world units of the player. A valid click-time terrain depth must
++   place the door in front of the occluder before it can become an operate goal.
+    It only covers the listed SNOs; ordinary props/NPCs keep the ray/assist path. */
+ static int door_sno(u32 sno) {
+     return sno == 178293u || /* inn door */
+@@ -1236,12 +1237,16 @@ static int door_sno(u32 sno) {
+ }
+ 
+ static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
++                               const WorldRay* ray, float occlusion, int ground_ok,
+                                const int pixel[2], WorldPos* found, u32* found_handle,
+                                u32* found_controller, u32* found_power, u32* found_sno) {
+     u32 limit, shift;
+     u64 buckets;
+     float best = 24.0f;
+     int hit = 0;
++    /* ground_target leaves FLT_MAX on failure; it is not an unobstructed ray. */
++    if (!ground_ok || !isfinite(occlusion) || occlusion < 0 || occlusion == FLT_MAX ||
++        !isfinite(ray->length) || ray->length <= 0) return 0;
+     if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
+         limit > 65536 || !read64(table + 0x120, &buckets)) return 0;
+     for (u32 i = 0; i < limit; i++) {
+@@ -1250,7 +1255,7 @@ static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+         float p[3], cylinder[5], base[2], top[2];
+         if (!read64(buckets + ((u64)i >> shift) * 8, &bucket) || !bucket) continue;
+         entry = bucket + (u64)(i & ((1u << shift) - 1)) * ENTITY_STRIDE;
+-        if (!read32(entry, &id) || !id || id == 0xFFFFFFFFu ||
++        if (!read32(entry, &id) || !id || id == 0xFFFFFFFFu || (id & 0xFFFF) != i ||
+             !read32(entry + 0xA0, &place) || place != pos->place ||
+             !read32(entry + 0x14, &cid) || cid == 0xFFFFFFFFu ||
+             !read32(entry + 0x18, &sno) || !door_sno(sno) ||
+@@ -1259,7 +1264,7 @@ static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+         memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
+         LOG("native: door probe %08x sno %u dist %.2f cylinder %.2f\n", id, sno,
+             hypotf(p[0] - pos->x, p[1] - pos->y), cylinder[4]);
+-        if (!isfinite(cylinder[4]) || cylinder[4] > 64) {
++        if (!isfinite(cylinder[4]) || cylinder[4] < 0 || cylinder[4] > 64) {
+             LOG("native: door skip %08x cylinder %.2f\n", id, cylinder[4]);
+             continue;
+         }
+@@ -1274,6 +1279,13 @@ static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+         float dx = pixel[0] - (base[0] + top[0]) * 0.5f;
+         float d = hypotf(dx, pixel[1] - cy);
+         if (d > best) continue;
++        float depth = (p[0] - ray->origin[0]) * ray->direction[0] +
++                      (p[1] - ray->origin[1]) * ray->direction[1] +
++                      (p[2] - ray->origin[2]) * ray->direction[2];
++        if (!isfinite(depth) || depth < 0 || depth > ray->length || depth > occlusion + 2.0f) {
++            LOG("native: door skip %08x depth %.2f terrain %.2f\n", id, depth, occlusion);
++            continue;
++        }
+         u64 cap_args[1] = {entry};
+         GuestResult cap;
+         int cap_ok = guest_call(cpu, CAP_POWER_PC, cap_args, 1, NULL, 0, &cap);
+@@ -1344,7 +1356,8 @@ static void world_tick(CPU* cpu) {
+             LOG("native: entity goal %u handle %08x power %d (%.2f,%.2f,%.2f) distance %.2f\n",
+                 p.serial, g_goal.handle, (int)g_goal.power, g_goal.entity.x, g_goal.entity.y,
+                 g_goal.entity.z, hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y));
+-        } else if (door_candidate_near(cpu, table, &pos, pixel, &door, &door_handle,
++        } else if (door_candidate_near(cpu, table, &pos, &ray, occlusion, ground_ok,
++                                       pixel, &door, &door_handle,
+                                        &door_controller, &door_power, &door_sno_value)) {
+             g_goal.handle = door_handle;
+             g_goal.controller = door_controller;

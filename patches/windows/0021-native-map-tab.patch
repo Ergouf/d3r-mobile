@@ -1,0 +1,12 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 70d20ca..b69c266 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -459,6 +459,7 @@ static u64 keymap(SDL_Scancode k) {
+         case SDL_SCANCODE_3: return 1ull << 9;     /* ZR */
+         case SDL_SCANCODE_RETURN: return 1ull << 10;
+         case SDL_SCANCODE_BACKSPACE: return 1ull << 11;
++        case SDL_SCANCODE_TAB: return 1ull << 15; /* map: bit observed to open the map */
+         case SDL_SCANCODE_LEFT: return 1ull << 12;
+         case SDL_SCANCODE_UP: return 1ull << 13;
+         case SDL_SCANCODE_RIGHT: return 1ull << 14;

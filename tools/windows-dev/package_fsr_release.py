@@ -304,7 +304,14 @@ ScarletNX 基于提交 `dbf8915965367e8a9616b19e5a0c1eddafaf28f3`，包含本地
 def build(args):
     test_raw_copy()
     test_settings()
+    if args.source is None:
+        raise ValueError(
+            "A baseline ZIP is required: pass --source or set DIABLO_RELEASE_ZIP; "
+            "the local/releases copy was removed as a duplicate of the installed game"
+        )
     old = args.source.resolve()
+    if not old.is_file():
+        raise FileNotFoundError(f"Baseline ZIP not found: {old}")
     output = args.output.resolve()
     partial = output.with_name(output.stem + ".partial.zip")
     evidence = args.evidence.resolve()
@@ -463,7 +470,12 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=Path(os.environ.get("DIABLO_RELEASE_ZIP", str(ROOT / "local/releases/windows/DiabloIII-Windows-2.7.7.92380-zhCN-Xbox-FSR1.zip"))))
+    parser.add_argument(
+        "--source",
+        type=Path,
+        default=Path(os.environ["DIABLO_RELEASE_ZIP"]) if os.environ.get("DIABLO_RELEASE_ZIP") else None,
+        help="Verified baseline ZIP, or set DIABLO_RELEASE_ZIP; no default archive is retained in the workspace",
+    )
     parser.add_argument("--output", type=Path, default=ROOT / "out/windows/releases/DiabloIII-Windows-2.7.7.92380-zhCN-Xbox-FSR1-repacked.zip")
     parser.add_argument("--evidence", type=Path, default=ROOT / "out/windows/packages")
     parser.add_argument("--runtime", type=Path, default=ROOT / "out/windows/build/scarletnx.exe")

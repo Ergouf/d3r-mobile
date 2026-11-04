@@ -1,0 +1,132 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index bdeca78..689fff8 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -29,6 +29,11 @@
+ #define PATH_ACTOR_PC 0x866D5C0ull
+ #define CAP_POWER_PC 0x84D8790ull
+ #define ACTION_PC 0x80CBA30ull
++#define ASSIST_ACTION 0x45CCFu
++/* The power a natural A press builds when nothing is interactable: an attack at
++   a world point.  A cylinder hit without an operate power becomes this. */
++#define ATTACK_POWER 0x45CCFu
++#define ATTACK_APPROACH 1.5f
+ #define WORLD_STACK_SIZE 0x40000u
+ #define WALK_SNO 0x777Cu
+ #define PICK_MAX_DISTANCE 200.0f
+@@ -44,7 +49,7 @@ typedef struct { float origin[3], direction[3], length; } WorldRay;
+ typedef struct { float x, y; u32 width, height; u64 fallback; u32 serial, frame; } PointerPress;
+ typedef struct { u64 x0; float f0; } GuestResult;
+ typedef struct {
+-    int active, entity_goal, submitted;
++    int active, entity_goal, submitted, attack;
+     u32 actor, serial, ticks, stuck;
+     WorldPos target, previous;
+     u32 handle, controller, power;
+@@ -267,6 +272,7 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+     u64 buckets;
+     float best = fminf(occlusion, ray->length) + 0.05f;
+     int found = 0;
++    u32 hit_cap = 0;
+     if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
+         limit > 65536 || !read64(table + 0x120, &buckets)) return -1;
+     memcpy(GP(scratch), ray, sizeof *ray);
+@@ -294,22 +300,64 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+         if (!r.x0) continue;
+         memcpy(&depth, GP(hit), 4);
+         if (!isfinite(depth) || depth < 0 || depth >= best) continue;
+-        best = depth;
+-        found = -1;
+         args[0] = entry;
+-        if (!guest_call(cpu, CAP_POWER_PC, args, 1, NULL, 0, &r) || (i32)r.x0 < 0) continue;
++        /* An incomplete capability query is unknown, not "no power": skip it
++           instead of turning a door or an NPC into an attack target. */
++        if (!guest_call(cpu, CAP_POWER_PC, args, 1, NULL, 0, &r)) continue;
++        u32 cap = ((i32)r.x0 > 0 && (u32)r.x0 != ASSIST_ACTION) ? (u32)r.x0 : 0;
++        hit_cap = cap;
++        best = depth;
+         found = 1;
+         goal->handle = id;
+         goal->controller = cid;
+         goal->entity = (WorldPos){p[0], p[1], p[2], place};
+-        goal->power = (u32)r.x0;
+-        goal->approach = fmaxf(INTERACT_APPROACH, cylinder[4] + 0.4f);
++        goal->attack = cap == 0;
++        goal->power = cap ? cap : ATTACK_POWER;
++        /* entity+0x80 word 4 is read as a height by the assist path, so it is
++           only a coarse standoff here and is clamped; an attack always uses the
++           fixed melee standoff. */
++        goal->approach = cap ? fmaxf(INTERACT_APPROACH, fminf(cylinder[4] + 0.4f, 3.6f))
++                             : ATTACK_APPROACH;
+     }
+-    if (found > 0) LOG("native: cylinder hit %08x depth %.3f terrain %.3f power %d\n",
+-                      goal->handle, best, occlusion, (int)goal->power);
++    if (found > 0) LOG("native: cylinder hit %08x depth %.3f terrain %.3f power %d%s\n",
++                      goal->handle, best, occlusion, (int)hit_cap,
++                      goal->attack ? " (attack)" : "");
+     return found;
+ }
+ 
++/* The attack record a natural A press builds when nothing is interactable:
++   +0 controller 0xFFFFFFFF, +4/+8 the attack power, +0xC 0, +0x10 -1, +0x14 a
++   type-2 position path built by 0x866D580(path, world_pos). */
++static int submit_attack(const CPU* cpu, u64 player_object, const WalkGoal* goal) {
++    const u64 record = g_stack_top - 0x1CB00, path = record + 0x14, pos = record + 0xA0;
++    u32* words = (u32*)GP(record);
++    memset(GP(record), 0, 0x80);
++    words[0] = 0xFFFFFFFFu;
++    words[1] = words[2] = ATTACK_POWER;
++    words[3] = 0;
++    words[4] = 0xFFFFFFFFu;
++    memcpy(GP(pos), &goal->entity, sizeof goal->entity);
++    u64 build[2] = {path, pos};
++    if (!guest_call(cpu, PATH_POS_PC, build, 2, NULL, 0, NULL)) {
++        LOG("native: attack path build failed for %08x\n", goal->handle);
++        return 0;
++    }
++    u32 type, id;
++    if (!read32(path, &type) || !read32(path + 4, &id) || type != 2 || id != 0xFFFFFFFFu) {
++        LOG("native: attack path mismatch type %u id %08x\n", type, id);
++        return 0;
++    }
++    u64 submit[4] = {player_object, record, 1, 1};
++    GuestResult r;
++    if (!guest_call(cpu, ACTION_PC, submit, 4, NULL, 0, &r)) {
++        LOG("native: attack call incomplete for %08x\n", goal->handle);
++        return 0;
++    }
++    LOG("native: attack %08x power %d at (%.2f,%.2f,%.2f) -> %d\n", goal->handle,
++        (int)ATTACK_POWER, goal->entity.x, goal->entity.y, goal->entity.z, (int)(u32)r.x0);
++    return (u32)r.x0 == 1;
++}
++
+ /* The native operate record the game builds for a natural A press on an actor
+    (0x80D5AF0 -> 0x840A4F0 -> 0x80CBA30).  Its header is four words and the
+    path starts at +0x14:
+@@ -655,7 +703,6 @@ static int project_point(const CPU* cpu, u32 place, float x, float y, float z, f
+    within a tight radius of the click and the ray reaches it before the
+    terrain.  This is a guard on the game's selection, never a projected-nearest
+    pick of its own; an empty click still becomes a walk, not a guessed action. */
+-#define ASSIST_ACTION 0x45CCFu
+ #define ASSIST_RADIUS 14.0f
+ #define ASSIST_GATE_DISTANCE 8.0f
+ /* A click on a thin object farther than the gate still names that object: walk
+@@ -948,10 +995,14 @@ static void world_tick(CPU* cpu) {
+         if (d > 0.001f) g_goal.target = (WorldPos){g_goal.entity.x + dx / d * g_goal.approach,
+             g_goal.entity.y + dy / d * g_goal.approach, g_goal.entity.z, place};
+         float reached = hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y);
+-        if (reached <= fmaxf(INTERACT_RANGE, g_goal.approach + 0.8f)) {
+-            int ok = submit_interact(cpu, player_object, &g_goal);
+-            LOG("native: entity goal %u operate %08x power %d at %.2f -> %s\n", g_goal.serial,
+-                g_goal.handle, (int)g_goal.power, reached, ok ? "accepted" : "rejected");
++        float reach = g_goal.attack ? g_goal.approach + 0.5f
++                                    : fmaxf(INTERACT_RANGE, g_goal.approach + 0.8f);
++        if (reached <= reach) {
++            int ok = g_goal.attack ? submit_attack(cpu, player_object, &g_goal)
++                                   : submit_interact(cpu, player_object, &g_goal);
++            LOG("native: entity goal %u %s %08x power %d at %.2f -> %s\n", g_goal.serial,
++                g_goal.attack ? "attack" : "operate", g_goal.handle, (int)g_goal.power, reached,
++                ok ? "accepted" : "rejected");
+             g_goal.active = 0;
+             return;
+         }

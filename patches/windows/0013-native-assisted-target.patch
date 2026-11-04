@@ -1,0 +1,154 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 4ff464a..69b497b 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -21,6 +21,8 @@
+ #define RAY_PC 0x826C7B0ull
+ #define GROUND_PC 0x813E6A0ull
+ #define CYLINDER_PC 0x8A35250ull
++#define PROJECT_PC 0x826CA70ull
++#define ASSIST_PC 0x80D5AF0ull
+ #define WALK_PC 0x80D21F0ull
+ #define SPEED_PC 0x8489AE0ull
+ #define PATH_POS_PC 0x866D580ull
+@@ -624,6 +626,131 @@ hit:
+         complete ? "returned" : "incomplete");
+ }
+ 
++/* World point -> engine screen pixel through the game's own camera. */
++static int project_point(const CPU* cpu, u32 place, float x, float y, float z, float out[2]) {
++    const u64 scratch = g_stack_top - 0x1B400;
++    float* loc = (float*)GP(scratch);
++    loc[0] = x; loc[1] = y; loc[2] = z;
++    memcpy(GP(scratch + 12), &place, 4);
++    u64 args[3] = {scratch, scratch + 0x20, 0xFFFFFFFFu};
++    if (!guest_call(cpu, PROJECT_PC, args, 3, NULL, 0, NULL)) return 0;
++    memcpy(out, GP(scratch + 0x20), 8);
++    return isfinite(out[0]) && isfinite(out[1]);
++}
++
++/* Assisted target: let the game's own A targeting (0x80D5AF0) choose the
++   nearest usable interactable, then accept it only when its projection is
++   within a tight radius of the click and the ray reaches it before the
++   terrain.  This is a guard on the game's selection, never a projected-nearest
++   pick of its own; an empty click still becomes a walk, not a guessed action. */
++#define ASSIST_ACTION 0x45CCFu
++#define ASSIST_RADIUS 14.0f
++#define ASSIST_GATE_RADIUS 30.0f
++#define ASSIST_GATE_DISTANCE 8.0f
++
++/* Coarse gate before calling the game's A selection: a writable, interactive
++   actor must be within 8 world units and 30 screen pixels of the click.  The
++   gate only decides whether to ask the game; it never picks the target. */
++static int assist_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
++                                 const int pixel[2]) {
++    u32 limit, shift;
++    u64 buckets;
++    if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
++        limit > 65536 || !read64(table + 0x120, &buckets)) return 0;
++    for (u32 i = 0; i < limit; i++) {
++        u64 bucket, entry;
++        u32 id, place, cid;
++        float p[3], base[2], top[2];
++        if (!read64(buckets + ((u64)i >> shift) * 8, &bucket) || !bucket) continue;
++        entry = bucket + (u64)(i & ((1u << shift) - 1)) * ENTITY_STRIDE;
++        if (!read32(entry, &id) || !id || id == 0xFFFFFFFFu ||
++            !read32(entry + 0xA0, &place) || place != pos->place ||
++            !read32(entry + 0x14, &cid) || cid == 0xFFFFFFFFu || !readable(entry + 0x60, 12))
++            continue;
++        memcpy(p, GP(entry + 0x60), sizeof p);
++        if (hypotf(p[0] - pos->x, p[1] - pos->y) > ASSIST_GATE_DISTANCE) continue;
++        if (!project_point(cpu, place, p[0], p[1], p[2], base)) continue;
++        float height = 0;
++        if (readable(entry + 0x80, 20)) {
++            float cylinder[5];
++            memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
++            if (isfinite(cylinder[4]) && cylinder[4] > 0 && cylinder[4] < 4) height = cylinder[4];
++        }
++        if (!project_point(cpu, place, p[0], p[1], p[2] + height, top)) {
++            top[0] = base[0]; top[1] = base[1];
++        }
++        float y0 = fminf(base[1], top[1]), y1 = fmaxf(base[1], top[1]);
++        float cy = pixel[1] < y0 ? y0 : (pixel[1] > y1 ? y1 : pixel[1]);
++        float dx = pixel[0] - (base[0] + top[0]) * 0.5f;
++        if (hypotf(dx, pixel[1] - cy) <= ASSIST_GATE_RADIUS) return 1;
++    }
++    return 0;
++}
++
++static int assist_target(const CPU* cpu, u64 table, u64 player_object, const WorldRay* ray,
++                         const int pixel[2], float occlusion, const WorldPos* pos, WalkGoal* goal) {
++    const u64 record = g_stack_top - 0x1C900;
++    const u64 scratch6 = g_stack_top - 0x1C800, scratch7 = g_stack_top - 0x1C804;
++    GuestResult r;
++    u32* words = (u32*)GP(record);
++    u64 args[8] = {ASSIST_ACTION, record, player_object, 0, 1, 1, scratch6, scratch7};
++    memset(GP(record), 0, 0x80);
++    memset(GP(scratch6), 0, 8);
++    if (!guest_call(cpu, ASSIST_PC, args, 8, NULL, 0, &r)) return 0;
++    u32 type, id, power = words[1], cid = words[0];
++    if (!read32(record + 0x14, &type) || !read32(record + 0x18, &id) ||
++        type != 1 || id == 0 || id == 0xFFFFFFFFu || power == 0 || power == 0xFFFFFFFFu ||
++        cid == 0 || cid == 0xFFFFFFFFu) {
++        LOG("native: assist miss (path %u id %08x power %08x cid %08x)\n", type, id, power, cid);
++        return 0;
++    }
++    u64 entry;
++    u32 place;
++    float p[3], base[2], top[2];
++    if (!lookup(table, id, ENTITY_STRIDE, &entry) || !read32(entry + 0xA0, &place) ||
++        place != pos->place || !readable(entry + 0x60, 12)) {
++        LOG("native: assist miss (target %08x not in table/place)\n", id);
++        return 0;
++    }
++    memcpy(p, GP(entry + 0x60), sizeof p);
++    float t = (p[0] - ray->origin[0]) * ray->direction[0] +
++              (p[1] - ray->origin[1]) * ray->direction[1] +
++              (p[2] - ray->origin[2]) * ray->direction[2];
++    if (!isfinite(t) || t > occlusion + 2.0f) {
++        LOG("native: assist miss (target %08x behind terrain %.2f > %.2f)\n", id, t, occlusion);
++        return 0;
++    }
++    if (!project_point(cpu, place, p[0], p[1], p[2], base)) return 0;
++    float height = 0;
++    if (readable(entry + 0x80, 20)) {
++        float cylinder[5];
++        memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
++        if (isfinite(cylinder[4]) && cylinder[4] > 0 && cylinder[4] < 4) height = cylinder[4];
++    }
++    if (!project_point(cpu, place, p[0], p[1], p[2] + height, top)) {
++        top[0] = base[0]; top[1] = base[1];
++    }
++    float y0 = fminf(base[1], top[1]), y1 = fmaxf(base[1], top[1]);
++    float cy = pixel[1] < y0 ? y0 : (pixel[1] > y1 ? y1 : pixel[1]);
++    float dx = pixel[0] - (base[0] + top[0]) * 0.5f;
++    float screen_distance = hypotf(dx, pixel[1] - cy);
++    if (!(screen_distance <= ASSIST_RADIUS)) {
++        LOG("native: assist miss (target %08x screen %.2f > %.2f)\n", id, screen_distance, ASSIST_RADIUS);
++        return 0;
++    }
++    goal->handle = id;
++    goal->controller = cid;
++    goal->entity = (WorldPos){p[0], p[1], p[2], place};
++    goal->power = power;
++    /* Portals accept the operate from farther than a normal prop (the natural
++       A at the inn door was accepted at 4.3), and their doorway blocks the
++       last step; approach and submit at 3.6. */
++    goal->approach = 3.6f;
++    LOG("native: assisted target %08x power %d screen %.2f terrain %.2f\n", id, (int)power,
++        screen_distance, occlusion);
++    return 1;
++}
++
+ static void world_tick(CPU* cpu) {
+     PointerPress p;
+     u32 actor;
+@@ -651,6 +778,8 @@ static void world_tick(CPU* cpu) {
+         memset(&g_goal, 0, sizeof g_goal);
+         int ground_ok = ground_target(cpu, pixel, &pos, &ground, &occlusion);
+         int picked = pick_entity(cpu, table, &ray, occlusion, &pos, actor, &g_goal);
++        if (picked == 0 && assist_candidate_near(cpu, table, &pos, pixel))
++            picked = assist_target(cpu, table, player_object, &ray, pixel, occlusion, &pos, &g_goal);
+         if (picked < 0) return;
+         if (picked > 0) {
+             g_goal.active = 1;

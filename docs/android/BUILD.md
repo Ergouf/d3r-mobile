@@ -18,7 +18,7 @@
 | `local/android/packages/validation/` | 独立验证 APK |
 | `local/android/packages/installed-baseline/` | 原安装基线 APK，身份及签名与 validation 不同 |
 | `local/android/drivers/driver-copy.tar` | Android 驱动相关本地材料 |
-| `local/assets/android/romfs/` | 匹配更新的合并主资源 |
+| 安装目录 romfs | 工作区副本已于 2026-10-21 清理；需要时从 `D:\Games\DiabloIII\01001B300B9BE000\01001B300B9BE000_data\romfs` 复制 |
 | `local/assets/android/voice-zh/` | 14 个中文 CPK |
 | `local/saves/android/` | `before-test.tar` 与 `after-baseline.tar` 两份 Android 存档备份 |
 

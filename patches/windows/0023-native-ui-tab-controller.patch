@@ -1,0 +1,222 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 020f413..d105373 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -458,80 +458,130 @@ static void ui_build_children(u64 map) {
+         LOG("native: UI child index truncated at %u\n", UI_CHILD_MAX);
+ }
+ 
+-static int g_ui_tab_target = -1, g_ui_tab_attempts;
++static u64 ui_object(u64 map, u64 key);
++static u64 ui_parent(u64 map, u64 obj);
++static int ui_visible(u64 map, u64 obj);
+ 
+-static int ui_tab_selected(u64 map, int* selected, u64* parent) {
+-    int seen = 0, selected_count = 0, entries = 0;
+-    u64 tab_parent = 0;
+-    ui_build_children(map);
+-    for (u32 i = 0; i < g_ui_child_count; i++) {
+-        u64 obj = g_ui_children[i].obj, vt;
+-        u32 flags;
+-        float r[4];
+-        if (!read64(obj, &vt) || vt != 0x90ABB48 ||
+-            !read32(obj + 0x18, &flags) || !(flags & 4) ||
+-            !readable(obj + 0x88, 16)) continue;
+-        memcpy(r, GP(obj + 0x88), sizeof r);
+-        if (!(r[2] - r[0] >= 150.0f && r[2] - r[0] <= 162.0f &&
+-              r[3] - r[1] >= 20.0f && r[3] - r[1] <= 28.0f &&
+-              r[1] >= 38.0f && r[1] < 64.0f)) continue;
+-        int idx = (int)((r[0] - 90.0f) / 156.0f);
+-        if (idx < 0 || idx > 4) continue;
+-        if (tab_parent == 0) tab_parent = g_ui_children[i].parent;
+-        else if (tab_parent != g_ui_children[i].parent) return 0;
+-        entries++;
+-        seen |= 1 << idx;
+-        if ((flags & 0x1400) == 0x1400) { *selected = idx; selected_count++; }
++/* Console_NextScreen (0x83C7A90) uses this navigation controller. Its first
++   group has six native slots: inventory, skills, paragon, follower, party,
++   journal. The top strip omits follower; disabled slots stay disabled. */
++typedef struct {
++    u64 open, close;
++    u32 slot;
++} UiTabSpec;
++static const UiTabSpec g_ui_tabs[5] = {
++    {0x8375340, 0x83752C0, 0},
++    {0x8386500, 0x8386AF0, 1},
++    {0x8216BF0, 0x8217490, 2},
++    {0x82224B0, 0x82224D0, 4},
++    {0x820D870, 0x820E100, 5},
++};
++
++typedef struct {
++    u64 group, page;
++    u32 enabled[6];
++    int current;
++} UiTabState;
++
++static u64 ui_path_key(const char* path) {
++    u64 key = 14695981039346656037ull;
++    for (; *path; path++) { key ^= (u8)*path; key *= 1099511628211ull; }
++    return key;
++}
++
++static int ui_within(u64 map, u64 obj, u64 ancestor) {
++    for (unsigned i = 0; obj && i < 64; i++, obj = ui_parent(map, obj))
++        if (obj == ancestor) return 1;
++    return 0;
++}
++
++static int ui_tab_state(u64 map, UiTabState* state) {
++    static const char* paths[5] = {
++        "root.normallayer.consoleinventoryring_main",
++        "root.normallayer.consoleskillselection_main",
++        "root.normallayer.consoleparagon_main",
++        "root.normallayer.consoleparty_main",
++        "root.normallayer.consolejournal_main",
++    };
++    u64 holder, navigation, first, data, count;
++    u32 selected, player;
++    if (!read64(0x9152080, &holder) || !read64(holder, &navigation) ||
++        !read64(navigation, &first) || !read64(navigation + 0x108, &state->group) ||
++        !first || state->group != first || !read64(first, &data) ||
++        !read64(first + 8, &count) || count != 6 ||
++        !read32(first + 0x18, &selected) || selected >= 6 ||
++        !read32(first + 0x1C, &player) || player != 0) return 0;
++    for (unsigned i = 0; i < 6; i++)
++        if (!read32(data + i * 0x18 + 0x10, &state->enabled[i]) || state->enabled[i] > 1) return 0;
++    int visible = 0;
++    state->current = -1;
++    for (unsigned i = 0; i < 5; i++) {
++        u64 open, close, page;
++        const UiTabSpec* tab = &g_ui_tabs[i];
++        if (!read64(data + tab->slot * 0x18, &open) || open != tab->open ||
++            !read64(data + tab->slot * 0x18 + 8, &close) || close != tab->close) return 0;
++        page = ui_object(map, ui_path_key(paths[i]));
++        if (page && ui_visible(map, page)) {
++            visible++;
++            if (selected != tab->slot) return 0;
++            state->current = (int)i;
++            state->page = page;
++        }
+     }
+-    if (entries != 5 || seen != 0x1F || selected_count != 1) return 0;
+-    *parent = tab_parent;
+-    return 1;
++    return visible == 1 && state->current >= 0;
+ }
+ 
+-static int ui_tab_hit(const UiPick* p, int* target) {
++static int ui_tab_click(UiPick* p) {
++    UiTabState state = {0};
++    GuestResult result;
++    u64 parent = 0;
++    unsigned seen = 0, entries = 0;
++    int target = -1;
++    if (!ui_tab_state(p->map, &state)) return 0;
+     for (u32 i = 0; i < g_ui_child_count; i++) {
+         u64 obj = g_ui_children[i].obj, vt;
+-        u32 flags;
+         float r[4];
+-        if (!read64(obj, &vt) || vt != 0x90ABB48 ||
+-            !read32(obj + 0x18, &flags) || !(flags & 4) || !readable(obj + 0x88, 16)) continue;
++        if (!read64(obj, &vt) || vt != 0x90ABB48 || !ui_visible(p->map, obj) ||
++            !ui_within(p->map, obj, state.page) || !readable(obj + 0x88, sizeof r)) continue;
+         memcpy(r, GP(obj + 0x88), sizeof r);
+-        if (r[2] - r[0] < 150.0f || r[2] - r[0] > 162.0f ||
+-            r[3] - r[1] < 20.0f || r[3] - r[1] > 28.0f || r[1] < 38.0f || r[1] >= 64.0f) continue;
+-        int idx = (int)((r[0] - 90.0f) / 156.0f);
+-        if (idx < 0 || idx > 4) continue;
++        if (!isfinite(r[0]) || !isfinite(r[1]) || !isfinite(r[2]) || !isfinite(r[3]) ||
++            fabsf(r[1] - 39.0f) > 1.0f || r[2] - r[0] < 150.0f || r[2] - r[0] > 162.0f ||
++            r[3] - r[1] < 20.0f || r[3] - r[1] > 28.0f || r[0] < 89.0f || r[0] > 715.0f) continue;
++        int idx = (int)lroundf((r[0] - 90.0f) / 156.0f);
++        if (idx < 0 || idx > 4 || fabsf(r[0] - (90.0f + 156.0f * idx)) > 1.0f) continue;
++        if ((seen & (1u << idx)) || (parent && parent != g_ui_children[i].parent)) return 0;
++        parent = g_ui_children[i].parent;
++        seen |= 1u << idx;
++        entries++;
+         if (p->point[0] >= r[0] && p->point[0] < r[2] &&
+-            p->point[1] >= r[1] && p->point[1] < r[3]) { *target = idx; return 1; }
++            p->point[1] >= r[1] && p->point[1] < r[3]) target = idx;
+     }
+-    return 0;
+-}
+-
+-static int ui_tab_step(UiPick* p) {
+-    int current, target;
+-    u64 parent;
+-    if (!ui_tab_selected(p->map, &current, &parent) || !ui_tab_hit(p, &target)) return 0;
+-    g_ui_tab_target = target;
+-    g_ui_tab_attempts = 0;
+-    LOG("native: UI tab click current=%d target=%d\n", current, target);
++    if (entries != 5 || seen != 0x1F || target < 0) return 0;
++    /* A modal with its own focus owns the pointer even if the page behind it
++       remains visible. Never redirect such a click into the character group. */
++    u64 focus_key, focus;
++    if (!guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &result) ||
++        !read64(result.x0, &focus_key)) return 0;
++    if (focus_key != UINT64_MAX && (!(focus = ui_object(p->map, focus_key)) ||
++        !ui_visible(p->map, focus) || !ui_within(p->map, focus, state.page))) return 0;
++    u32 slot = g_ui_tabs[target].slot;
++    if (!state.enabled[slot]) {
++        LOG("native: UI tab disabled current=%d target=%d slot=%u\n", state.current, target, slot);
++        return 1;
++    }
++    if (state.current == target) {
++        LOG("native: UI tab unchanged current=%d target=%d\n", state.current, target);
++        return 1;
++    }
++    /* Native page selector: group 0, the clicked native slot, player 0,
++       ordinary transition. No pending shoulder/confirm input is created. */
++    u64 args[4] = {0, slot, 0, 0};
++    int complete = guest_call(p->cpu, 0x816F550, args, 4, NULL, 0, NULL);
++    LOG("native: UI tab select current=%d target=%d slot=%u -> %s\n",
++        state.current, target, slot, complete ? "returned" : "incomplete");
+     return 1;
+ }
+ 
+-static void ui_tab_tick(void) {
+-    u64 global, world, manager, map, parent;
+-    int current;
+-    if (__atomic_load_n(&g_ui_tab_target, __ATOMIC_ACQUIRE) < 0) return;
+-    if (!read64(0x914F840, &global) || !read64(global + 0x10, &world) ||
+-        !read64(world + 0xB80, &manager) || !read64(manager, &map) ||
+-        !ui_tab_selected(map, &current, &parent)) { __atomic_store_n(&g_ui_tab_target, -1, __ATOMIC_RELEASE); return; }
+-    int target = __atomic_load_n(&g_ui_tab_target, __ATOMIC_ACQUIRE);
+-    if (current == target) { __atomic_store_n(&g_ui_tab_target, -1, __ATOMIC_RELEASE); return; }
+-    if (++g_ui_tab_attempts > 16) { __atomic_store_n(&g_ui_tab_target, -1, __ATOMIC_RELEASE); return; }
+-    int dir = target > current ? 1 : -1;
+-    if (!native_action_press(1ull << (dir > 0 ? 7 : 6))) return;
+-    LOG("native: UI tab step current=%d target=%d dir=%s attempt=%d\n", current, target,
+-        dir > 0 ? "R" : "L", g_ui_tab_attempts);
+-}
+-
+ static int ui_code(u64 pc) {
+     return pc >= g_code_lo && pc < g_code_hi && !(pc & 3);
+ }
+@@ -700,7 +750,7 @@ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     memcpy(p.point, GP(scratch + 0x20), sizeof p.point);
+     if (!isfinite(p.point[0]) || !isfinite(p.point[1])) return;
+     ui_build_children(p.map);
+-    if (ui_tab_step(&p)) return;
++    if (ui_tab_click(&p)) return;
+     if (!read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
+         !read32(subs + 8, &sub_count) || sub_count > 1024) sub_count = 0;
+     int focused = 0, menu_owner = 0;
+@@ -974,7 +1024,7 @@ static void world_tick(CPU* cpu) {
+     WorldPos pos;
+     int pending;
+     if (__atomic_exchange_n(&g_cancel, 0, __ATOMIC_ACQ_REL)) g_goal.active = 0;
+-    if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE)) { ui_tab_tick(); return; }
++    if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE)) return;
+     pending = take_pointer(&p);
+     if (!pending && !g_goal.active) return;
+     if (pending && (u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - p.frame) > 120) {
+@@ -1196,7 +1246,6 @@ static void world_ui(CPU* cpu, u64 entry) {
+     if (!primary || cpu->pc != lr) return;
+     int blocked = cpu->x[0] != 0;
+     __atomic_store_n(&g_ui_blocked, blocked, __ATOMIC_RELEASE);
+-    if (!blocked) { g_ui_tab_target = -1; g_ui_tab_attempts = 0; }
+     if (blocked) {
+         PointerPress p;
+         g_goal.active = 0;

@@ -20,12 +20,12 @@
     "src/nx/runtime/present.c": "54d889b3729796f8b57976ad62eaefe0b944230cc74b2a00bfa5912654f556c2",
     "src/nx/runtime/settings.txt": "c9eab50291afdb7838ca95c8fa528cfc4f21fab6f157cdf061aeeff07838cdd7"
   },
-  "verification": "base patch applies to base commit; extra patches apply in order on top; 0002 reproduces the two changed files after LF normalization",
+  "verification": "base patch applies to base commit; 0002-0028 and 0031-0034 (excluding archived 0029/0030) apply in order with plain git apply on the result of the previous one; every stage changed files match the recorded LF hashes",
   "runtime_release_sha256": "194e5b59ca8b8d155faf0c242ce2c5bb3d6910a6e3a28a268924aed50e9878e5",
   "extra_patches": [
     {
       "patch": "0002-mouse-steer.patch",
-      "patch_sha256": "8481be149aab47dc8741aaf89f32216b23f4245ff50cbc9e981a32a152bd45a6",
+      "patch_sha256": "4dc3615abeb807d23b55abb0eea8d7060d2e4858fe68d9e3018ad726054de851",
       "changed_files_lf_sha256": {
         "src/nx/runtime/platform/backend/sdl3.c": "5b193b7f6321fb156a0697587db6f3f56db345a1c0f89f19ed4b92b86e480741",
         "src/nx/runtime/settings.txt": "6c6cd5da57c03859b9d53a152dee3f4cbeca3b40197c8e1db6798f4e453b9f21"
@@ -33,15 +33,243 @@
     },
     {
       "patch": "0003-native-bridge.patch",
-      "patch_sha256": "f284c437d01183605922b081d69ff6b7535e9fd32328af1364ecdb8880afeb90",
+      "patch_sha256": "5a0b9f322e0c2fd739e77f1520fd9e7849cb3c9d86768d314f59cd38472c930e",
       "changed_files_lf_sha256": {
         "src/nx/CMakeLists.txt": "528aed3990336ec7aca6f04e6834615b6527848db94251f43a13bf1d9db2e700",
         "src/nx/hle/svc/svc.c": "584a8ec38c0ae30662d985eb223c0e0c28d404b14db46510496918c249fae3a0",
         "src/nx/runtime/main.c": "741420979423342ad0b4bbc58027a020fe5ab5bce2d685e2306409929933a5b7",
-        "src/nx/runtime/rtapi.c": "e4e387b8cee683c2bebe47b52502c6782e32283730abc61e6f644ebbf7f96cf6",
         "src/nx/runtime/native_input.c": "fbe8122b6d1e98d41a6329a44b24ab45bc19b4f63a5ad8616a65fff6eabb8a17",
         "src/nx/runtime/native_input.h": "a5207095506d0977e48ef71c5ac7f0847ffec6616242bf88bf5d5494cdec35f7",
-        "src/nx/runtime/platform/backend/sdl3.c": "44cd9443b9f4625f56c080902bfad6c71db77f1d331dd53f77d04bfe4dc4f9fb"
+        "src/nx/runtime/platform/backend/sdl3.c": "44cd9443b9f4625f56c080902bfad6c71db77f1d331dd53f77d04bfe4dc4f9fb",
+        "src/nx/runtime/rtapi.c": "e4e387b8cee683c2bebe47b52502c6782e32283730abc61e6f644ebbf7f96cf6"
+      }
+    },
+    {
+      "patch": "0004-hid-mouse.patch",
+      "patch_sha256": "f42fdac9f6766b159fb1f8fb437f9c72e642231f51e3f79c02d14a477911d08e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/settings.txt": "a495427855b939c3461efc542d6c4c4f9ac71971b74762709e91adbab7ce9771",
+        "src/nx/hle/services/hid.h": "bbca85a4b85bfe549bdfa25bd4d3fa01bb567b33ba06db549ec6941a0b6efc8e",
+        "src/nx/hle/services/hid.c": "3e464818b466de0026302658fe32e11f718a337fc3bca41357f9d7d857d05574",
+        "src/nx/runtime/platform/backend/sdl3.c": "34132479deedc0cddbf17aa45d07214271e1a5bac78da87e7dc864a2e8deb2c7"
+      }
+    },
+    {
+      "patch": "0005-native-inventory-key.patch",
+      "patch_sha256": "2f6caed67c29210ab065b473eb6ff5cb7cd790c92496d19d3e3b55e46b4b0cc7",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_input.c": "01274852c86299b51d447e81953081c4be4d7ced8f1b06e5d176853a819f0531",
+        "src/nx/runtime/native_input.h": "5c99f3fa529089e67875d1802706227067469eea0c635be247ae403b31cb305f",
+        "src/nx/runtime/platform/backend/sdl3.c": "f185c7811b1e0899a38458ec6399dcb92d3cf33c8d1e4369cd0dfb2bb20606c2"
+      }
+    },
+    {
+      "patch": "0006-native-action-keys.patch",
+      "patch_sha256": "9ff5e496cfe8f65bdf33c0871ac24f2ad8e62e2fdede86d3a8f8ef0c306a9cdc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_input.c": "085329e818d414b497b54058111cbbaf29c13c4074c9dc43a98f69f940ae391b",
+        "src/nx/runtime/native_input.h": "0cec5400eecd071a183454d105a122e911bd8c4579255c89f966811b0cd5743d",
+        "src/nx/runtime/platform/backend/sdl3.c": "b748d4887e2eee0b048fecde65465239225a92964a290b0ccfb11fae06e56a5b"
+      }
+    },
+    {
+      "patch": "0007-native-mouse-buttons.patch",
+      "patch_sha256": "fac7a4ab05e70f03fdb244487520855fda469c48f9d61908ccf2aecc649c89a5",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "dc4419e39cdc9fb0d283162591571dcf17c0466419dfd846e7ff325bb66cc7e1"
+      }
+    },
+    {
+      "patch": "0008-native-action-followup.patch",
+      "patch_sha256": "3aaa663cbf21ad1069c47186d13f5d24ff37c32157b6f0da2bb3271b9795fa23",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_input.c": "9d347ac3d5f1001afe724a8e968069607d6ba8aa18031d36fddb47afda448165",
+        "src/nx/runtime/native_input.h": "7b4374bcc7da0f82eeb12efc5d334e9b36e792a2cb8da7d7249518c263f6737c",
+        "src/nx/runtime/platform/backend/sdl3.c": "133060266682838ce2ff291a5faaeb3821c5f5750dbcca4ff1e6243ed2589638",
+        "src/nx/runtime/settings.txt": "e5b861291bffd3ea3beb50b79f0a3747ddf19856a406accf7a0728f398b7bfb3"
+      }
+    },
+    {
+      "patch": "0009-native-world-pointer.patch",
+      "patch_sha256": "4e0e1f43160b6b9d66f2de9e4fb55576cc97f16fe5227f959ebaff2ae23a4fe6",
+      "changed_files_lf_sha256": {
+        "src/nx/CMakeLists.txt": "518dc1d9efe0cd7a0653e68f91dde87cb85c51fbc2dfacf77312dc54175337a7",
+        "src/nx/runtime/native_input.c": "6a41f070921cfbe463d20182c221de7d43f31c1b87ea5faa78611336ebf49336",
+        "src/nx/runtime/native_world.c": "3c993156b53b9fd1a02b732ba63826bd3a02d2ca7f0fcf3046323b84f8e23871",
+        "src/nx/runtime/native_world.h": "a23aeed2d2cc3926bb9997a3fe8bd2f68e6906d5b8b212f98f90152887e44a12",
+        "src/nx/runtime/platform/backend/sdl3.c": "587aaa4dc9d4001b0a620e4bac5a10d3cb065ce52f2e82c8e9a0c0735d7723d2"
+      }
+    },
+    {
+      "patch": "0010-native-actor-interact.patch",
+      "patch_sha256": "443265b866b21bbbfa996eeac58d0f90a5e9cc1c15dd0c6a4d0404e8fc977a60",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "ebc83666f1e0b8cba861d944ccf389adf0c950874adb143b19e62ca2c9227bcb",
+        "src/nx/runtime/platform/backend/sdl3.c": "dcafd19d96bbcbf7b1beb868a38cbe9cb6700d67a8a683f6616b79c647eec30b",
+        "src/nx/runtime/platform/overlay.c": "035d6b000ac1a5363783bb74c4dfb48abe56b64c2760dad93d3d1ec9bfa121e3",
+        "src/nx/runtime/platform/overlay.h": "2c62c7170962805e402bdcdc4bd6e1dfd8ab95ed9968cadad6cc9b7402472cce",
+        "src/nx/gpu/vk/ui.c": "c30e116ce0f20301aac13d8148a7ef3e43eaf9e520aad59a9db3384f5b4b52d9",
+        "tests/overlay.c": "8df5af81f0831f40adc733a6740b9b9ab07632134b4ff76876c1239527908b1f"
+      }
+    },
+    {
+      "patch": "0011-native-ui-page-fallback.patch",
+      "patch_sha256": "12497c7b710e4bd755db3a55c9c39c025aeeb08b631fbf825b21524b6779686f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "1304c3d09eab482fe2ceb32c542bb8edea05c174e5d2df8a8027469447672c44"
+      }
+    },
+    {
+      "patch": "0012-native-skill-keybinds.patch",
+      "patch_sha256": "1057c1c53dd2b295aedc63ed6f25434f6088efbfc663b99de4281fc6e92c726f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "684ce0db4d4cc757dd76aab2a5190f00e81a9956b68add76e7bb6644cc9496d1"
+      }
+    },
+    {
+      "patch": "0013-native-assisted-target.patch",
+      "patch_sha256": "68c0252a2d1608113e7fb680a76bdf4ab21acb175ca42b44b9fbded054d34a76",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "44b260edfe2c758d1f2a45b59f02cc1c72d73b35b0682df522a85b403bf04691"
+      }
+    },
+    {
+      "patch": "0014-native-assist-retry.patch",
+      "patch_sha256": "d2923ae0174dba3736399b48c2ab3daed83d9d991381412cd55dda44c4acfb94",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "4f4ec6b7286650061af460531d511da9b17c63ec97beacf0fba420a941e06c20"
+      }
+    },
+    {
+      "patch": "0015-native-attack-target.patch",
+      "patch_sha256": "282e74bead7077990f78f8ac4ffc4d771c26878805d37ab57fc1fe8ad09174fa",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "17418e664b5d72338ef8cdf3b75cbad9ddc89ccd1af95f561e9636a983f784da"
+      }
+    },
+    {
+      "patch": "0016-native-nearer-retry.patch",
+      "patch_sha256": "a85781d61230271cb47b630df668eda0619470d350dcfcea1b6a20e64e63f0a6",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "19f98c4abdf421019ef80c1e8e501735fdc349e4989f9e2e66c26566793e5523"
+      }
+    },
+    {
+      "patch": "0017-native-wheel-keybinds.patch",
+      "patch_sha256": "88a4d4e73fdcc65a5c14e88122a2b7b76494bf530a7c1e1987a272f083c61777",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/overlay.c": "cfc4cb5528f55b104bb41bba2a0563a6127732451b50355641254d5f75ccec48",
+        "src/nx/runtime/platform/overlay.h": "8e04dc39a78c0d7a2e0c19396dc340177f1491e62b131cda5bbbbbba9018fd1e",
+        "src/nx/runtime/platform/backend/sdl3.c": "ea3d4d977891603e2d387d5cdd3011493277156930c3f341deb0f8c46801ebd1"
+      }
+    },
+    {
+      "patch": "0018-native-operate-standoff.patch",
+      "patch_sha256": "3b49f68b24b0243fe385375b83476c44427ff2406459eebe49be2444f1c0e373",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8b5b730700eb16748c1b9ae997a89dcd28e31dfc50251298b68fa8fce38ce6d1"
+      }
+    },
+    {
+      "patch": "0019-native-main-menu-click.patch",
+      "patch_sha256": "95c965aae176c5175c523eef925ba619f452f4c4554f7ce2359623d1819396cd",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "420fdee517cf9142c5f64edb9d58839023cf83a0c988f63fba382dda68abe09a"
+      }
+    },
+    {
+      "patch": "0020-native-actor-attack.patch",
+      "patch_sha256": "1e88cf7bf58899241594675f83b4f1918c7707dd3316e75f3d116c2fa39b91bc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "aabf3d204e199bdb8fa4923a4f1cccc8f2596ccff3b2776a0eba767d774a62af"
+      }
+    },
+    {
+      "patch": "0021-native-map-tab.patch",
+      "patch_sha256": "90bb51abbc98f48c387ca611443f83980e9680653017c2bb9f47da53a7003b51",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "c30fa72dcfce06f7bc1d03c4721d6d894c943271a9f82d3993f1894ce686808b"
+      }
+    },
+    {
+      "patch": "0022-native-ui-tab-click.patch",
+      "patch_sha256": "6b55ee3440f89d82399c718b43fc83f00d7952157030fc8a768b88832de6624e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "9a07b76044926b84ad5ee6c7058477ea3f9d8033adaa5d8a6795892d21298c76"
+      }
+    },
+    {
+      "patch": "0023-native-ui-tab-controller.patch",
+      "patch_sha256": "f878c33836fc0b27a543850a140b1b61741b7a0e103f2d6bbabf0500026c0a78",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "46b67817651196c4e10a1458ab659047d05dd084c44b6b4dcff719d35dad44b3"
+      }
+    },
+    {
+      "patch": "0024-native-equipment-icon-click.patch",
+      "patch_sha256": "a1e617790d4a63e73b0da0ea1b0cac3f8cdac8972b32acbf9e1bf71e1971f5b7",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "ca1b83725f369b8d3dceda29ec369fe9e802155767df37f7706f62785ee3e22b"
+      }
+    },
+    {
+      "patch": "0025-native-skill-icon-click.patch",
+      "patch_sha256": "5b3f319d967c30520f0904270d088281dea70e3f5677d5a55eb2f76dc7bd617e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "494df72e3ce65b74d2985c543098e6c92465e3fec8376ad1d981cc8f1a630428"
+      }
+    },
+    {
+      "patch": "0026-native-pc-cursor.patch",
+      "patch_sha256": "1b2b204f9e4caf6aa85a83e2f35c4f98cc95531360878d818674595ae87cf774",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "5c1c0d29ba91093853bf34dbdd63a558d8dafea8c33b574a3ead841a18b136db",
+        "src/nx/runtime/platform/overlay.c": "994b8e3a58b134f8864410192bfbcaf2a806ac9921faec531e9811fe253dc2ca",
+        "src/nx/runtime/platform/backend/cursor_pc.h": "db9170a5a369fa07d83045cb3823161060f710c033c895d9ccc7a81d7581e70a"
+      }
+    },
+    {
+      "patch": "0027-native-dialog-buttons.patch",
+      "patch_sha256": "7f9ff76c392395adc5d9e2c53adbb7375660565ba302525dcdd22a91fbc18271",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "b628fc3966274ab6d6c40abd9b65df9b422b2dc699af93bd10b246841fc33811"
+      }
+    },
+    {
+      "patch": "0028-native-walk-into.patch",
+      "patch_sha256": "0579bc05e3e64dde565a248a88527ab24d790285fcf2402f9342b99ab316bc28",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8c4ed235b5737dbd767f5b0602c1ab3b97272b94286b412a6ae9a4759e6a7fca"
+      }
+    },
+    {
+      "patch": "0031-native-door-probe.patch",
+      "patch_sha256": "ac3ec5b4d49a6263124ed0eaf0c010f75108b058741318d55dcea2e073ab51dc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8e354c9ced8f5aef5f8a2b8d7fceba9c7dffb1ae15d7105f6d9ccc8a3cbfbc1a"
+      }
+    },
+    {
+      "patch": "0032-native-door-radius0.patch",
+      "patch_sha256": "0311454b88e384fcc34e0b5733d72716614e85ac361cb768ab7cb5eea9391c30",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "54bbc004f76e9c5a4e94827cee4b44e6a67601c56ac84372bc542f192b555040"
+      }
+    },
+    {
+      "patch": "0033-native-door-occlusion.patch",
+      "patch_sha256": "717b887209ed344e5c59be49de8b3113c8c27af7930c630a095e7c405c9ec2bc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "9e1a5d4d2d78ca9dd5722ddbf7acc3d7964935af1fe4ebf6c94e2aa7247c464f"
+      }
+    },
+    {
+      "patch": "0034-native-map-key-guard.patch",
+      "patch_sha256": "d89fe42e0264a0ba2586ef7e5e3d8f6f55c96b9ef70bf7ddbeed51aecbea6eda",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "4481d0fb453403f4bc0be931d003f7068b2e40aa359a7b7e3301b9b0aa348bd5",
+        "src/nx/runtime/native_world.h": "11696d864f6f0f9fbf9c85e4a1dfd3095e50ef06b3619f2dee93b6a5d55ec7f3",
+        "src/nx/runtime/platform/backend/sdl3.c": "4668996e234652c05b8193b86355ebeae91b7e280742152e235c400c1bc046a3"
       }
     }
   ]

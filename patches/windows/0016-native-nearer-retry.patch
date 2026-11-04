@@ -1,0 +1,41 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 689fff8..560f0d2 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -49,7 +49,7 @@ typedef struct { float origin[3], direction[3], length; } WorldRay;
+ typedef struct { float x, y; u32 width, height; u64 fallback; u32 serial, frame; } PointerPress;
+ typedef struct { u64 x0; float f0; } GuestResult;
+ typedef struct {
+-    int active, entity_goal, submitted, attack;
++    int active, entity_goal, submitted, attack, retries;
+     u32 actor, serial, ticks, stuck;
+     WorldPos target, previous;
+     u32 handle, controller, power;
+@@ -1015,7 +1015,26 @@ static void world_tick(CPU* cpu) {
+     if (hypotf(pos.x - g_goal.previous.x, pos.y - g_goal.previous.y) < 0.002f) g_goal.stuck++;
+     else g_goal.stuck = 0;
+     g_goal.previous = pos;
+-    if (++g_goal.ticks > 600 || g_goal.stuck > 90) {
++    g_goal.ticks++;
++    if (g_goal.stuck > 90 && !g_goal.entity_goal && !g_goal.assist_pending &&
++        g_goal.retries < 2) {
++        /* A ground click can land on a point the nav mesh cannot reach (inside
++           a fence, behind a wall).  Pull the target toward the player and try
++           again instead of dropping the whole click.  An assist goal rewrites
++           its target every tick, so a pull there would be undone immediately. */
++        float dx = g_goal.target.x - pos.x, dy = g_goal.target.y - pos.y;
++        float pull = hypotf(dx, dy) * 0.4f;
++        if (isfinite(dx) && isfinite(dy) && pull > 1.0f) {
++            g_goal.target = (WorldPos){pos.x + dx * 0.4f, pos.y + dy * 0.4f,
++                                       g_goal.target.z, g_goal.target.place};
++            g_goal.stuck = 0; g_goal.ticks = 0; g_goal.retries++;
++            LOG("native: world goal %u retry nearer (%.2f)\n", g_goal.serial, pull);
++            distance = hypotf(g_goal.target.x - pos.x, g_goal.target.y - pos.y);
++        } else {
++            LOG("native: world goal %u stopped (too near)\n", g_goal.serial);
++            g_goal.active = 0; return;
++        }
++    } else if (g_goal.ticks > 600 || g_goal.stuck > 90) {
+         LOG("native: world goal %u stopped (blocked/timeout)\n", g_goal.serial);
+         g_goal.active = 0; return;
+     }

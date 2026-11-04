@@ -1,6 +1,6 @@
 # 当前状态与验收
 
-更新：2026-10-21。本文统一记录 Android 与 Windows 的已验收范围和剩余工作；构建步骤分别见 [Android](android/BUILD.md) 与 [Windows](windows/BUILD.md)。
+更新：2026-11-04。本文统一记录 Android 与 Windows 的已验收范围和剩余工作；构建步骤分别见 [Android](android/BUILD.md) 与 [Windows](windows/BUILD.md)。
 
 ## Android
 
@@ -29,6 +29,8 @@ Activity 重建后同 PID 恢复与正常冷启动是不同验收项。历史续
 
 ## Windows
 
+> **2026-11-04 原生键鼠/KBM 进展**：当前安装版 `F4BF82B6…`、补丁链 `0001–0034`（0029/0030 归档）PASS。地图 `Tab` 已加菜单门控；NPC 对话选项、商人商品行、主菜单/暂停菜单、角色页签和门进入已验证。详见 [KBM 交接](windows/HANDOFF-20261104-CURRENT.md)。铁匠 NPC 全菜单、商人/工匠页签鼠标切换、战利品箱、拾取、地牢/portal 和技能鼠标方向仍未完成。
+
 Windows 路径基于 ScarletNX 固定提交 `dbf8915965367e8a9616b19e5a0c1eddafaf28f3`，与 Android 兼容层是独立构建。
 
 - 已在 Core Ultra 5 125H / Intel Arc 核显运行，驱动 `32.0.101.6078`、设备 Vulkan `1.3.293`。
@@ -36,8 +38,8 @@ Windows 路径基于 ScarletNX 固定提交 `dbf8915965367e8a9616b19e5a0c1eddafa
 - 3072×1920 全屏中保持纵横比，FSR 输出 3072×1728；两次启动及全屏/窗口切换的 Khronos 验证层检查通过。
 - 10 项相关设置/运行时测试、三份 FSR 着色器 SPIR-V 验证通过。描述符录制、回退图像布局、资源寿命与翻转修复已进入本地版本。
 - 简体中文与中文语音 DLC 已包含；Windows 中文语音尚未完成人工听验。Xbox A 确认、B 取消，X→X、Y→Y。
-- 当前启动入口为 `D:\Games\DiabloIII\Launch.cmd`，旧 `D:\Program Files` 安装已迁移删除；完整 ZIP 归档位于 `local/releases/windows/`。归档的逐文件 CRC/SHA-256、整体校验值和解压副本 25 秒启动测试通过，见 [发行记录](windows/RELEASE.md)。
-- 2026-10-21 用当前源码重新构建并替换了安装目录运行时（SHA-256 `02097a2a…`，含 FSR1、`SNX_PRESENT_STATS` 与 `vk_sc_view`），旧运行时备份在 `out/windows/backups/`，安装目录 `SHA256SUMS.txt` 已同步；`local/releases/` 里的归档 ZIP 仍是旧的 `64e0c3…` 版本。
+- 当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`，直接启动运行时且没有控制台窗口；`Launch.cmd` 仍保留，发行 ZIP 解压后仍以它为入口。旧 `D:\Program Files` 安装已迁移删除；完整 ZIP 归档已在 2026-10-21 作为安装目录重复副本清理，重打包时需显式指定基线 ZIP。归档的逐文件 CRC/SHA-256、整体校验值和解压副本 25 秒启动测试记录保留在 [发行记录](windows/RELEASE.md)。
+- 2026-10-21 用当前源码重新构建并替换了安装目录运行时（SHA-256 `194e5b59…`，含 FSR1、`SNX_PRESENT_STATS`、`vk_sc_view` 与全屏前隐藏窗口），旧运行时备份在 `out/windows/backups/`，安装目录 `SHA256SUMS.txt` 已同步。同日清理工作区重复数据约 57.55 GiB：两份 Windows ZIP 归档、`local/assets/android/romfs` 与临时检查目录；romfs 的 37 个文件与安装目录逐文件 SHA-256 一致。窗口句柄 A/B 采样：旧版 0.22 秒首次可见为 1280×720 带标题栏小窗，新版 0.38 秒首次可见已是无边框 3072×1920 全屏。
 
 此前未加本次 FSR 改动的第一章早期道路基线为约 **58.96 FPS**，来自 6,600 次 guest present / 111.94 秒；不是独立上屏帧率，也不能代表全部战斗场景。FSR 版最终实战验收尚未完成。
 

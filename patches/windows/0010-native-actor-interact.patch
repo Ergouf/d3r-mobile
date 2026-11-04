@@ -1,0 +1,805 @@
+diff --git a/src/nx/gpu/vk/ui.c b/src/nx/gpu/vk/ui.c
+index 5e3a794..e7901b7 100644
+--- a/src/nx/gpu/vk/ui.c
++++ b/src/nx/gpu/vk/ui.c
+@@ -265,6 +265,7 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]) {
+     atlas_upload(cb);
+     vpad_draw(&list, safe);
+     overlay_draw(&list, sw, sh);
++    overlay_pointer_draw(&list, sw, sh);
+     ui_unlock();
+     n = list.n;
+     if (!n || !g_atlas || !pipeline_make(g_vk.sc_format) || !(view = vk_sc_view(sc))) return;
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 7839e91..26110a6 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1,5 +1,6 @@
+ /* SPDX-License-Identifier: GPL-3.0-or-later
+-   Native D3 world targets: SDL pointer -> engine camera ray -> client Walk command.
++   Native D3 world targets: SDL pointer -> engine camera ray -> client Walk command,
++   or -> picked actor/controller -> native operate action.
+    No Npad or simulated stick state is written by this module. */
+ #include "nx/runtime/native_world.h"
+ #include "nx/runtime/native_input.h"
+@@ -11,24 +12,41 @@
+ #include "common/filesystem/host.h"
+ #include <math.h>
+ #include <string.h>
++#include <float.h>
+ 
+ #define UI_PC 0x8331490ull
+ #define GAME_PC 0x804F9C0ull
+ #define PLAYER_PC 0x8525360ull
+ #define RAY_PC 0x826C7B0ull
++#define GROUND_PC 0x813E6A0ull
++#define CYLINDER_PC 0x8A35250ull
+ #define WALK_PC 0x80D21F0ull
+ #define SPEED_PC 0x8489AE0ull
++#define PATH_POS_PC 0x866D580ull
++#define PATH_ACTOR_PC 0x866D5C0ull
++#define CAP_POWER_PC 0x84D8790ull
++#define ACTION_PC 0x80CBA30ull
+ #define WORLD_STACK_SIZE 0x40000u
+ #define WALK_SNO 0x777Cu
++#define PICK_MAX_DISTANCE 200.0f
++/* The game's own operate entry accepts a target this close; a far target is
++   walked up to first, then submitted once. */
++#define INTERACT_RANGE 2.8f
++#define INTERACT_APPROACH 1.6f
++#define ENTITY_STRIDE 0x360u
++#define CONTROLLER_STRIDE 0x410u
+ 
+ typedef struct { float x, y, z; u32 place; } WorldPos;
+-typedef struct { float origin[3], direction[3]; } WorldRay;
++typedef struct { float origin[3], direction[3], length; } WorldRay;
+ typedef struct { float x, y; u32 width, height; u64 fallback; u32 serial, frame; } PointerPress;
+ typedef struct { u64 x0; float f0; } GuestResult;
+ typedef struct {
+-    int active;
++    int active, entity_goal, submitted;
+     u32 actor, serial, ticks, stuck;
+     WorldPos target, previous;
++    u32 handle, controller, power;
++    WorldPos entity;
++    float approach;
+ } WalkGoal;
+ 
+ static PMutex g_pointer_lock = PMUTEX_INIT;
+@@ -115,6 +133,7 @@ static int guest_call(const CPU* source, u64 pc, const u64* args, unsigned count
+     return 1;
+ }
+ 
++
+ static int context(const CPU* cpu, u64* ctx) {
+     u64 holder, object, block;
+     u32 slot;
+@@ -132,31 +151,32 @@ static int lookup(u64 table, u32 handle, u32 stride, u64* entry) {
+     *entry = bucket + (index & ((1u << shift) - 1)) * (u64)stride;
+     return read32(*entry, &found) && found == handle;
+ }
+-static int local_player(const CPU* cpu, u32* actor, u64* entity, u64* controller, WorldPos* pos) {
++static int local_player(const CPU* cpu, u32* actor, u64* entity, u64* controller, WorldPos* pos,
++                        u64* player_object, u64* table) {
+     GuestResult r;
+-    u64 ctx, a, b, c, table, global, world;
++    u64 ctx, a, b, c, tab, global, world;
+     u32 controller_id, controller_actor;
+     const u64 args[] = {0};
+     if (!context(cpu, &ctx) || !read64(ctx, &a) || !read64(a, &b) ||
+-        !read64(b + 0x140, &c) || !c || !read64(b + 0x198, &c) || !read64(c, &table) ||
++        !read64(b + 0x140, &c) || !c || !read64(b + 0x198, &c) || !read64(c, &tab) ||
+         !guest_call(cpu, PLAYER_PC, args, 1, NULL, 0, &r) || !r.x0 ||
+         !read32(r.x0 + 4, actor) || !read32(r.x0 + 8, &controller_id) ||
+-        !lookup(table, *actor, 0x360, entity) || !readable(*entity + 0x60, 12) ||
++        !lookup(tab, *actor, ENTITY_STRIDE, entity) || !readable(*entity + 0x60, 12) ||
+         !read32(*entity + 0xA0, &pos->place)) return 0;
+     memcpy(pos, GP(*entity + 0x60), 12);
+     if (!isfinite(pos->x) || !isfinite(pos->y) || !isfinite(pos->z)) return 0;
++    *table = tab;   /* entity table: keep it before the controller lookup reuses tab */
+     if (!read64(0x914F840, &global) || !read64(global + 0x10, &world) ||
+-        !read64(world + 0xA98, &table) || !lookup(table, controller_id, 0x410, controller) ||
++        !read64(world + 0xA98, &tab) || !lookup(tab, controller_id, CONTROLLER_STRIDE, controller) ||
+         !read32(*controller + 8, &controller_actor) || controller_actor != *actor) return 0;
++    *player_object = r.x0;
+     return 1;
+ }
+ 
+-static int pointer_target(const CPU* cpu, const PointerPress* p, const WorldPos* pos, WorldPos* target) {
++/* Screen pixel -> engine camera ray, through the renderer's presentation rect. */
++static int pointer_pixel(const CPU* cpu, const PointerPress* p, int pixel[2]) {
+     const u64 rect_address = g_stack_top - 0x20000;
+-    const u64 pixel_address = rect_address + 0x100;
+-    const u64 ray_address = rect_address + 0x200;
+-    int rect[4], pixel[2];
+-    WorldRay ray;
++    int rect[4];
+     u64 args[3] = {rect_address, 0, 0};
+     if (!guest_call(cpu, 0x8042940, args, 1, NULL, 0, NULL)) return 0;
+     memcpy(rect, GP(rect_address), sizeof rect);
+@@ -173,25 +193,317 @@ static int pointer_target(const CPU* cpu, const PointerPress* p, const WorldPos*
+     if (x < 0 || y < 0 || x >= 1 || y >= 1) return 0;
+     pixel[0] = (int)lroundf(rect[0] + x * (rect[2] - rect[0]));
+     pixel[1] = (int)lroundf(rect[1] + y * (rect[3] - rect[1]));
+-    memcpy(GP(pixel_address), pixel, sizeof pixel);
++    return pixel[0] < rect[2] && pixel[1] < rect[3];
++}
++
++static int pointer_ray(const CPU* cpu, const PointerPress* p, WorldRay* ray, int pixel[2]) {
++    const u64 pixel_address = g_stack_top - 0x1FF00;
++    const u64 ray_address = g_stack_top - 0x1FE00;
++    u64 args[3];
++    if (!pointer_pixel(cpu, p, pixel)) return 0;
++    memcpy(GP(pixel_address), pixel, 2 * sizeof(int));
+     args[0] = pixel_address; args[1] = ray_address; args[2] = 0xFFFFFFFFu;
+     if (!guest_call(cpu, RAY_PC, args, 3, NULL, 0, NULL)) return 0;
+-    memcpy(&ray, GP(ray_address), sizeof ray);
++    memcpy(ray, GP(ray_address), sizeof(WorldRay));
++    u64 offset;
++    float origin_offset[3];
++    if (!read64(0x914F918, &offset) || !readable(offset, sizeof origin_offset)) return 0;
++    memcpy(origin_offset, GP(offset), sizeof origin_offset);
++    for (unsigned i = 0; i < 3; i++) ray->origin[i] += origin_offset[i];
+     for (unsigned i = 0; i < 3; i++)
+-        if (!isfinite(ray.origin[i]) || !isfinite(ray.direction[i])) return 0;
+-    if (fabsf(ray.direction[2]) < 0.0001f) return 0;
+-    float t = (pos->z - ray.origin[2]) / ray.direction[2];
+-    if (!(t > 0 && t < 10000)) return 0;
+-    *target = (WorldPos){ray.origin[0] + ray.direction[0] * t,
+-        ray.origin[1] + ray.direction[1] * t, pos->z, pos->place};
+-    return isfinite(target->x) && isfinite(target->y) &&
+-        hypotf(target->x - pos->x, target->y - pos->y) < 200;
++        if (!isfinite(ray->origin[i]) || !isfinite(ray->direction[i])) return 0;
++    float n = sqrtf(ray->direction[0] * ray->direction[0] +
++                    ray->direction[1] * ray->direction[1] +
++                    ray->direction[2] * ray->direction[2]);
++    if (!(n > 1e-6f)) return 0;
++    if (!isfinite(ray->length) || ray->length <= 0) return 0;
++    for (unsigned i = 0; i < 3; i++) ray->direction[i] /= n;
++    return 1;
++}
++static int ground_target(const CPU* cpu, const int pixel[2], const WorldPos* pos,
++                         WorldPos* target, float* distance) {
++    const u64 scratch = g_stack_top - 0x1C000;
++    u64 args[8] = {scratch, scratch + 0x40, 0x45, 0xFFFFFFFFu,
++                    scratch + 0x60, scratch + 0x64, scratch + 0x68, scratch + 0x6C};
++    GuestResult r;
++    memcpy(GP(scratch), pixel, 8);
++    memset(GP(scratch + 0x40), 0, 0x40);
++    *distance = FLT_MAX;
++    if (!guest_call(cpu, GROUND_PC, args, 8, NULL, 0, &r) || !r.x0) return 0;
++    memcpy(target, GP(scratch + 0x40), 12);
++    target->place = pos->place;
++    memcpy(distance, GP(scratch + 0x6C), 4);
++    return isfinite(target->x) && isfinite(target->y) && isfinite(target->z) &&
++           isfinite(*distance) && *distance >= 0 &&
++           hypotf(target->x - pos->x, target->y - pos->y) < PICK_MAX_DISTANCE;
++}
++
++/* World point -> engine screen pixel through the game's own camera. */
++
++
++/* Nearest interactive actor under the click.  A cylinder ray test is exact but
++   misses small or thin props; when it finds nothing, project the actors the
++   game owns and take the one whose on-screen body (base..top) is closest to the
++   click, still respecting the terrain ray for occlusion. */
++static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occlusion,
++                       const WorldPos* pos, u32 player_actor, WalkGoal* goal) {
++    const u64 scratch = g_stack_top - 0x1D000, hit = scratch + 0x40;
++    u32 limit, shift;
++    u64 buckets;
++    float best = fminf(occlusion, ray->length) + 0.05f;
++    int found = 0;
++    if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
++        limit > 65536 || !read64(table + 0x120, &buckets)) return -1;
++    memcpy(GP(scratch), ray, sizeof *ray);
++    for (u32 i = 0; i < limit; i++) {
++        u64 bucket, entry;
++        u32 id, place, cid;
++        float cylinder[5], p[3], depth;
++        GuestResult r;
++        if (!read64(buckets + ((u64)i >> shift) * 8, &bucket) || !bucket) continue;
++        entry = bucket + (u64)(i & ((1u << shift) - 1)) * ENTITY_STRIDE;
++        if (!read32(entry, &id) || !id || (id & 0xFFFF) != i || id == 0xFFFFFFFFu || id == player_actor ||
++            !read32(entry + 0xA0, &place) || place != pos->place ||
++            !read32(entry + 0x14, &cid) || cid == 0xFFFFFFFFu ||
++            !readable(entry + 0x60, 12) || !readable(entry + 0x80, sizeof cylinder)) continue;
++        memcpy(p, GP(entry + 0x60), sizeof p);
++        memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
++        int finite = 1;
++        for (unsigned j = 0; j < 5; j++) if (!isfinite(cylinder[j])) finite = 0;
++        if (!finite || cylinder[3] <= 0 || cylinder[4] <= 0 ||
++            hypotf(p[0] - pos->x, p[1] - pos->y) > PICK_MAX_DISTANCE) continue;
++        /* Entity collision bounds, native ray test and native terrain depth.
++           No projected-nearest or generic confirm fallback may retarget a click. */
++        u64 args[3] = {scratch, entry + 0x80, hit};
++        if (!guest_call(cpu, CYLINDER_PC, args, 3, NULL, 0, &r)) return -1;
++        if (!r.x0) continue;
++        memcpy(&depth, GP(hit), 4);
++        if (!isfinite(depth) || depth < 0 || depth >= best) continue;
++        best = depth;
++        found = -1;
++        args[0] = entry;
++        if (!guest_call(cpu, CAP_POWER_PC, args, 1, NULL, 0, &r) || (i32)r.x0 < 0) continue;
++        found = 1;
++        goal->handle = id;
++        goal->controller = cid;
++        goal->entity = (WorldPos){p[0], p[1], p[2], place};
++        goal->power = (u32)r.x0;
++        goal->approach = fmaxf(INTERACT_APPROACH, cylinder[4] + 0.4f);
++    }
++    if (found > 0) LOG("native: cylinder hit %08x depth %.3f terrain %.3f power %d\n",
++                      goal->handle, best, occlusion, (int)goal->power);
++    return found;
++}
++
++/* The native operate record the game builds for a natural A press on an actor
++   (0x80D5AF0 -> 0x840A4F0 -> 0x80CBA30).  Its header is four words and the
++   path starts at +0x14:
++     +0 controller handle, +4 power, +8 power, +0xC 0, +0x10 -1 */
++static int submit_interact(const CPU* cpu, u64 player_object, const WalkGoal* goal) {
++    const u64 record = g_stack_top - 0x1CD00, path = record + 0x14;
++    u32* words = (u32*)GP(record);
++    memset(GP(record), 0, 0x80);
++    words[0] = goal->controller;
++    words[1] = words[2] = goal->power;
++    words[3] = 0;
++    words[4] = 0xFFFFFFFFu;
++    u64 build[4] = {path, goal->handle, 0, 0};
++    if (!guest_call(cpu, PATH_ACTOR_PC, build, 4, NULL, 0, NULL)) {
++        LOG("native: operate path build failed for %08x\n", goal->handle);
++        return 0;
++    }
++    u32 type, id;
++    if (!read32(path, &type) || !read32(path + 4, &id) || type != 1 || id != goal->handle) {
++        LOG("native: operate path mismatch type %u id %08x (want %08x)\n", type, id, goal->handle);
++        return 0;
++    }
++    u64 submit[4] = {player_object, record, 1, 1};
++    GuestResult r;
++    if (!guest_call(cpu, ACTION_PC, submit, 4, NULL, 0, &r)) {
++        LOG("native: operate call incomplete for %08x\n", goal->handle);
++        return 0;
++    }
++    LOG("native: operate %08x record %08x/%d/%d -> %d\n", goal->handle, words[0], (int)words[1],
++        (int)words[2], (int)(u32)r.x0);
++    return (u32)r.x0 == 1;
++}
++
++/* UIReference holds a name key, not a pointer. +0x20/+0x28 are intrusive
++   sibling links; +0x38 is the parent reference used by the native UI code. */
++typedef struct {
++    const CPU* cpu;
++    u64 map, focused, owner, callback;
++    float point[2];
++    unsigned visited;
++    u64 control, row, hit_owner, hit_callback;
++    u32 index;
++    int kind; /* 1 = button, 2 = list row, 3 = disabled/blocked */
++} UiPick;
++
++static int ui_code(u64 pc) {
++    return pc >= g_code_lo && pc < g_code_hi && !(pc & 3);
++}
++
++static u64 ui_object(u64 map, u64 key) {
++    u32 mask, h = 0x811C9DC5u;
++    u64 buckets, node;
++    if (key == UINT64_MAX || !read32(map, &mask) || mask > 262143 ||
++        !read64(map + 0x10, &buckets)) return 0;
++    /* 0x8335350 hashes the low four bytes of the 64-bit name key. */
++    for (unsigned i = 0; i < 4; i++) h = (h ^ ((key >> (i * 8)) & 255)) * 0x1000193u;
++    if (!read64(buckets + (h & mask) * 8ull, &node)) return 0;
++    for (unsigned i = 0; node && i < 1024; i++) {
++        u64 actual, obj, identity;
++        if (!read64(node + 8, &actual)) return 0;
++        if (actual == key) {
++            if (!read64(node + 0x10, &obj) || !read64(obj + 0x30, &identity) || identity != key) return 0;
++            return obj;
++        }
++        if (!read64(node, &node)) return 0;
++    }
++    return 0;
++}
++
++static u64 ui_parent(u64 map, u64 obj) {
++    u64 key;
++    return read64(obj + 0x38, &key) ? ui_object(map, key) : 0;
++}
++
++static int ui_visible(u64 map, u64 obj) {
++    for (unsigned i = 0; obj && i < 64; i++) {
++        u32 flags;
++        u64 parent;
++        if (!read32(obj + 0x18, &flags) || !(flags & 4) || !read64(obj + 0x38, &parent)) return 0;
++        if (parent == UINT64_MAX) return 1;
++        obj = ui_object(map, parent);
++    }
++    return 0; /* missing parent, cycle or unbounded hierarchy */
++}
++
++static int ui_inside(UiPick* pick, u64 obj) {
++    const u64 scratch = g_stack_top - 0x1B000;
++    GuestResult r;
++    float clip[4];
++    u64 args[3] = {obj};
++    if (!readable(obj + 0x88, 16) ||
++        !guest_call(pick->cpu, 0x83B7EE0, args, 1, NULL, 0, &r) || !readable(r.x0, 16)) return 0;
++    args[0] = obj + 0x88; args[1] = r.x0; args[2] = scratch;
++    if (!guest_call(pick->cpu, 0x8A385B0, args, 3, NULL, 0, NULL)) return 0;
++    memcpy(clip, GP(scratch), sizeof clip);
++    for (unsigned i = 0; i < 4; i++) if (!isfinite(clip[i])) return 0;
++    return clip[2] > clip[0] && clip[3] > clip[1] &&
++           pick->point[0] >= clip[0] && pick->point[0] < clip[2] &&
++           pick->point[1] >= clip[1] && pick->point[1] < clip[3];
++}
++
++static int ui_visit(UiPick* p, u64 obj, unsigned depth) {
++    u64 vt, method, data;
++    u32 flags, count;
++    GuestResult r;
++    if (!obj || ++p->visited > 20000 || depth > 48 || !read32(obj + 0x18, &flags) ||
++        !(flags & 4) || !read64(obj, &vt)) return 0;
++    if (!read64(vt + 0xE0, &method)) return 0;
++    if (method == 0x838C6C0 && obj == p->focused && ui_inside(p, obj)) {
++        u64 model, model_vt, size_pc, allow_pc;
++        u32 page, columns;
++        if (!read64(obj + 0x258, &model) || !read64(model, &model_vt) ||
++            !read64(model_vt + 0x10, &size_pc) || !ui_code(size_pc) ||
++            !read64(model_vt + 0x30, &allow_pc) || !ui_code(allow_pc) ||
++            !read64(obj + 0x210, &data) || !read32(obj + 0x218, &count) || count > 4096 ||
++            !read32(obj + 0x1E4, &page) || !read32(obj + 0x2A4, &columns)) return 0;
++        u64 args[3] = {model};
++        if (!guest_call(p->cpu, size_pc, args, 1, NULL, 0, &r) || r.x0 > 65536) return 0;
++        u32 size = (u32)r.x0;
++        for (u32 i = count; i-- > 0;) {
++            u64 key, row;
++            i64 index = (i32)page < 0 ? -1 : (i64)page * columns + i;
++            if (!read64(data + i * 8ull, &key) || !(row = ui_object(p->map, key)) ||
++                !read32(row + 0x18, &flags) || !(flags & 4) || index < 0 || index >= size ||
++                !ui_inside(p, row)) continue;
++            args[0] = model; args[1] = obj; args[2] = (u32)index;
++            if (!guest_call(p->cpu, allow_pc, args, 3, NULL, 0, &r)) return 0;
++            p->kind = r.x0 ? 2 : 3;
++            p->control = obj; p->row = row; p->index = (u32)index;
++            p->hit_owner = p->owner; p->hit_callback = p->callback;
++            return 1;
++        }
++    }
++    if (!read32(obj + 0x68, &count) || count > 4096 || !read64(obj + 0x60, &data)) return 0;
++    for (u32 i = count; i-- > 0;) {
++        u64 child;
++        if (read64(data + i * 24ull + 8, &child) && ui_visit(p, child, depth + 1)) return 1;
++    }
++    if (read64(vt + 0x60, &method) && method == 0x8392410 && ui_inside(p, obj)) {
++        u32 enabled;
++        u64 table, cb, predicate;
++        if (!read32(obj + 0x3C8, &enabled) || !read64(obj + 0x118, &table) ||
++            !read64(table, &cb) || !ui_code(cb)) return 0;
++        p->kind = (enabled & 1) ? 1 : 3;
++        if (p->kind == 1 && read64(obj + 0x488, &predicate) && predicate) {
++            const u64 args[] = {obj + 0x30};
++            if (!ui_code(predicate) || !guest_call(p->cpu, predicate, args, 1, NULL, 0, &r) || !r.x0)
++                p->kind = 3;
++        }
++        p->control = p->hit_owner = obj; p->hit_callback = cb;
++        return 1;
++    }
++    return 0;
++}
++
++
++
++static void ui_click(const CPU* cpu, const PointerPress* press) {
++    UiPick p = {.cpu = cpu};
++    GuestResult r;
++    const u64 scratch = g_stack_top - 0x1A000;
++    u64 global, world, manager, key, vt, method, table;
++    int pixel[2];
++    if ((u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - press->frame) > 120 ||
++        !pointer_pixel(cpu, press, pixel) || !read64(0x914F840, &global) ||
++        !read64(global + 0x10, &world) || !read64(world + 0xB80, &manager) ||
++        !read64(manager, &p.map)) return;
++    if (!guest_call(cpu, 0x832D180, NULL, 0, NULL, 0, &r) ||
++        !read64(r.x0, &key) || !(p.focused = ui_object(p.map, key))) return;
++    if (!ui_visible(p.map, p.focused)) return;
++    p.owner = p.focused;
++    for (unsigned i = 0; p.owner && i < 64; i++) {
++        u32 flags;
++        if (!read32(p.owner + 0x18, &flags) || !(flags & 4)) return;
++        if (read64(p.owner, &vt) && read64(vt + 0xB0, &method) && method == 0x83B81F0 &&
++            read64(p.owner + 0x118, &table) && read64(table + 0x20, &p.callback) && ui_code(p.callback)) break;
++        p.owner = ui_parent(p.map, p.owner);
++    }
++    if (!p.owner || !ui_code(p.callback)) return;
++    memcpy(GP(scratch), pixel, sizeof pixel);
++    u64 args[3] = {scratch, scratch + 0x20};
++    if (!guest_call(cpu, 0x8350BF0, args, 2, NULL, 0, NULL)) return;
++    memcpy(p.point, GP(scratch + 0x20), sizeof p.point);
++    if (!isfinite(p.point[0]) || !isfinite(p.point[1]) || !ui_visit(&p, p.owner, 0)) {
++        LOG("native: UI pointer %u missed (%d,%d)\n", press->serial, pixel[0], pixel[1]);
++        return;
++    }
++    if (p.kind == 3) {
++        LOG("native: UI pointer %u disabled control %llx\n", press->serial, (unsigned long long)p.control);
++        return;
++    }
++    if (p.kind == 2) {
++        args[0] = p.control; args[1] = p.index;
++        u32 selected;
++        if (!guest_call(cpu, 0x838A6E0, args, 2, NULL, 0, NULL) ||
++            !read32(p.control + 0x1E0, &selected) || selected != p.index) return;
++    }
++    /* Invoke this hit control's callback, never a global A/confirm event. */
++    args[0] = p.hit_owner + 0x30; args[1] = 0;
++    int complete = guest_call(cpu, p.hit_callback, args, 2, NULL, 0, NULL);
++    LOG("native: UI pointer %u kind %d control %llx row %u callback %llx -> %s\n", press->serial,
++        p.kind, (unsigned long long)p.control, p.index, (unsigned long long)p.hit_callback,
++        complete ? "returned" : "incomplete");
+ }
+ 
+ static void world_tick(CPU* cpu) {
+     PointerPress p;
+     u32 actor;
+-    u64 entity, controller;
++    u64 entity, controller, player_object, table;
+     WorldPos pos;
+     int pending;
+     if (__atomic_exchange_n(&g_cancel, 0, __ATOMIC_ACQ_REL)) g_goal.active = 0;
+@@ -201,22 +513,80 @@ static void world_tick(CPU* cpu) {
+     if (pending && (u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - p.frame) > 120) {
+         g_goal.active = 0; return;
+     }
+-    if (!local_player(cpu, &actor, &entity, &controller, &pos)) {
++    if (!local_player(cpu, &actor, &entity, &controller, &pos, &player_object, &table)) {
+         g_goal.active = 0;
+-        if (pending) native_action_press(p.fallback);
+         return;
+     }
+     if (pending) {
++        WorldRay ray;
++        int pixel[2];
++        float occlusion;
++        WorldPos ground;
+         g_goal.active = 0;
+-        if (!pointer_target(cpu, &p, &pos, &g_goal.target)) return;
+-        g_goal.active = 1; g_goal.actor = actor; g_goal.serial = p.serial;
+-        g_goal.ticks = g_goal.stuck = 0; g_goal.previous = pos;
+-        LOG("native: world goal %u actor %08x (%.3f,%.3f,%.3f) -> (%.3f,%.3f,%.3f)\n",
+-            p.serial, actor, pos.x, pos.y, pos.z, g_goal.target.x, g_goal.target.y, g_goal.target.z);
++        if (!pointer_ray(cpu, &p, &ray, pixel)) return;
++        memset(&g_goal, 0, sizeof g_goal);
++        int ground_ok = ground_target(cpu, pixel, &pos, &ground, &occlusion);
++        int picked = pick_entity(cpu, table, &ray, occlusion, &pos, actor, &g_goal);
++        if (picked < 0) return;
++        if (picked > 0) {
++            g_goal.active = 1;
++            g_goal.entity_goal = 1;
++            g_goal.actor = actor;
++            g_goal.serial = p.serial;
++            g_goal.previous = pos;
++            /* stand just outside the target, on the line back to the player */
++            float dx = pos.x - g_goal.entity.x, dy = pos.y - g_goal.entity.y;
++            float d = hypotf(dx, dy);
++            if (d > 0.001f) {
++                g_goal.target = (WorldPos){g_goal.entity.x + dx / d * g_goal.approach,
++                    g_goal.entity.y + dy / d * g_goal.approach, g_goal.entity.z, g_goal.entity.place};
++            } else {
++                g_goal.target = g_goal.entity;
++            }
++            LOG("native: entity goal %u handle %08x power %d (%.2f,%.2f,%.2f) distance %.2f\n",
++                p.serial, g_goal.handle, (int)g_goal.power, g_goal.entity.x, g_goal.entity.y,
++                g_goal.entity.z, hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y));
++        } else {
++            if (!ground_ok) return;
++            g_goal.target = ground;
++            g_goal.active = 1; g_goal.actor = actor; g_goal.serial = p.serial;
++            g_goal.ticks = g_goal.stuck = 0; g_goal.previous = pos;
++            LOG("native: world goal %u actor %08x (%.3f,%.3f,%.3f) -> (%.3f,%.3f,%.3f)\n",
++                p.serial, actor, pos.x, pos.y, pos.z, g_goal.target.x, g_goal.target.y, g_goal.target.z);
++        }
+     }
+     if (g_goal.actor != actor || g_goal.target.place != pos.place) { g_goal.active = 0; return; }
++    if (g_goal.entity_goal) {
++        u64 current, global, world, controllers, target_controller;
++        u32 place, cid, owner;
++        if (!lookup(table, g_goal.handle, ENTITY_STRIDE, &current) ||
++            !read32(current + 0xA0, &place) || place != pos.place ||
++            !read32(current + 0x14, &cid) || cid != g_goal.controller ||
++            !read64(0x914F840, &global) || !read64(global + 0x10, &world) ||
++            !read64(world + 0xA98, &controllers) ||
++            !lookup(controllers, cid, CONTROLLER_STRIDE, &target_controller) ||
++            !read32(target_controller + 8, &owner) || owner != g_goal.handle ||
++            !readable(current + 0x60, 12)) {
++            LOG("native: entity goal %u target expired\n", g_goal.serial);
++            g_goal.active = 0; return;
++        }
++        memcpy(&g_goal.entity, GP(current + 0x60), 12);
++        float dx = pos.x - g_goal.entity.x, dy = pos.y - g_goal.entity.y;
++        float d = hypotf(dx, dy);
++        if (!isfinite(d)) { g_goal.active = 0; return; }
++        if (d > 0.001f) g_goal.target = (WorldPos){g_goal.entity.x + dx / d * g_goal.approach,
++            g_goal.entity.y + dy / d * g_goal.approach, g_goal.entity.z, place};
++        float reached = hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y);
++        if (reached <= fmaxf(INTERACT_RANGE, g_goal.approach + 0.8f)) {
++            int ok = submit_interact(cpu, player_object, &g_goal);
++            LOG("native: entity goal %u operate %08x power %d at %.2f -> %s\n", g_goal.serial,
++                g_goal.handle, (int)g_goal.power, reached, ok ? "accepted" : "rejected");
++            g_goal.active = 0;
++            return;
++        }
++    }
+     float distance = hypotf(g_goal.target.x - pos.x, g_goal.target.y - pos.y);
+-    if (distance <= 0.12f) {
++    if (!g_goal.entity_goal && distance <= 0.12f) {
+         LOG("native: world goal %u arrived (error %.4f, %u ticks)\n", g_goal.serial, distance, g_goal.ticks);
+         g_goal.active = 0; return;
+     }
+@@ -236,7 +606,7 @@ static void world_tick(CPU* cpu) {
+     memcpy(GP(pos_address), &g_goal.target, sizeof g_goal.target);
+     memset(GP(path_address), 0, 32);
+     args[0] = path_address; args[1] = pos_address;
+-    if (!guest_call(cpu, 0x866D580, args, 2, NULL, 0, NULL)) { g_goal.active = 0; return; }
++    if (!guest_call(cpu, PATH_POS_PC, args, 2, NULL, 0, NULL)) { g_goal.active = 0; return; }
+     args[0] = controller; args[1] = args[2] = WALK_SNO; args[3] = path_address;
+     for (unsigned i = 4; i < 9; i++) args[i] = 0;
+     if (!guest_call(cpu, WALK_PC, args, 9, floats, 2, NULL)) g_goal.active = 0;
+@@ -256,8 +626,12 @@ static void world_ui(CPU* cpu, u64 entry) {
+     __atomic_store_n(&g_ui_blocked, blocked, __ATOMIC_RELEASE);
+     if (blocked) {
+         PointerPress p;
++        g_goal.active = 0;
+         __atomic_store_n(&g_cancel, 1, __ATOMIC_RELEASE);
+-        if (take_pointer(&p)) native_action_press(p.fallback);
++        if (take_pointer(&p) && !__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) {
++            ui_click(cpu, &p);
++            __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
++        }
+     }
+ }
+ static void world_game(CPU* cpu, u64 entry) {
+@@ -292,5 +666,5 @@ void native_world_install(void) {
+         if (f && f != world_game) { g_game_original = f; __atomic_store_n(slot, world_game, __ATOMIC_RELEASE); }
+     }
+     if (g_ui_original && g_game_original && !__atomic_exchange_n(&g_enabled, 1, __ATOMIC_ACQ_REL))
+-        LOG("native: world pointer installed (camera ray -> client Walk)\n");
++        LOG("native: world pointer installed (camera ray -> client Walk / actor operate)\n");
+ }
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 99b1bb3..4222d26 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1075,10 +1075,11 @@ void video_poll(void) {
+                         int x, y, width, height;
+                         float density = SDL_GetWindowPixelDensity(g_win);
+                         backend_window_safe(&x, &y, &width, &height);
+-                        if (density > 0 && width > 0 && height > 0 && native_world_click(
++                        if (density > 0 && width > 0 && height > 0) native_world_click(
+                                 (e.button.x * density - x) / width, (e.button.y * density - y) / height,
+-                                (u32)width, (u32)height, mouse_native_pad(e.button.button))) break;
+-                    } else break;
++                                (u32)width, (u32)height, 0);
++                    }
++                    break; /* rejected/black-bar clicks must not become a global confirm */
+                 }
+                 /* the same layout as a native action: one pulse per press, and the release has no held state */
+                 if (mouse_native_pad(e.button.button)) {
+@@ -1088,6 +1089,16 @@ void video_poll(void) {
+                 touch_mouse(&e);
+                 break;
+             case SDL_EVENT_MOUSE_MOTION:
++                if (e.motion.which != SDL_TOUCH_MOUSEID) {
++                    int ww, wh;
++                    if (g_win && SDL_GetWindowSize(g_win, &ww, &wh) && ww > 0 && wh > 0) {
++                        float density = SDL_GetWindowPixelDensity(g_win);
++                        ui_lock();
++                        overlay_pointer_feed(e.motion.x / (float)ww, e.motion.y / (float)wh, 1,
++                                             (int)(ww * density), (int)(wh * density));
++                        ui_unlock();
++                    }
++                }
+                 hid_mouse_feed(&e);
+                 if (mouse_steer_on() && e.motion.which != SDL_TOUCH_MOUSEID) {
+                     g_mouse_x = e.motion.x;
+@@ -1108,11 +1119,26 @@ void video_poll(void) {
+                 wsafe_set();
+                 break;
+             case SDL_EVENT_KEY_DOWN:
+-                if (e.key.key == SDLK_ESCAPE) { /* a fresh press: the repeats of the Esc that closed the menu don't */
+-                    if (!e.key.repeat) g_quit = 1;
++                if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !e.key.repeat) {
++                    /* Alt opens the built-in skill wheel around the pointer; releasing it casts the slot the
++                       pointer points at. Alt+Enter still switches fullscreen and cancels the wheel. */
++                    if (!e.key.repeat) {
++                        ui_lock();
++                        overlay_wheel_begin();
++                        ui_unlock();
++                    }
++                    break;
++                }
++                if (e.key.key == SDLK_ESCAPE) {
++                    /* Esc is the game's own back button: it closes dialogs, the inventory and the pause
++                       screen. Quitting the program stays on the runtime menu (F2 -> Exit). */
++                    if (!e.key.repeat) native_action_press(1ull << 1);
+                     break;
+                 }
+                 if (e.key.key == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT)) {
++                    ui_lock();
++                    overlay_wheel_cancel();
++                    ui_unlock();
+                     if (!e.key.repeat) set_fullscreen(!g_fullscreen);
+                     break;
+                 }
+@@ -1130,6 +1156,15 @@ void video_poll(void) {
+                 if (!e.key.repeat) keys_held |= keymap(e.key.scancode);
+                 break;
+             case SDL_EVENT_KEY_UP:
++                if (e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) {
++                    static const u64 wheel_pad[6] = {1ull << 0, 1ull << 1, 1ull << 2,
++                                                     1ull << 3, 1ull << 6, 1ull << 7};
++                    ui_lock();
++                    int slot = overlay_wheel_end();
++                    ui_unlock();
++                    if (slot >= 0) native_action_press(wheel_pad[slot]);
++                    break;
++                }
+                 if (keymap_native(e.key.scancode)) break; /* a native action key has no held state */
+                 keys_held &= ~keymap(e.key.scancode);
+                 break;
+@@ -1138,6 +1173,8 @@ void video_poll(void) {
+                 keys_held = 0;
+                 g_mouse_buttons = 0;
+                 ui_lock();
++                overlay_pointer_feed(0, 0, 0, 0, 0);
++                overlay_wheel_cancel();
+                 vpad_release();
+                 overlay_pointers_reset(); /* lifts that come without their presses don't tap the menu */
+                 ui_unlock();
+diff --git a/src/nx/runtime/platform/overlay.c b/src/nx/runtime/platform/overlay.c
+index 441a8c2..6da3924 100644
+--- a/src/nx/runtime/platform/overlay.c
++++ b/src/nx/runtime/platform/overlay.c
+@@ -601,8 +601,91 @@ void overlay_draw(SnxUiList* l, int sw, int sh) {
+     menu_dialog(&d, text, value, pads, sizeof pads);
+     dialog_draw(l, sw, sh, &d, rows_of, &at);
+ }
+-int overlay_error_hit(const SnxOverlayRect* r, float x, float y) {
+-    return r && r->w > 0 && r->h > 0 && x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h;
++
++/* ---- native mouse cursor and the built-in skill wheel ---- */
++/* The pointer comes from SDL's motion events (window pixels), so it follows a
++   real mouse as well as a scripted one.  The wheel opens on Alt and casts the
++   slot the pointer points at when Alt is released: A B X Y L R around the
++   centre, the same native action queue the keyboard uses. */
++static float g_pt_x = -1, g_pt_y = -1;
++static float g_pt_width, g_pt_height;
++static int g_pt_inside;
++static int g_wheel;
++static float g_wheel_cx, g_wheel_cy;
++
++void overlay_pointer_feed(float x, float y, int inside, int width, int height) {
++    g_pt_x = x; g_pt_y = y; g_pt_width = width; g_pt_height = height;
++    g_pt_inside = inside && isfinite(x) && isfinite(y) && width > 0 && height > 0 &&
++                  x >= 0 && y >= 0 && x <= 1 && y <= 1;
++    if (!g_pt_inside) g_wheel = 0;
++}
++void overlay_wheel_begin(void) {
++    g_wheel = 0;
++    if (!g_pt_inside) return;
++    g_wheel = 1;
++    g_wheel_cx = g_pt_x; g_wheel_cy = g_pt_y;
++}
++void overlay_wheel_cancel(void) {
++    g_wheel = 0;
++}
++static int wheel_slot(void) {
++    if (!g_wheel || !g_pt_inside) return -1;
++    float dx = (g_pt_x - g_wheel_cx) * g_pt_width;
++    float dy = (g_pt_y - g_wheel_cy) * g_pt_height;
++    if (hypotf(dx, dy) <= 24.0f) return -1;
++    float angle = atan2f(dy, dx) + (float)M_PI / 2.0f;
++    while (angle < 0) angle += 2.0f * (float)M_PI;
++    return (int)lroundf(angle / ((float)M_PI / 3.0f)) % 6;
++}
++int overlay_wheel_end(void) {
++    int slot = wheel_slot(); /* latest motion, even when no draw occurred */
++    g_wheel = 0;
++    return slot;
++}
++
++static void cursor_draw(SnxUiList* l, float x, float y) {
++    /* Temporary drawn pointer. The actual PC cursor asset is not imported yet. */
++    ui_fill(l, x + 2, y + 1, 5, 15, 0xE0080C18);
++    ui_fill(l, x + 1, y + 9, 14, 13, 0xE0080C18);
++    ui_fill(l, x + 3, y + 2, 3, 13, 0xFFE8C07A);
++    ui_fill(l, x + 2, y + 10, 12, 10, 0xFFD9A85C);
++    ui_fill(l, x + 13, y + 11, 4, 6, 0xFFD9A85C);
++    ui_fill(l, x + 2, y + 10, 10, 2, 0xFFFFE7B8);
++    ui_fill(l, x + 5, y + 13, 2, 5, 0xFFE8C07A);
++    ui_fill(l, x + 8, y + 13, 2, 5, 0xFFE8C07A);
++    ui_fill(l, x + 11, y + 13, 2, 4, 0xFFE8C07A);
++}
++
++static void wheel_draw(SnxUiList* l, int sw, int sh) {
++    static const char* const label[6] = {"A", "B", "X", "Y", "L", "R"};
++    static const char* const keys[6] = {"SPACE", "Z", "C", "V", "Q", "E"};
++    float cx = g_wheel_cx * sw, cy = g_wheel_cy * sh;
++    int slot = wheel_slot(), i;
++    const float R = 74.0f, B = 21.0f;
++    ui_fill(l, cx - 8, cy - 8, 16, 16, 0xA0080C18);
++    ui_fill(l, cx - 6, cy - 6, 12, 12, 0xFFD9A85C);
++    for (i = 0; i < 6; ++i) {
++        float a = (float)i * (float)M_PI / 3.0f - (float)M_PI / 2.0f;
++        float x = cx + cosf(a) * R - B, y = cy + sinf(a) * R - B;
++        u32 fill = i == slot ? 0xC03088E8 : 0xB0080C18;
++        u32 edge = i == slot ? 0xFFFFE7B8 : 0xFF3FA0E8;
++        ui_fill(l, x, y, B * 2, B * 2, fill);
++        ui_fill(l, x, y, B * 2, 2, edge);
++        ui_fill(l, x, y + B * 2 - 2, B * 2, 2, edge);
++        ui_fill(l, x, y, 2, B * 2, edge);
++        ui_fill(l, x + B * 2 - 2, y, 2, B * 2, edge);
++        ui_text(l, x + B - 3, y + 3, 1, label[i], 0xFFFFE7B8);
++        ui_text(l, x + 2, y + B * 2 - 12, 1, keys[i], 0xC0D9A85C);
++    }
++    ui_text(l, cx - 22, cy - R - 30, 1, "SKILLS", 0xFF3FA0E8);
++}
++void overlay_pointer_draw(SnxUiList* l, int sw, int sh) {
++    if (g_wheel) wheel_draw(l, sw, sh);
++    if (g_pt_inside && g_pt_x >= 0 && g_pt_x <= 1 && g_pt_y >= 0 && g_pt_y <= 1)
++        cursor_draw(l, g_pt_x * sw, g_pt_y * sh);
++}
++
++int overlay_error_hit(const SnxOverlayRect* r, float x, float y) {    return r && r->w > 0 && r->h > 0 && x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h;
+ }
+ void overlay_error_draw(SnxUiList* l, int sw, int sh, SnxOverlayError* e) {
+     static DialogRows rows_of; /* the thread that shows the panel's */
+diff --git a/src/nx/runtime/platform/overlay.h b/src/nx/runtime/platform/overlay.h
+index 8e29f7b..f3ceb29 100644
+--- a/src/nx/runtime/platform/overlay.h
++++ b/src/nx/runtime/platform/overlay.h
+@@ -49,6 +49,13 @@ int overlay_pointer_up(u64 id, float x, float y, int sw, int sh);
+ void overlay_pointer_cancel(u64 id);
+ void overlay_pointers_reset(void);
+ void overlay_draw(SnxUiList* l, int sw, int sh);
++/* Experimental pointer/wheel. All calls require ui_lock, including input APIs.
++   Coordinates are window fractions; width/height are physical window pixels. */
++void overlay_pointer_feed(float x, float y, int inside, int width, int height);
++void overlay_wheel_begin(void);
++void overlay_wheel_cancel(void);
++int overlay_wheel_end(void); /* the chosen slot 0..5, or -1 */
++void overlay_pointer_draw(SnxUiList* l, int sw, int sh);
+ /* the columns the menu's pages and the stopped panel take at scale on a picture sw wide: as many as three quarters of it
+    holds, within OVERLAY_COLS and OVERLAY_COLS_MAX */
+ int overlay_cols(int sw, int scale);
+diff --git a/tests/overlay.c b/tests/overlay.c
+index d12bcf3..b0d5e6c 100644
+--- a/tests/overlay.c
++++ b/tests/overlay.c
+@@ -767,6 +767,27 @@ int main(void) {
+         for (i = 0, pictures = 0; i < list.n; ++i) pictures += list.q[i].v == SNX_CONTROLS_ATLAS_HEIGHT;
+         assert(!pictures && !shows("Player"));
+     }
++    { /* Alt release cannot confirm without an open wheel; final motion wins
++         even when there is no intervening render frame. */
++        overlay_pointer_feed(0, 0, 0, 0, 0);
++        assert(overlay_wheel_end() == -1);
++        overlay_wheel_begin();
++        assert(overlay_wheel_end() == -1);
++        overlay_pointer_feed(0.5f, 0.5f, 1, 1000, 600);
++        overlay_wheel_begin();
++        overlay_pointer_feed(0.5f, 0.3f, 1, 1000, 600);
++        list.n = 0;
++        overlay_pointer_draw(&list, 1000, 600); /* top sector drawn */
++        overlay_pointer_feed(0.7f, 0.5f, 1, 1000, 600);
++        assert(overlay_wheel_end() == 2); /* newest pointer: right sector */
++        assert(overlay_wheel_end() == -1); /* no duplicate release */
++        overlay_wheel_begin();
++        assert(overlay_wheel_end() == -1); /* centre/dead zone */
++        overlay_wheel_begin();
++        overlay_pointer_feed(0.7f, 0.2f, 1, 1000, 600);
++        overlay_wheel_cancel();
++        assert(overlay_wheel_end() == -1);
++    }
+     puts("overlay: placing, pages, taps, keys, values, scrolling, look, the error's panel, the atlas and the user "
+          "passed");
+     return 0;

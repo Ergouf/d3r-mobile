@@ -1,207 +1,87 @@
-# D3 native keyboard/mouse RE tools
+# D3 Windows 原生键鼠探针
 
-Native keyboard/mouse investigation of Diablo III on the Windows ScarletNX
-runtime. See docs/windows/KBM-METHOD-ASSESSMENT.md for the 2026-11-01 live audit.
-Only native mouse/keyboard semantics are in scope; no Npad mapping fallback.
+用于 Diablo III `01001B300B9BE000` 在 ScarletNX Windows 运行时上的世界交互、UI 命中与输入证据。当前交接见 [HANDOFF-20261104-CURRENT.md](../../docs/windows/HANDOFF-20261104-CURRENT.md)，操作说明见 [KBM-INPUT-GUIDE.md](../../docs/windows/KBM-INPUT-GUIDE.md)。
 
-## Current workflow
+所有探针必须**串行**运行。并发 Frida attach 曾导致游戏退出；线程、对象和 PID 都不能跨重启复用。
 
-Start/connect Serena and activate the relevant source project before code work,
-as required by the repository AGENTS.md. The ignored reference/ScarletNX-src
-checkout must be activated separately for its symbols.
-
-All game/window launch, input and visual checks belong to GPT-6.1 Terra.
-Prefer attaching to an existing, version-checked PID. Historical tools below
-may spawn or send input; do not run those paths as read-only probes.
-
-Use the bounded observer instead of the old context/constructor tracers:
+## 先取身份
 
 ```powershell
-python tools/d3-re/assess_runtime.py --pid <pid> --out out/windows/kbm/probe.json --name root.normallayer.consolestart_main --slots 19 --seconds 4
-python tools/d3-re/assess_runtime.py --pid <pid> --out out/windows/kbm/dump.json --dump
-python tools/d3-re/xref_runtime.py 0x83baa90 0x914f840 --json out/windows/kbm/xrefs.json
+Get-CimInstance Win32_Process |
+  Where-Object Name -eq '01001B300B9BE000.exe' |
+  Select-Object ProcessId,ExecutablePath,CreationDate,CommandLine
+python tools/d3-re/probe_runtime_state.py --pid <PID>
 ```
 
-assess_runtime.py never sends UI input or calls game business functions. It
-temporarily instruments host code and detaches in finally; it records errors,
-runtime hashes, register context, thread identity, and observation counts.
-Use --object <guest-pointer> to filter GuestFn samples, and --keyboard only
-when coordinating one external input with Terra. RVA defaults are tied to the
-runtime SHA-256 in the handover; rederive them with llvm-nm after a rebuild.
+`probe_runtime_state.py` 返回运行时 enabled、`ui_blocked`、点击 serial 和当前世界 goal。探针的 `version.py` 必须通过 `tools/windows-dev/sync_probe_version.py --exe <安装 exe>` 与当前构建同步。
 
-Important corrections:
+## 常用入口
 
-- The current fixed ELF text and rodata exactly match the runtime. The previous
-  mismatch claim subtracted 0x8000000 instead of the real main base 0x8005000.
-- GuestFn is (CPU*, guest_entry) on the x64 host. Read guest x0 from CPU.x[0],
-  and translate guest object memory through g_mem. Host context.x0 is absent.
-- trace_ui_all.py, trace_ui_disp.py and trace_ui_vtable.py have that wrong host
-  register assumption; trace_ui_widgets.py mistakes CPU* for a widget. Do not
-  treat their old missing hits or object samples as negative evidence.
-- xref_runtime.py now skips embedded undecodable data, handles memory operands
-  and reports coverage. The old implementation stopped after 12 bytes.
-- A same-poll key down/up can cancel before the runtime publishes held input.
-  An automation API returning success is not proof of a guest action.
-
-
-## Prerequisites
-
-- Node/Python as used by the repository.
-- `hactool` (to decompress `main.nso0`).
-- Ghidra 12.1.x + JDK 21 (for static analysis).
-- Frida 17.x Python bindings (for runtime probes).
-
-The paths below are examples; use your own install locations.
-
-## 1. Decompress the main NSO
-
-```powershell
-hactool -t nso --uncompressed=main.bin main.nso0
-```
-
-Expected input: `local/assets/exefs_update/main.nso0` (build
-`2607A74F5DF7754CC0357B5DF7E496931355D8CA`).
-
-## 2. Build a Ghidra-loadable AArch64 ELF
-
-```powershell
-python tools/d3-re/build_main_elf.py main.bin --out out/windows/kbm/b0/d3_main_fixed.elf
-```
-
-The `hactool --uncompressed` image keeps the NSO0 header, and each segment's
-file offset is normally its memory offset plus 0x100. The script parses the
-header and places `.text` / `.rodata` / `.data` / `.bss` at their **memory**
-offsets, so a Ghidra address is the module-relative offset:
-
-```text
-Ghidra address = absolute guest address - 0x8005000
-```
-
-The older `d3_main.elf` (built without stripping the header) was shifted by
-0x100; use `d3_main_fixed.elf` for all new analysis.
-
-## 3. Read guest state with Frida
-
-Spawn a throwaway game process and read the known PC action strings:
-
-```powershell
-python tools/d3-re/frida_probe.py --json
-```
-
-Attach to an already running game:
-
-```powershell
-python tools/d3-re/frida_probe.py --pid <pid> --json
-```
-
-The probe:
-
-- finds `01001B300B9BE000_code.dll`;
-- calls its `snx_module` export;
-- reads the `SnxModInfo` array (`main`, `sdk`, `rtld`);
-- finds the host view whose size equals the `main` module size;
-- scans that view for the known NSO strings and prints both host and guest
-  addresses.
-
-It does not write game memory.
-
-Current B0 result (see `docs/windows/KBM-RE-EVIDENCE.md`):
-
-| string | guest address |
+| 目的 | 工具 |
 | --- | --- |
-| `LeftClickToMove` | `0x8dc985b` |
-| `RightClickAttack` | `0x8e26e0b` |
-| `UseCommandClickAsRightClick` | `0x8e4533b` |
-| `UI_HUD_ClickPredicate` | `0x8dcf212` |
-| `ControlScheme` | `0x8dc91cb` |
-| `ActionBinding` | `0x8ecc112` |
+| SDL 键盘注入 | `probe_sdl_key.py` |
+| SDL 鼠标左键注入 | `probe_pointer_click.py` |
+| 世界实体与 native collide/operate | `probe_click_interact.py` |
+| 同进程点击 before/after、命令和输入中立性 | `verify_script_interaction.py` |
+| 世界点导航与碰撞预检 | `walk_to.py` |
+| 命名 UI 控件快照 | `probe_ui_snapshot.py` |
+| 可见 UI 控件树 | `probe_ui_tree.py` |
+| 原生 UI hit-test | `probe_ui_pointer.py` |
+| 单控件字段/vtable | `probe_ui_object.py` |
+| UI navigation group | `probe_nav_group.py` |
+| 当前角色页签状态 | `probe_ui_tab_state.py` |
 
-## 4. Ghidra
-
-`ghidra_analyze.ps1` imports the ELF, runs auto-analysis with an 8 GiB heap, and
-runs `FindUiRefs.java` afterwards.
-
-```powershell
-.\tools\d3-re\ghidra_analyze.ps1 `
-  -Elf .\out\windows\kbm\b0\d3_main_fixed.elf `
-  -GhidraHome C:\tools\ghidra_12.1.4_PUBLIC `
-  -JavaHome C:\tools\jdk-21
-```
-
-The B0 acceptance is the Frida probe plus the ELF; the Ghidra run is the B1
-input. Do not treat a partial Ghidra analysis as evidence of absence.
-
-## 5. B1b runtime probes
-
-All probes are read-only; they spawn a throwaway game unless `--pid` is given.
-
-Dump the Console UI callback table:
+## 世界点击
 
 ```powershell
-python tools/d3-re/dump_ui_table.py --json out/windows/kbm/b1/ui_table.json
+python tools/d3-re/probe_world_interact.py --pid <PID> --context <CTX> --radius 160 --out out/windows/kbm/session/world.json
+python tools/d3-re/verify_script_interaction.py --pid <PID> --target 0x<HANDLE> --seconds 10 --out out/windows/kbm/session/click.json
+python tools/d3-re/walk_to.py --pid <PID> --context <CTX> --to 2915,2846 --reach 5 --out-dir out/windows/kbm/session/route
 ```
 
-Dump another 24-byte-entry table (for example the transient PC UI table seen at
-module offset `0x1874720`):
+要点：
+
+- 世界坐标是游戏单位；SDL 指针与 UI 坐标是 1280×720 引擎像素。
+- 改变相机会改变实体投影。日志、截图和点击必须来自同一时刻。
+- 碰撞柱命中会变成 entity/attack goal；`walk_to.py` 报 `stopped` 时不能算到达。
+- 远处门/portal 的“命令 accepted”不等于 place 改变。
+
+## UI 点击
 
 ```powershell
-python tools/d3-re/dump_ui_table.py --table-offset 0x1874720 --game-script "5000:1,15000:1,25000:1,35000:1,45000:400" --spawn-wait 55
+python tools/d3-re/probe_ui_snapshot.py --pid <PID> --match 'consolepause_main|conversation|vendorpanel' --out out/windows/kbm/session/ui.json
+python tools/d3-re/probe_ui_tree.py --pid <PID> --visible --out out/windows/kbm/session/tree.json
+python tools/d3-re/probe_ui_pointer.py --pid <PID> --screen 541,51 --out out/windows/kbm/session/hit.json
 ```
 
-Dump the Power script-function table from the fixed ELF:
+当前通用路径支持：
+
+- 有 `+0x118` callback table 的按钮与列表行；
+- 已验证的角色页签 controller；
+- 14 个装备槽与 11 个技能类别；
+- 固定的双按钮确认框形状（尚无焦点/最上层门控）。
+
+当前限制：
+
+- 商人/工匠顶部页签 `0x90ABB48` 的 `+0x118 == 0`；通用点击日志为 `no callback owner`。
+- `0x83911f0(button,1,0,0)` 只改变视觉状态，不能用来宣称业务选择。
+- `0x816F550(0,slot,0,0)` 只用于已经验证的全局角色页签；错误地用于 vendor tab 会切换到角色页。
+- 开关、滑块、滚动列表和重叠控件的完整矩阵尚未完成。
+
+## 探针阅读规则
+
+- `operate accepted`、`submit returned` 和 UI 高亮是中间结果。
+- 业务完成至少需要 place 改变、物品数量变化、背包内容变化或明确的 UI before/after。
+- 多个 Frida 脚本可在同一 session 内加载；不要从多个 Python 进程同时 attach。
+- UI 父链以对象 `+0x38` 的 UIReference 为准；旧的 `+0x20` 解析只用于诊断。
+- `probe_ui_named.py` 的 visible 是静态 flags/父链状态，不是完整当前显示状态；使用同轮前后快照判断。
+- 所有二进制和截图输出只写 `out/`，不得把唯一存档或密钥放进可清理目录。
+
+## 补丁和版本
 
 ```powershell
-python tools/d3-re/dump_script_table.py --filter Cursor
+python tools/windows-dev/verify_patch_chain.py
+python tools/windows-dev/sync_probe_version.py --exe "D:\Games\DiabloIII\01001B300B9BE000\01001B300B9BE000.exe"
 ```
 
-Hook guest functions and post a key through the game window:
-
-```powershell
-python tools/d3-re/trace_ui.py --guest 0x81fb910 --key space
-```
-
-Watch inventory handlers while the game loads:
-
-```powershell
-python tools\d3-re\probe_inventory.py --seconds 58 --post-at 48
-```
-
-Resolve a guest address through `CPU.disp` (AOT/JIT host function) and inspect
-`CPU.mem`:
-
-```powershell
-python tools\d3-re\find_cpu.py --guest 0x8366870 --guest 0x81fb910
-```
-
-Notes:
-
-- Handler entry/continuation claims from the old baseline are obsolete.
-  Inspect the correctly rebased bytes and prove the ABI/context for each target.
-- `PostMessage(WM_KEYDOWN/UP)` works even when the game window is not focused.
-- `CPU.mem + absolute_guest_address` reads guest memory; module-relative
-  addresses must be offset by `0x8005000`.
-
-## 6. Static xrefs and the guest-call boundary
-
-`find_xrefs.py` scans the fixed ELF for code that builds a module address
-(`ADRP+ADD`, `ADRP+LDR`, `ADR`) and for direct `BL`/`B` targets:
-
-```powershell
-python tools/d3-re/find_xrefs.py --string ControlScheme --exact
-python tools/d3-re/find_xrefs.py 0x3cc4c0 0x39cdb0
-```
-
-It found the djb2 hash lookup (`FUN_003cc4c0`) and the widget constructor that
-resolves UI callbacks by name. Some historical continuation-block conclusions came from incorrect address
-conversion and are withdrawn; each callback needs independent ABI/context proof.
-
-`call_guest.py` copies a live CPU and runs a guest function through `CPU.disp`.
-It is a boundary probe only: calling from a Frida thread with a copied stack
-crashed the game (`BEX64`, `0xc0000409`). A real injection bridge must run on
-the game thread with a dedicated guest stack.
-
-## Safety
-
-- No save writes, no `_code.dll` patches.
-- Spawned probes are killed after reading unless `--keep` is given.
-- All binary work products stay under `out/` (git-ignored).
+只按 `patches/windows/base.json` 应用补丁。`0029`、`0030` 已归档，不在当前链中。当前链和业务边界见根仓库的当前交接文档。

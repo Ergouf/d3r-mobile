@@ -1,0 +1,107 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 550cd32..70d20ca 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -397,6 +397,17 @@ static SDL_Scancode g_skill_key[6] = {SDL_SCANCODE_SPACE, SDL_SCANCODE_Z, SDL_SC
+                                       SDL_SCANCODE_V, SDL_SCANCODE_Q, SDL_SCANCODE_E};
+ static int g_skill_keys_loaded;
+ 
++
++/* Publish the six bindings to the overlay, which owns the display strings. */
++static void skill_keys_publish(void) {
++    ui_lock();
++    for (int i = 0; i < 6; i++) {
++        const char* name = SDL_GetScancodeName(g_skill_key[i]);
++        overlay_set_skill_key_name(i, name && name[0] ? name : "?");
++    }
++    ui_unlock();
++}
++
+ static void skill_keys_load(void) {
+     static const char* const names[6] = {"a", "b", "x", "y", "l", "r"};
+     char path[1100], line[160];
+@@ -407,6 +418,7 @@ static void skill_keys_load(void) {
+     f = fopen(path, "r");
+     if (!f) {
+         LOG("input: skill keys are the defaults (no %s)\n", path);
++        skill_keys_publish();
+         return;
+     }
+     while (fgets(line, sizeof line, f)) {
+@@ -431,6 +443,7 @@ static void skill_keys_load(void) {
+         g_skill_key[slot] = k;
+     }
+     fclose(f);
++    skill_keys_publish();
+     LOG("input: skill keys %s=%s %s=%s %s=%s %s=%s %s=%s %s=%s\n", names[0],
+         SDL_GetScancodeName(g_skill_key[0]), names[1], SDL_GetScancodeName(g_skill_key[1]),
+         names[2], SDL_GetScancodeName(g_skill_key[2]), names[3], SDL_GetScancodeName(g_skill_key[3]),
+@@ -1173,6 +1186,8 @@ void video_poll(void) {
+                     /* Alt opens the built-in skill wheel around the pointer; releasing it casts the slot the
+                        pointer points at. Alt+Enter still switches fullscreen and cancels the wheel. */
+                     if (!e.key.repeat) {
++                        /* a session whose first key is Alt must still show the keybinds.ini names */
++                        skill_keys_load();
+                         ui_lock();
+                         overlay_wheel_begin();
+                         ui_unlock();
+diff --git a/src/nx/runtime/platform/overlay.c b/src/nx/runtime/platform/overlay.c
+index 6da3924..22cafec 100644
+--- a/src/nx/runtime/platform/overlay.c
++++ b/src/nx/runtime/platform/overlay.c
+@@ -613,6 +613,15 @@ static int g_pt_inside;
+ static int g_wheel;
+ static float g_wheel_cx, g_wheel_cy;
+ 
++/* Filled by the backend from keybinds.ini; the defaults match the backend's. */
++static char g_skill_key_text[6][24] = {"Space", "Z", "C", "V", "Q", "E"};
++
++void overlay_set_skill_key_name(int slot, const char* name) {
++    if (slot < 0 || slot >= 6 || !name) return;
++    /* one slot box is 42 px at 8 px per glyph: keep the label inside it */
++    snprintf(g_skill_key_text[slot], sizeof g_skill_key_text[slot], "%.5s", name);
++}
++
+ void overlay_pointer_feed(float x, float y, int inside, int width, int height) {
+     g_pt_x = x; g_pt_y = y; g_pt_width = width; g_pt_height = height;
+     g_pt_inside = inside && isfinite(x) && isfinite(y) && width > 0 && height > 0 &&
+@@ -658,7 +667,6 @@ static void cursor_draw(SnxUiList* l, float x, float y) {
+ 
+ static void wheel_draw(SnxUiList* l, int sw, int sh) {
+     static const char* const label[6] = {"A", "B", "X", "Y", "L", "R"};
+-    static const char* const keys[6] = {"SPACE", "Z", "C", "V", "Q", "E"};
+     float cx = g_wheel_cx * sw, cy = g_wheel_cy * sh;
+     int slot = wheel_slot(), i;
+     const float R = 74.0f, B = 21.0f;
+@@ -675,7 +683,15 @@ static void wheel_draw(SnxUiList* l, int sw, int sh) {
+         ui_fill(l, x, y, 2, B * 2, edge);
+         ui_fill(l, x + B * 2 - 2, y, 2, B * 2, edge);
+         ui_text(l, x + B - 3, y + 3, 1, label[i], 0xFFFFE7B8);
+-        ui_text(l, x + 2, y + B * 2 - 12, 1, keys[i], 0xC0D9A85C);
++        /* the real keybinds.ini binding, not a hard-coded list */
++        ui_text(l, x + 2, y + B * 2 - 12, 1, g_skill_key_text[i], 0xC0D9A85C);
++        if (i == slot)
++            ui_fill(l, x + B - 2, y + B * 2 + 2, 4, 4, 0xFFFFE7B8);
++    }
++    if (slot >= 0) {
++        /* the selected slot's letter, in the middle of the ring */
++        ui_fill(l, cx - 7, cy + 7, 14, 16, 0xC0080C18);
++        ui_text(l, cx - 4, cy + 10, 1, label[slot], 0xFFFFE7B8);
+     }
+     ui_text(l, cx - 22, cy - R - 30, 1, "SKILLS", 0xFF3FA0E8);
+ }
+diff --git a/src/nx/runtime/platform/overlay.h b/src/nx/runtime/platform/overlay.h
+index f3ceb29..6d4d044 100644
+--- a/src/nx/runtime/platform/overlay.h
++++ b/src/nx/runtime/platform/overlay.h
+@@ -52,6 +52,10 @@ void overlay_draw(SnxUiList* l, int sw, int sh);
+ /* Experimental pointer/wheel. All calls require ui_lock, including input APIs.
+    Coordinates are window fractions; width/height are physical window pixels. */
+ void overlay_pointer_feed(float x, float y, int inside, int width, int height);
++/* Display name of the key bound to skill slot 0..5, pushed by the backend after
++   it reads keybinds.ini.  The skill wheel shows these instead of a hard-coded
++   list; the defaults stay until the backend publishes the real bindings. */
++void overlay_set_skill_key_name(int slot, const char* name);
+ void overlay_wheel_begin(void);
+ void overlay_wheel_cancel(void);
+ int overlay_wheel_end(void); /* the chosen slot 0..5, or -1 */

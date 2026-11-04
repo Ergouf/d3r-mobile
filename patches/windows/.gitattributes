@@ -1,1 +1,2 @@
 *.patch -text
+*.patch whitespace=-trailing-space,-blank-at-eof

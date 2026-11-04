@@ -1,0 +1,413 @@
+diff --git a/src/nx/CMakeLists.txt b/src/nx/CMakeLists.txt
+index 3dd9b4d..3f45592 100644
+--- a/src/nx/CMakeLists.txt
++++ b/src/nx/CMakeLists.txt
+@@ -28,7 +28,7 @@ function(snx_component name)
+ endfunction()
+ 
+ snx_component(core runtime/main.c runtime/arm.c runtime/loader.c runtime/rtapi.c runtime/clock.c runtime/crash.c runtime/options.c
+-              runtime/native_input.c
++              runtime/native_input.c runtime/native_world.c
+               runtime/startup.c runtime/gdbstub.c runtime/present.c runtime/guest_jit.c
+               runtime/cheats.c)
+ target_link_libraries(snx_core PRIVATE snx_driver snx_lz4 snx_build_info)
+diff --git a/src/nx/runtime/native_input.c b/src/nx/runtime/native_input.c
+index 84a219c..47a8be2 100644
+--- a/src/nx/runtime/native_input.c
++++ b/src/nx/runtime/native_input.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-3.0-or-later
+    Copyright 2026 the ScarletNX contributors */
+ #include "nx/runtime/native_input.h"
++#include "nx/runtime/native_world.h"
+ #include "nx/runtime/loader.h"
+ #include "nx/runtime/arm.h"
+ #include "nx/runtime/main.h"
+@@ -29,6 +30,7 @@ static PMutex g_lock = PMUTEX_INIT;
+ static int g_have;
+ static u64 g_pc;
+ static u64 g_args[8];
++static GuestFn g_inv_original;
+ 
+ static void inv_install(void);
+ 
+@@ -72,6 +74,7 @@ void native_input_init(void) {
+         return;
+     }
+     g_stack_top = base + NATIVE_STACK_SIZE - 0x100;
++    native_world_init();
+     g_test_ui = getenv("SNX_NATIVE_TEST") != NULL;
+     LOG("native: bridge ready (stack %llx%s)\n", (unsigned long long)g_stack_top, g_test_ui ? ", test UI" : "");
+ }
+@@ -82,6 +85,7 @@ void native_input_tick(void) {
+     u64 args[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+     static int queued;
+     inv_install();
++    if (g_inv_original) native_world_install();
+     if (!g_test_ui || queued || !g_stack_top) return;
+     if (__atomic_load_n(&g_frames, __ATOMIC_RELAXED) < 3000) return;
+     if (native_input_queue(0x8366870, args)) {
+@@ -143,7 +147,6 @@ void native_input_run(CPU* c) {
+ #define INV_EV_TYPE_NEW 0x1Au
+ #define INV_BIT_MASK    0x3FFFFu     /* the bit loop at 0x82B94F4 walks bits 0..17 */
+ 
+-static GuestFn g_inv_original;
+ static u32 g_act_pending; /* logical bits from key presses, not in a frame yet */
+ static u32 g_act_applied; /* bits written into the word, waiting for the engine to clear them */
+ static unsigned g_act_seq;
+@@ -215,6 +218,7 @@ int native_action_press(u64 pad) {
+ }
+ 
+ void native_action_cancel(void) {
++    native_world_cancel();
+     u32 pend = __atomic_exchange_n(&g_act_pending, 0, __ATOMIC_ACQ_REL);
+     /* A bit applied in the frame the window lost focus is still in the engine's word until the input manager
+        next rewrites it. Forget it too: otherwise the wrapper would later log a release for a cancelled press,
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+new file mode 100644
+index 0000000..7839e91
+--- /dev/null
++++ b/src/nx/runtime/native_world.c
+@@ -0,0 +1,296 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++   Native D3 world targets: SDL pointer -> engine camera ray -> client Walk command.
++   No Npad or simulated stick state is written by this module. */
++#include "nx/runtime/native_world.h"
++#include "nx/runtime/native_input.h"
++#include "nx/runtime/loader.h"
++#include "nx/runtime/rtapi.h"
++#include "nx/runtime/main.h"
++#include "nx/runtime/platform/log.h"
++#include "nx/memory/mem.h"
++#include "common/filesystem/host.h"
++#include <math.h>
++#include <string.h>
++
++#define UI_PC 0x8331490ull
++#define GAME_PC 0x804F9C0ull
++#define PLAYER_PC 0x8525360ull
++#define RAY_PC 0x826C7B0ull
++#define WALK_PC 0x80D21F0ull
++#define SPEED_PC 0x8489AE0ull
++#define WORLD_STACK_SIZE 0x40000u
++#define WALK_SNO 0x777Cu
++
++typedef struct { float x, y, z; u32 place; } WorldPos;
++typedef struct { float origin[3], direction[3]; } WorldRay;
++typedef struct { float x, y; u32 width, height; u64 fallback; u32 serial, frame; } PointerPress;
++typedef struct { u64 x0; float f0; } GuestResult;
++typedef struct {
++    int active;
++    u32 actor, serial, ticks, stuck;
++    WorldPos target, previous;
++} WalkGoal;
++
++static PMutex g_pointer_lock = PMUTEX_INIT;
++static PointerPress g_pointer;
++static int g_have_pointer, g_cancel, g_enabled, g_ui_blocked = 1, g_busy;
++static u32 g_serial;
++static u64 g_stack_top;
++static GuestFn g_ui_original, g_game_original;
++static WalkGoal g_goal;
++
++static int readable(u64 address, u64 size) {
++    MemBlock b;
++    if (!address || address >= AS_END || size > AS_END - address) return 0;
++    mem_query(address, &b);
++    return (b.perm & PERM_R) && address >= b.addr && address + size <= b.addr + b.size;
++}
++static int read64(u64 address, u64* out) {
++    if (!readable(address, 8)) return 0;
++    memcpy(out, GP(address), 8);
++    return 1;
++}
++static int read32(u64 address, u32* out) {
++    if (!readable(address, 4)) return 0;
++    memcpy(out, GP(address), 4);
++    return 1;
++}
++static int take_pointer(PointerPress* p) {
++    int have;
++    pm_lock(&g_pointer_lock);
++    have = g_have_pointer;
++    if (have) { *p = g_pointer; g_have_pointer = 0; }
++    pm_unlock(&g_pointer_lock);
++    return have;
++}
++
++int native_world_click(float x, float y, u32 width, u32 height, u64 fallback_pad) {
++    PointerPress p;
++    if (!__atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) || !isfinite(x) || !isfinite(y) ||
++        !width || !height || width > 65535 || height > 65535 ||
++        x < 0 || y < 0 || x >= 1 || y >= 1) return 0;
++    pm_lock(&g_pointer_lock);
++    p = (PointerPress){x, y, width, height, fallback_pad, ++g_serial,
++        (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED)};
++    g_pointer = p;
++    g_have_pointer = 1;
++    pm_unlock(&g_pointer_lock);
++    LOG("native: world pointer queued %u (%.4f, %.4f)\n", p.serial, x, y);
++    return 1;
++}
++void native_world_cancel(void) {
++    __atomic_store_n(&g_cancel, 1, __ATOMIC_RELEASE);
++    pm_lock(&g_pointer_lock);
++    g_have_pointer = 0;
++    pm_unlock(&g_pointer_lock);
++}
++
++/* Source CPU, including its concurrent poll request, remains untouched. */
++static int guest_call(const CPU* source, u64 pc, const u64* args, unsigned count,
++                      const float* floats, unsigned float_count, GuestResult* result) {
++    CPU n = *source;
++    unsigned steps = 0;
++    n.pc = pc;
++    n.x[30] = 0;
++    n.x[31] = g_stack_top;
++    n.poll = 0;
++    for (unsigned i = 0; i < 8; i++) n.x[i] = i < count ? args[i] : 0;
++    n.x[8] = 0;
++    for (unsigned i = 8; i < count; i++) memcpy(GP(g_stack_top + (i - 8) * 8), &args[i], 8);
++    for (unsigned i = 0; i < float_count; i++) {
++        memset(&n.v[i], 0, sizeof n.v[i]);
++        memcpy(&n.v[i], &floats[i], sizeof(float));
++    }
++    while (n.pc && steps++ < 16384) {
++        GuestFn f = snx_lookup(&n, n.pc);
++        if (!f) break;
++        f(&n, n.pc);
++    }
++    if (n.pc) {
++        WARN("native: world call %llx incomplete at %llx (%u steps)\n",
++             (unsigned long long)pc, (unsigned long long)n.pc, steps);
++        return 0;
++    }
++    if (result) { result->x0 = n.x[0]; memcpy(&result->f0, &n.v[0], 4); }
++    return 1;
++}
++
++static int context(const CPU* cpu, u64* ctx) {
++    u64 holder, object, block;
++    u32 slot;
++    return read64(0x914F8D0, &holder) && read64(holder, &object) &&
++        read32(object + 12, &slot) && slot < 64 && read64(cpu->tpidrro + 0x1F8, &block) &&
++        read64(block + 0x80 + slot * 8, ctx) && *ctx;
++}
++static int lookup(u64 table, u32 handle, u32 stride, u64* entry) {
++    u32 limit, shift, found;
++    u64 buckets, bucket;
++    u32 index = handle & 0xFFFF;
++    if (handle == 0xFFFFFFFFu || !read32(table + 0x100, &limit) || index >= limit ||
++        !read32(table + 0x168, &shift) || shift > 16 || !read64(table + 0x120, &buckets) ||
++        !read64(buckets + ((u64)index >> shift) * 8, &bucket) || !bucket) return 0;
++    *entry = bucket + (index & ((1u << shift) - 1)) * (u64)stride;
++    return read32(*entry, &found) && found == handle;
++}
++static int local_player(const CPU* cpu, u32* actor, u64* entity, u64* controller, WorldPos* pos) {
++    GuestResult r;
++    u64 ctx, a, b, c, table, global, world;
++    u32 controller_id, controller_actor;
++    const u64 args[] = {0};
++    if (!context(cpu, &ctx) || !read64(ctx, &a) || !read64(a, &b) ||
++        !read64(b + 0x140, &c) || !c || !read64(b + 0x198, &c) || !read64(c, &table) ||
++        !guest_call(cpu, PLAYER_PC, args, 1, NULL, 0, &r) || !r.x0 ||
++        !read32(r.x0 + 4, actor) || !read32(r.x0 + 8, &controller_id) ||
++        !lookup(table, *actor, 0x360, entity) || !readable(*entity + 0x60, 12) ||
++        !read32(*entity + 0xA0, &pos->place)) return 0;
++    memcpy(pos, GP(*entity + 0x60), 12);
++    if (!isfinite(pos->x) || !isfinite(pos->y) || !isfinite(pos->z)) return 0;
++    if (!read64(0x914F840, &global) || !read64(global + 0x10, &world) ||
++        !read64(world + 0xA98, &table) || !lookup(table, controller_id, 0x410, controller) ||
++        !read32(*controller + 8, &controller_actor) || controller_actor != *actor) return 0;
++    return 1;
++}
++
++static int pointer_target(const CPU* cpu, const PointerPress* p, const WorldPos* pos, WorldPos* target) {
++    const u64 rect_address = g_stack_top - 0x20000;
++    const u64 pixel_address = rect_address + 0x100;
++    const u64 ray_address = rect_address + 0x200;
++    int rect[4], pixel[2];
++    WorldRay ray;
++    u64 args[3] = {rect_address, 0, 0};
++    if (!guest_call(cpu, 0x8042940, args, 1, NULL, 0, NULL)) return 0;
++    memcpy(rect, GP(rect_address), sizeof rect);
++    if (rect[2] <= rect[0] || rect[3] <= rect[1]) return 0;
++    /* Match the renderer's centered, aspect-preserving presentation rectangle. */
++    u32 dw = p->width, dh = (u32)((u64)p->width * (rect[3] - rect[1]) / (rect[2] - rect[0]));
++    if (dh > p->height) {
++        dh = p->height;
++        dw = (u32)((u64)p->height * (rect[2] - rect[0]) / (rect[3] - rect[1]));
++    }
++    if (!dw || !dh) return 0;
++    float x = (p->x * p->width - (p->width - dw) / 2) / dw;
++    float y = (p->y * p->height - (p->height - dh) / 2) / dh;
++    if (x < 0 || y < 0 || x >= 1 || y >= 1) return 0;
++    pixel[0] = (int)lroundf(rect[0] + x * (rect[2] - rect[0]));
++    pixel[1] = (int)lroundf(rect[1] + y * (rect[3] - rect[1]));
++    memcpy(GP(pixel_address), pixel, sizeof pixel);
++    args[0] = pixel_address; args[1] = ray_address; args[2] = 0xFFFFFFFFu;
++    if (!guest_call(cpu, RAY_PC, args, 3, NULL, 0, NULL)) return 0;
++    memcpy(&ray, GP(ray_address), sizeof ray);
++    for (unsigned i = 0; i < 3; i++)
++        if (!isfinite(ray.origin[i]) || !isfinite(ray.direction[i])) return 0;
++    if (fabsf(ray.direction[2]) < 0.0001f) return 0;
++    float t = (pos->z - ray.origin[2]) / ray.direction[2];
++    if (!(t > 0 && t < 10000)) return 0;
++    *target = (WorldPos){ray.origin[0] + ray.direction[0] * t,
++        ray.origin[1] + ray.direction[1] * t, pos->z, pos->place};
++    return isfinite(target->x) && isfinite(target->y) &&
++        hypotf(target->x - pos->x, target->y - pos->y) < 200;
++}
++
++static void world_tick(CPU* cpu) {
++    PointerPress p;
++    u32 actor;
++    u64 entity, controller;
++    WorldPos pos;
++    int pending;
++    if (__atomic_exchange_n(&g_cancel, 0, __ATOMIC_ACQ_REL)) g_goal.active = 0;
++    if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE)) return;
++    pending = take_pointer(&p);
++    if (!pending && !g_goal.active) return;
++    if (pending && (u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - p.frame) > 120) {
++        g_goal.active = 0; return;
++    }
++    if (!local_player(cpu, &actor, &entity, &controller, &pos)) {
++        g_goal.active = 0;
++        if (pending) native_action_press(p.fallback);
++        return;
++    }
++    if (pending) {
++        g_goal.active = 0;
++        if (!pointer_target(cpu, &p, &pos, &g_goal.target)) return;
++        g_goal.active = 1; g_goal.actor = actor; g_goal.serial = p.serial;
++        g_goal.ticks = g_goal.stuck = 0; g_goal.previous = pos;
++        LOG("native: world goal %u actor %08x (%.3f,%.3f,%.3f) -> (%.3f,%.3f,%.3f)\n",
++            p.serial, actor, pos.x, pos.y, pos.z, g_goal.target.x, g_goal.target.y, g_goal.target.z);
++    }
++    if (g_goal.actor != actor || g_goal.target.place != pos.place) { g_goal.active = 0; return; }
++    float distance = hypotf(g_goal.target.x - pos.x, g_goal.target.y - pos.y);
++    if (distance <= 0.12f) {
++        LOG("native: world goal %u arrived (error %.4f, %u ticks)\n", g_goal.serial, distance, g_goal.ticks);
++        g_goal.active = 0; return;
++    }
++    if (hypotf(pos.x - g_goal.previous.x, pos.y - g_goal.previous.y) < 0.002f) g_goal.stuck++;
++    else g_goal.stuck = 0;
++    g_goal.previous = pos;
++    if (++g_goal.ticks > 600 || g_goal.stuck > 90) {
++        LOG("native: world goal %u stopped (blocked/timeout)\n", g_goal.serial);
++        g_goal.active = 0; return;
++    }
++    GuestResult speed;
++    u64 args[9] = {entity, 0x11060};
++    if (!guest_call(cpu, SPEED_PC, args, 2, NULL, 0, &speed) ||
++        !isfinite(speed.f0) || speed.f0 <= 0 || speed.f0 > 10) { g_goal.active = 0; return; }
++    float floats[2] = {0, fminf(speed.f0, fmaxf(0.02f, distance * 0.25f))};
++    const u64 pos_address = g_stack_top - 0x1F000, path_address = g_stack_top - 0x1E000;
++    memcpy(GP(pos_address), &g_goal.target, sizeof g_goal.target);
++    memset(GP(path_address), 0, 32);
++    args[0] = path_address; args[1] = pos_address;
++    if (!guest_call(cpu, 0x866D580, args, 2, NULL, 0, NULL)) { g_goal.active = 0; return; }
++    args[0] = controller; args[1] = args[2] = WALK_SNO; args[3] = path_address;
++    for (unsigned i = 4; i < 9; i++) args[i] = 0;
++    if (!guest_call(cpu, WALK_PC, args, 9, floats, 2, NULL)) g_goal.active = 0;
++}
++
++static int primary_event(CPU* cpu, u64* event) {
++    u32 type, player;
++    *event = cpu->x[0];
++    return read32(*event, &type) && type == 0x19 && read32(*event + 0x28, &player) && player == 0;
++}
++static void world_ui(CPU* cpu, u64 entry) {
++    u64 event, lr = cpu->x[30];
++    int primary = entry == UI_PC && primary_event(cpu, &event);
++    g_ui_original(cpu, entry);
++    if (!primary || cpu->pc != lr) return;
++    int blocked = cpu->x[0] != 0;
++    __atomic_store_n(&g_ui_blocked, blocked, __ATOMIC_RELEASE);
++    if (blocked) {
++        PointerPress p;
++        __atomic_store_n(&g_cancel, 1, __ATOMIC_RELEASE);
++        if (take_pointer(&p)) native_action_press(p.fallback);
++    }
++}
++static void world_game(CPU* cpu, u64 entry) {
++    u64 event, lr = cpu->x[30];
++    int primary = entry == GAME_PC && primary_event(cpu, &event);
++    float axes[2] = {0, 0};
++    if (primary && readable(event + 0x30, sizeof axes)) memcpy(axes, GP(event + 0x30), sizeof axes);
++    g_game_original(cpu, entry);
++    if (!primary || cpu->pc != lr) return;
++    if (fabsf(axes[0]) > 0.05f || fabsf(axes[1]) > 0.05f) { native_world_cancel(); return; }
++    if (__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) return;
++    world_tick(cpu);
++    __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
++}
++
++void native_world_init(void) {
++    g_stack_top = kmem_alloc(WORLD_STACK_SIZE, MS_STACK, PERM_RW) + WORLD_STACK_SIZE - 0x100;
++}
++void native_world_install(void) {
++    if (!g_stack_top || !g_disp || UI_PC < g_code_lo || GAME_PC < g_code_lo ||
++        UI_PC >= g_code_hi || GAME_PC >= g_code_hi || WALK_PC >= g_code_hi) return;
++    /* D3 2.6.2.52309 entry: sub sp,#0xc0; stp d13,d12; stp d11,d10. */
++    if (gr32(WALK_PC) != 0xD10303FFu || gr32(WALK_PC + 4) != 0x6D0333EDu) return;
++    if (!g_ui_original) {
++        GuestFn* slot = &g_disp[(UI_PC - g_code_lo) / 4];
++        GuestFn f = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
++        if (f && f != world_ui) { g_ui_original = f; __atomic_store_n(slot, world_ui, __ATOMIC_RELEASE); }
++    }
++    if (!g_game_original) {
++        GuestFn* slot = &g_disp[(GAME_PC - g_code_lo) / 4];
++        GuestFn f = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
++        if (f && f != world_game) { g_game_original = f; __atomic_store_n(slot, world_game, __ATOMIC_RELEASE); }
++    }
++    if (g_ui_original && g_game_original && !__atomic_exchange_n(&g_enabled, 1, __ATOMIC_ACQ_REL))
++        LOG("native: world pointer installed (camera ray -> client Walk)\n");
++}
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+new file mode 100644
+index 0000000..9fbd03a
+--- /dev/null
++++ b/src/nx/runtime/native_world.h
+@@ -0,0 +1,11 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#ifndef SNX_NATIVE_WORLD_H
++#define SNX_NATIVE_WORLD_H
++#include "common/cpu/aarch64/cpu.h"
++
++void native_world_init(void);
++void native_world_install(void);
++/* Safe-area coordinates and pixel dimensions, before removing presentation bars. */
++int native_world_click(float x, float y, u32 width, u32 height, u64 fallback_pad);
++void native_world_cancel(void);
++#endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 1394884..99b1bb3 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -20,6 +20,7 @@
+ #include "nx/runtime/platform/vpad.h"
+ #include "nx/runtime/platform/gamepad.h"
+ #include "nx/runtime/native_input.h"
++#include "nx/runtime/native_world.h"
+ #include "common/utilities/pad_sdl.h"
+ #include <stdatomic.h>
+ #include <stdio.h>
+@@ -1069,6 +1070,16 @@ void video_poll(void) {
+                         g_mouse_buttons &= ~bit;
+                     break;
+                 }
++                if (e.button.which != SDL_TOUCH_MOUSEID && e.button.button == SDL_BUTTON_LEFT) {
++                    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
++                        int x, y, width, height;
++                        float density = SDL_GetWindowPixelDensity(g_win);
++                        backend_window_safe(&x, &y, &width, &height);
++                        if (density > 0 && width > 0 && height > 0 && native_world_click(
++                                (e.button.x * density - x) / width, (e.button.y * density - y) / height,
++                                (u32)width, (u32)height, mouse_native_pad(e.button.button))) break;
++                    } else break;
++                }
+                 /* the same layout as a native action: one pulse per press, and the release has no held state */
+                 if (mouse_native_pad(e.button.button)) {
+                     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) native_action_press(mouse_native_pad(e.button.button));

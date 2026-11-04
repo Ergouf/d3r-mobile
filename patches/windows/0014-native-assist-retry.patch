@@ -1,0 +1,247 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 69b497b..bdeca78 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -50,6 +50,14 @@ typedef struct {
+     u32 handle, controller, power;
+     WorldPos entity;
+     float approach;
++    /* A click that pointed at a thin object too far for the game's A selection:
++       walk to it and retry once the player is close.  The stored pixel only
++       recomputes the ray and terrain depth; the retry accepts the object by
++       handle identity with the one this click matched. */
++    int assist_pending;
++    int assist_pixel[2];
++    WorldPos assist_pos;
++    u32 assist_handle;
+ } WalkGoal;
+ 
+ static PMutex g_pointer_lock = PMUTEX_INIT;
+@@ -199,11 +207,10 @@ static int pointer_pixel(const CPU* cpu, const PointerPress* p, int pixel[2]) {
+     return pixel[0] < rect[2] && pixel[1] < rect[3];
+ }
+ 
+-static int pointer_ray(const CPU* cpu, const PointerPress* p, WorldRay* ray, int pixel[2]) {
++static int ray_at_pixel(const CPU* cpu, const int pixel[2], WorldRay* ray) {
+     const u64 pixel_address = g_stack_top - 0x1FF00;
+     const u64 ray_address = g_stack_top - 0x1FE00;
+     u64 args[3];
+-    if (!pointer_pixel(cpu, p, pixel)) return 0;
+     memcpy(GP(pixel_address), pixel, 2 * sizeof(int));
+     args[0] = pixel_address; args[1] = ray_address; args[2] = 0xFFFFFFFFu;
+     if (!guest_call(cpu, RAY_PC, args, 3, NULL, 0, NULL)) return 0;
+@@ -223,6 +230,11 @@ static int pointer_ray(const CPU* cpu, const PointerPress* p, WorldRay* ray, int
+     for (unsigned i = 0; i < 3; i++) ray->direction[i] /= n;
+     return 1;
+ }
++
++static int pointer_ray(const CPU* cpu, const PointerPress* p, WorldRay* ray, int pixel[2]) {
++    if (!pointer_pixel(cpu, p, pixel)) return 0;
++    return ray_at_pixel(cpu, pixel, ray);
++}
+ static int ground_target(const CPU* cpu, const int pixel[2], const WorldPos* pos,
+                          WorldPos* target, float* distance) {
+     const u64 scratch = g_stack_top - 0x1C000;
+@@ -645,16 +657,27 @@ static int project_point(const CPU* cpu, u32 place, float x, float y, float z, f
+    pick of its own; an empty click still becomes a walk, not a guessed action. */
+ #define ASSIST_ACTION 0x45CCFu
+ #define ASSIST_RADIUS 14.0f
+-#define ASSIST_GATE_RADIUS 30.0f
+ #define ASSIST_GATE_DISTANCE 8.0f
++/* A click on a thin object farther than the gate still names that object: walk
++   to it and ask the game once more when close.  The cap only limits how far a
++   click may name an object; whether a click names one at all is decided by the
++   gate below (interactive power, same place, and its projection within
++   ASSIST_RADIUS of the click). */
++#define ASSIST_RETRY_DISTANCE 120.0f
+ 
+ /* Coarse gate before calling the game's A selection: a writable, interactive
+-   actor must be within 8 world units and 30 screen pixels of the click.  The
+-   gate only decides whether to ask the game; it never picks the target. */
++   actor must be within `distance_limit` world units and ASSIST_RADIUS screen
++   pixels of the click, must not be the local player, and must have a positive
++   operate power.  The gate only decides whether to ask the game; it never picks
++   the target.  The nearest such candidate (screen distance) is returned in
++   `found`. */
+ static int assist_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+-                                 const int pixel[2]) {
++                                 const int pixel[2], float distance_limit, WorldPos* found,
++                                 u32* found_id, u32 player_actor) {
+     u32 limit, shift;
+     u64 buckets;
++    float best = ASSIST_RADIUS;
++    int hit = 0;
+     if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
+         limit > 65536 || !read64(table + 0x120, &buckets)) return 0;
+     for (u32 i = 0; i < limit; i++) {
+@@ -663,12 +686,18 @@ static int assist_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+         float p[3], base[2], top[2];
+         if (!read64(buckets + ((u64)i >> shift) * 8, &bucket) || !bucket) continue;
+         entry = bucket + (u64)(i & ((1u << shift) - 1)) * ENTITY_STRIDE;
+-        if (!read32(entry, &id) || !id || id == 0xFFFFFFFFu ||
++        if (!read32(entry, &id) || !id || id == 0xFFFFFFFFu || id == player_actor ||
+             !read32(entry + 0xA0, &place) || place != pos->place ||
+             !read32(entry + 0x14, &cid) || cid == 0xFFFFFFFFu || !readable(entry + 0x60, 12))
+             continue;
+         memcpy(p, GP(entry + 0x60), sizeof p);
+-        if (hypotf(p[0] - pos->x, p[1] - pos->y) > ASSIST_GATE_DISTANCE) continue;
++        if (hypotf(p[0] - pos->x, p[1] - pos->y) > distance_limit) continue;
++        /* Only an actor the game itself gives an operate power to can be a
++           retry target; a decoration or the player never arms one. */
++        u64 cap_args[1] = {entry};
++        GuestResult cap;
++        if (!guest_call(cpu, CAP_POWER_PC, cap_args, 1, NULL, 0, &cap) || (i32)cap.x0 <= 0 ||
++            (u32)cap.x0 == ASSIST_ACTION) continue;
+         if (!project_point(cpu, place, p[0], p[1], p[2], base)) continue;
+         float height = 0;
+         if (readable(entry + 0x80, 20)) {
+@@ -682,13 +711,19 @@ static int assist_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+         float y0 = fminf(base[1], top[1]), y1 = fmaxf(base[1], top[1]);
+         float cy = pixel[1] < y0 ? y0 : (pixel[1] > y1 ? y1 : pixel[1]);
+         float dx = pixel[0] - (base[0] + top[0]) * 0.5f;
+-        if (hypotf(dx, pixel[1] - cy) <= ASSIST_GATE_RADIUS) return 1;
++        float d = hypotf(dx, pixel[1] - cy);
++        if (d > best) continue;
++        best = d;
++        if (found) *found = (WorldPos){p[0], p[1], p[2], place};
++        if (found_id) *found_id = id;
++        hit = 1;
+     }
+-    return 0;
++    return hit;
+ }
+ 
+ static int assist_target(const CPU* cpu, u64 table, u64 player_object, const WorldRay* ray,
+-                         const int pixel[2], float occlusion, const WorldPos* pos, WalkGoal* goal) {
++                         const int pixel[2], float occlusion, const WorldPos* pos, WalkGoal* goal,
++                         u32 want) {
+     const u64 record = g_stack_top - 0x1C900;
+     const u64 scratch6 = g_stack_top - 0x1C800, scratch7 = g_stack_top - 0x1C804;
+     GuestResult r;
+@@ -700,10 +735,14 @@ static int assist_target(const CPU* cpu, u64 table, u64 player_object, const Wor
+     u32 type, id, power = words[1], cid = words[0];
+     if (!read32(record + 0x14, &type) || !read32(record + 0x18, &id) ||
+         type != 1 || id == 0 || id == 0xFFFFFFFFu || power == 0 || power == 0xFFFFFFFFu ||
+-        cid == 0 || cid == 0xFFFFFFFFu) {
++        power == ASSIST_ACTION || cid == 0 || cid == 0xFFFFFFFFu) {
+         LOG("native: assist miss (path %u id %08x power %08x cid %08x)\n", type, id, power, cid);
+         return 0;
+     }
++    if (want && id != want) {
++        LOG("native: assist miss (game chose %08x, click named %08x)\n", id, want);
++        return 0;
++    }
+     u64 entry;
+     u32 place;
+     float p[3], base[2], top[2];
+@@ -734,7 +773,10 @@ static int assist_target(const CPU* cpu, u64 table, u64 player_object, const Wor
+     float cy = pixel[1] < y0 ? y0 : (pixel[1] > y1 ? y1 : pixel[1]);
+     float dx = pixel[0] - (base[0] + top[0]) * 0.5f;
+     float screen_distance = hypotf(dx, pixel[1] - cy);
+-    if (!(screen_distance <= ASSIST_RADIUS)) {
++    /* The click-time guard proves the click pointed at this object.  A retry
++       happens after walking, when the camera has moved, so it proves identity
++       with the handle instead and keeps the occlusion check. */
++    if (!want && !(screen_distance <= ASSIST_RADIUS)) {
+         LOG("native: assist miss (target %08x screen %.2f > %.2f)\n", id, screen_distance, ASSIST_RADIUS);
+         return 0;
+     }
+@@ -778,8 +820,11 @@ static void world_tick(CPU* cpu) {
+         memset(&g_goal, 0, sizeof g_goal);
+         int ground_ok = ground_target(cpu, pixel, &pos, &ground, &occlusion);
+         int picked = pick_entity(cpu, table, &ray, occlusion, &pos, actor, &g_goal);
+-        if (picked == 0 && assist_candidate_near(cpu, table, &pos, pixel))
+-            picked = assist_target(cpu, table, player_object, &ray, pixel, occlusion, &pos, &g_goal);
++        WorldPos candidate;
++        if (picked == 0 &&
++            assist_candidate_near(cpu, table, &pos, pixel, ASSIST_GATE_DISTANCE, &candidate, NULL,
++                                  actor))
++            picked = assist_target(cpu, table, player_object, &ray, pixel, occlusion, &pos, &g_goal, 0);
+         if (picked < 0) return;
+         if (picked > 0) {
+             g_goal.active = 1;
+@@ -804,11 +849,84 @@ static void world_tick(CPU* cpu) {
+             g_goal.target = ground;
+             g_goal.active = 1; g_goal.actor = actor; g_goal.serial = p.serial;
+             g_goal.ticks = g_goal.stuck = 0; g_goal.previous = pos;
++            /* The click still named an interactable that is merely too far for
++               the game's A selection: walk to it and retry there, keeping this
++               click's pixel/ray/depth so the retry can only accept it. */
++            float candidate_distance = 0;
++            if (assist_candidate_near(cpu, table, &pos, pixel, ASSIST_RETRY_DISTANCE, &candidate,
++                                      &g_goal.assist_handle, actor) &&
++                (candidate_distance = hypotf(candidate.x - pos.x, candidate.y - pos.y)) >
++                    ASSIST_GATE_DISTANCE) {
++                float dx = pos.x - candidate.x, dy = pos.y - candidate.y;
++                float d = hypotf(dx, dy);
++                if (d > 0.001f) {
++                    g_goal.target = (WorldPos){candidate.x + dx / d * 3.6f, candidate.y + dy / d * 3.6f,
++                        candidate.z, candidate.place};
++                } else {
++                    g_goal.target = candidate;
++                }
++                g_goal.assist_pending = 1;
++                g_goal.assist_pixel[0] = pixel[0];
++                g_goal.assist_pixel[1] = pixel[1];
++                g_goal.assist_pos = candidate;
++                LOG("native: assist pending %u handle %08x (%.1f,%.1f) distance %.2f\n",
++                    p.serial, g_goal.assist_handle, candidate.x, candidate.y, candidate_distance);
++            }
+             LOG("native: world goal %u actor %08x (%.3f,%.3f,%.3f) -> (%.3f,%.3f,%.3f)\n",
+                 p.serial, actor, pos.x, pos.y, pos.z, g_goal.target.x, g_goal.target.y, g_goal.target.z);
+         }
+     }
+     if (g_goal.actor != actor || g_goal.target.place != pos.place) { g_goal.active = 0; return; }
++    if (g_goal.assist_pending) {
++        u64 current;
++        u32 place;
++        if (!lookup(table, g_goal.assist_handle, ENTITY_STRIDE, &current) ||
++            !read32(current + 0xA0, &place) || place != pos.place ||
++            !readable(current + 0x60, 12)) {
++            LOG("native: assist pending %u target %08x expired\n", g_goal.serial,
++                g_goal.assist_handle);
++            g_goal.assist_pending = 0;
++            g_goal.active = 0;
++            return;
++        }
++        memcpy(&g_goal.assist_pos, GP(current + 0x60), 12);
++        g_goal.assist_pos.place = place;
++        /* A moving NPC would otherwise leave the arm-time walk point behind and
++           the goal would "arrive" outside the retry radius. */
++        float adx = pos.x - g_goal.assist_pos.x, ady = pos.y - g_goal.assist_pos.y;
++        float ad = hypotf(adx, ady);
++        if (ad > 0.001f)
++            g_goal.target = (WorldPos){g_goal.assist_pos.x + adx / ad * 3.6f,
++                g_goal.assist_pos.y + ady / ad * 3.6f, g_goal.assist_pos.z, place};
++        else
++            g_goal.target = g_goal.assist_pos;
++        float gap = hypotf(g_goal.assist_pos.x - pos.x, g_goal.assist_pos.y - pos.y);
++        if (gap <= ASSIST_GATE_DISTANCE) {
++            g_goal.assist_pending = 0;
++            WalkGoal retry = {0};
++            WorldRay ray;
++            WorldPos ground;
++            float occlusion = FLT_MAX;
++            if (!ground_target(cpu, g_goal.assist_pixel, &pos, &ground, &occlusion) ||
++                occlusion == FLT_MAX) {
++                LOG("native: assist retry %u no terrain depth\n", g_goal.serial);
++            } else if (ray_at_pixel(cpu, g_goal.assist_pixel, &ray) &&
++                assist_target(cpu, table, player_object, &ray, g_goal.assist_pixel, occlusion,
++                              &pos, &retry, g_goal.assist_handle)) {
++                g_goal.handle = retry.handle;
++                g_goal.controller = retry.controller;
++                g_goal.power = retry.power;
++                g_goal.approach = retry.approach;
++                g_goal.entity = retry.entity;
++                g_goal.entity_goal = 1;
++                g_goal.ticks = g_goal.stuck = 0;
++                LOG("native: assist retry %u accepted %08x (same handle) at %.2f\n",
++                    g_goal.serial, g_goal.handle, gap);
++            } else {
++                LOG("native: assist retry %u rejected at %.2f\n", g_goal.serial, gap);
++            }
++        }
++    }
+     if (g_goal.entity_goal) {
+         u64 current, global, world, controllers, target_controller;
+         u32 place, cid, owner;

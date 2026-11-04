@@ -1,0 +1,89 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index bcb34be..2222fcd 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -273,6 +273,12 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+     u32 limit, shift;
+     u64 buckets;
+     float best = fminf(occlusion, ray->length) + 0.05f;
++    float player_radius = 0;
++    u64 player_entry;
++    if (lookup(table, player_actor, ENTITY_STRIDE, &player_entry) && readable(player_entry + 0x90, 4)) {
++        memcpy(&player_radius, GP(player_entry + 0x90), 4);
++        if (!isfinite(player_radius) || player_radius <= 0 || player_radius > 64) player_radius = 0;
++    }
+     int found = 0;
+     u32 hit_cap = 0;
+     if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
+@@ -280,7 +286,7 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+     memcpy(GP(scratch), ray, sizeof *ray);
+     for (u32 i = 0; i < limit; i++) {
+         u64 bucket, entry;
+-        u32 id, place, cid;
++        u32 id, place, cid, actor_type;
+         float cylinder[5], p[3], depth;
+         GuestResult r;
+         if (!read64(buckets + ((u64)i >> shift) * 8, &bucket) || !bucket) continue;
+@@ -295,9 +301,15 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+         for (unsigned j = 0; j < 5; j++) if (!isfinite(cylinder[j])) finite = 0;
+         if (!finite || cylinder[3] <= 0 || cylinder[4] <= 0 ||
+             hypotf(p[0] - pos->x, p[1] - pos->y) > PICK_MAX_DISTANCE) continue;
++        /* Character bounds retain their spawn position in +0x80.  Intersect
++           their current location; static gizmos keep their authored offset. */
++        if (read32(entry + 0x14C, &actor_type) && actor_type == 1) {
++            cylinder[0] = p[0]; cylinder[1] = p[1]; cylinder[2] = p[2];
++        }
++        memcpy(GP(scratch + 0x80), cylinder, sizeof cylinder);
+         /* Entity collision bounds, native ray test and native terrain depth.
+            No projected-nearest or generic confirm fallback may retarget a click. */
+-        u64 args[3] = {scratch, entry + 0x80, hit};
++        u64 args[3] = {scratch, scratch + 0x80, hit};
+         if (!guest_call(cpu, CYLINDER_PC, args, 3, NULL, 0, &r)) return -1;
+         if (!r.x0) continue;
+         memcpy(&depth, GP(hit), 4);
+@@ -307,6 +319,7 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+            instead of turning a door or an NPC into an attack target. */
+         if (!guest_call(cpu, CAP_POWER_PC, args, 1, NULL, 0, &r)) continue;
+         u32 cap = ((i32)r.x0 > 0 && (u32)r.x0 != ASSIST_ACTION) ? (u32)r.x0 : 0;
++        if (!cap && (!player_radius || cylinder[4] > 64)) return -1;
+         hit_cap = cap;
+         best = depth;
+         found = 1;
+@@ -320,7 +333,7 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+            [3] for the top).  Stand outside the radius, with a margin, and clamp
+            so a very wide object still leaves a reachable walk point. */
+         goal->approach = cap ? fmaxf(INTERACT_APPROACH, fminf(cylinder[4] + 0.8f, 4.0f))
+-                             : ATTACK_APPROACH;
++                             : fmaxf(ATTACK_APPROACH, cylinder[4] + player_radius + 0.2f);
+     }
+     if (found > 0) LOG("native: cylinder hit %08x depth %.3f terrain %.3f power %d%s\n",
+                       goal->handle, best, occlusion, (int)hit_cap,
+@@ -332,21 +345,22 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+    +0 controller 0xFFFFFFFF, +4/+8 the attack power, +0xC 0, +0x10 -1, +0x14 a
+    type-2 position path built by 0x866D580(path, world_pos). */
+ static int submit_attack(const CPU* cpu, u64 player_object, const WalkGoal* goal) {
+-    const u64 record = g_stack_top - 0x1CB00, path = record + 0x14, pos = record + 0xA0;
++    const u64 record = g_stack_top - 0x1CB00, path = record + 0x14;
+     u32* words = (u32*)GP(record);
+     memset(GP(record), 0, 0x80);
+-    words[0] = 0xFFFFFFFFu;
++    words[0] = goal->controller;
+     words[1] = words[2] = ATTACK_POWER;
+     words[3] = 0;
+     words[4] = 0xFFFFFFFFu;
+-    memcpy(GP(pos), &goal->entity, sizeof goal->entity);
+-    u64 build[2] = {path, pos};
+-    if (!guest_call(cpu, PATH_POS_PC, build, 2, NULL, 0, NULL)) {
++    /* Natural A against the observed monster used a type-1 actor path and
++       its controller.  The type-2 record is only the empty-ground attack. */
++    u64 build[4] = {path, goal->handle, 0, 0};
++    if (!guest_call(cpu, PATH_ACTOR_PC, build, 4, NULL, 0, NULL)) {
+         LOG("native: attack path build failed for %08x\n", goal->handle);
+         return 0;
+     }
+     u32 type, id;
+-    if (!read32(path, &type) || !read32(path + 4, &id) || type != 2 || id != 0xFFFFFFFFu) {
++    if (!read32(path, &type) || !read32(path + 4, &id) || type != 1 || id != goal->handle) {
+         LOG("native: attack path mismatch type %u id %08x\n", type, id);
+         return 0;
+     }

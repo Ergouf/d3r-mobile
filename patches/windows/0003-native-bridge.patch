@@ -1,5 +1,5 @@
 diff --git a/src/nx/CMakeLists.txt b/src/nx/CMakeLists.txt
-index b2a6b9f..3dd9b4d 100644
+index 6ad555c..3dd9b4d 100644
 --- a/src/nx/CMakeLists.txt
 +++ b/src/nx/CMakeLists.txt
 @@ -28,6 +28,7 @@ function(snx_component name)
@@ -10,25 +10,6 @@ index b2a6b9f..3dd9b4d 100644
                runtime/startup.c runtime/gdbstub.c runtime/present.c runtime/guest_jit.c
                runtime/cheats.c)
  target_link_libraries(snx_core PRIVATE snx_driver snx_lz4 snx_build_info)
-@@ -86,13 +87,17 @@ include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
- snx_shaderdec(snx_shader)
- snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/record.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
-                  gpu/vk/buffer.c gpu/vk/writeback.c gpu/vk/pipeline.c gpu/vk/pipeline_file.c gpu/vk/render.c gpu/vk/release.c gpu/vk/query.c gpu/vk/compute.c
--                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
-+                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/vk/fsr.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
-                  "${volk_SOURCE_DIR}/volk.c")
- # the ASTC decoder's and the VIC composition's SPIR-V, compiled from their GLSL at build time (cmake/glsl.cmake). The
- # VIC shader is built twice: for word aligned rows, and for the rest (gpu/video/vic_compose.glsl)
- include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
- snx_glsl_spirv(snx_vk SOURCE gpu/texture/astc.comp NAME astc_spv HEADER nx/gpu/texture/astc_spv.h)
- snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_spv HEADER nx/gpu/video/vic_spv.h)
-+# the FSR 1 EASU pass's triangle and its upscale (gpu/vk/fsr.c)
-+snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr.vert NAME fsr_vert_spv HEADER nx/gpu/vk/fsr_spv.h)
-+snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr.frag NAME fsr_frag_spv HEADER nx/gpu/vk/fsr_spv.h)
-+snx_glsl_spirv(snx_vk SOURCE gpu/vk/shaders/fsr_rcas.frag NAME fsr_rcas_spv HEADER nx/gpu/vk/fsr_spv.h)
- snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_unaligned_spv HEADER nx/gpu/video/vic_spv.h
-                DEFINES VIC_UNALIGNED)
- set(components core kernel hle video gpu platform shader vk)
 diff --git a/src/nx/hle/svc/svc.c b/src/nx/hle/svc/svc.c
 index e622f19..9a11896 100644
 --- a/src/nx/hle/svc/svc.c

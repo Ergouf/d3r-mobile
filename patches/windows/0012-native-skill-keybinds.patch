@@ -1,0 +1,99 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 4222d26..550cd32 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -360,16 +360,18 @@ int backend_vk_surface(VkInstance instance, VkSurfaceKHR* surface) {
+ static const char* HELP = "Controller: A, B, X and Y where the console's are (gamepad_swap_ab=1 swaps A and B). Home: "
+                           "the game's menu.\n\n"
+                           "Keyboard (keys by position, as on a US layout):\n"
+-                          "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick\n"
+-                          "  X / Space = A    Z = B    C = X    V = Y\n"
+-                          "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
++                          "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick (unless rebound)\n"
++                          "  Defaults (keybinds.ini may change them): Space = A    Z = B    C = X    V = Y\n"
++                          "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n"
++                          "  The six skill keys are the a= b= x= y= l= r= lines of keybinds.ini next to the game;\n"
++                          "  without that file they are Space Z C V Q E.\n\n"
+                           "Mouse steer (mouse_steer=1): the pointer is the left stick, left = A, right = B, middle = X,\n"
+                           "back = Y; in a menu it moves the selection and the left button confirms.\n"
+                           "Without mouse steer, the mouse's buttons are the pad's actions (left A, right B, middle X,\n"
+                           "back Y, forward L). The touch screen takes fingers only: touch=2 no longer turns mouse buttons\n"
+-                          "into touches.\n\n"
++                          "into touches. Alt opens the skill wheel at the pointer and casts the highlighted slot on release.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+-                          "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = quit";
++                          "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+ 
+ static PadKind gamepad_kind(int type) {
+     switch (type) {
+@@ -383,15 +385,63 @@ static PadKind gamepad_kind(int type) {
+ /* keys -> HidNpadButton bits; 40..47 are the stick keys, turned into axes in video_poll. By scancode, the key's
+    position: the keycode depends on the layout and on the modifiers, so Shift pressed while 1 was held made its release
+    a different key, and ZL stayed held */
++/* The six skill slots (A B X Y L R) are bound by keybinds.ini next to the game's exe:
++     a=space
++     b=z
++     ...
++   An absent file keeps the defaults below.  The face/shoulder keys no longer
++   have a second hard-coded mapping: one slot, one key, so the file is the whole
++   binding. */
++static const u64 SKILL_PAD[6] = {1ull << 0, 1ull << 1, 1ull << 2, 1ull << 3, 1ull << 6, 1ull << 7};
++static SDL_Scancode g_skill_key[6] = {SDL_SCANCODE_SPACE, SDL_SCANCODE_Z, SDL_SCANCODE_C,
++                                      SDL_SCANCODE_V, SDL_SCANCODE_Q, SDL_SCANCODE_E};
++static int g_skill_keys_loaded;
++
++static void skill_keys_load(void) {
++    static const char* const names[6] = {"a", "b", "x", "y", "l", "r"};
++    char path[1100], line[160];
++    FILE* f;
++    if (g_skill_keys_loaded) return;
++    g_skill_keys_loaded = 1;
++    snprintf(path, sizeof path, "%skeybinds.ini", g_exedir);
++    f = fopen(path, "r");
++    if (!f) {
++        LOG("input: skill keys are the defaults (no %s)\n", path);
++        return;
++    }
++    while (fgets(line, sizeof line, f)) {
++        char name[16], value[64];
++        int slot = -1;
++        if (sscanf(line, " %15[^= \t] = %63s", name, value) != 2) continue;
++        for (int i = 0; i < 6; i++)
++            if (!strcmp(name, names[i])) slot = i;
++        if (slot < 0) {
++            if (name[0] != ';' && name[0] != '#')
++                WARN("input: keybinds.ini: unknown slot '%s'\n", name);
++            continue;
++        }
++        SDL_Scancode k = SDL_GetScancodeFromName(value);
++        if (k == SDL_SCANCODE_UNKNOWN) {
++            WARN("input: keybinds.ini: unknown key '%s' for '%s'\n", value, name);
++            continue;
++        }
++        for (int j = 0; j < 6; j++)
++            if (j != slot && g_skill_key[j] == k)
++                WARN("input: keybinds.ini: '%s' also binds slot %s\n", value, names[j]);
++        g_skill_key[slot] = k;
++    }
++    fclose(f);
++    LOG("input: skill keys %s=%s %s=%s %s=%s %s=%s %s=%s %s=%s\n", names[0],
++        SDL_GetScancodeName(g_skill_key[0]), names[1], SDL_GetScancodeName(g_skill_key[1]),
++        names[2], SDL_GetScancodeName(g_skill_key[2]), names[3], SDL_GetScancodeName(g_skill_key[3]),
++        names[4], SDL_GetScancodeName(g_skill_key[4]), names[5], SDL_GetScancodeName(g_skill_key[5]));
++}
++
+ static u64 keymap(SDL_Scancode k) {
++    skill_keys_load();
++    for (int i = 0; i < 6; i++)
++        if (k == g_skill_key[i]) return SKILL_PAD[i];
+     switch (k) {
+-        case SDL_SCANCODE_X:
+-        case SDL_SCANCODE_SPACE: return 1ull << 0; /* A */
+-        case SDL_SCANCODE_Z: return 1ull << 1;     /* B */
+-        case SDL_SCANCODE_C: return 1ull << 2;     /* X */
+-        case SDL_SCANCODE_V: return 1ull << 3;     /* Y */
+-        case SDL_SCANCODE_Q: return 1ull << 6;     /* L */
+-        case SDL_SCANCODE_E: return 1ull << 7;     /* R */
+         case SDL_SCANCODE_1: return 1ull << 8;     /* ZL */
+         case SDL_SCANCODE_3: return 1ull << 9;     /* ZR */
+         case SDL_SCANCODE_RETURN: return 1ull << 10;

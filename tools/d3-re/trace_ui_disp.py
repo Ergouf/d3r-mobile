@@ -20,7 +20,7 @@ import time
 import frida
 
 # globals in the current scarletnx.exe (llvm-nm | findstr " g_disp$ g_code_lo$")
-G_DISP_OFFSET = 0x12910D0
+G_DISP_OFFSET = 0x12910E0
 G_CODE_LO_OFFSET = 0x17AF028
 
 JS = r"""

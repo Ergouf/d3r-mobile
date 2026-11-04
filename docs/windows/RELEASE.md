@@ -1,24 +1,27 @@
 # Windows FSR1 发行记录
 
-更新：2026-10-21。现存启动入口为：
+更新：2026-11-04。下表保留最初 FSR1 发行身份；当前本机 KBM 诊断构建为 `F4BF82B6…`，不能回写成原发行包哈希。现存启动入口为：
 
 ```text
-D:\Games\DiabloIII\Launch.cmd
+D:\Games\DiabloIII\暗黑破坏神 III.lnk
 ```
 
-旧 `D:\Program Files` 安装已迁移到 `D:\Games\DiabloIII` 并删除旧位置；原交付位置的外部 ZIP 也已解压/删除。项目中保留的完整归档为 [DiabloIII-Windows-2.7.7.92380-zhCN-Xbox-FSR1.zip](../../local/releases/windows/DiabloIII-Windows-2.7.7.92380-zhCN-Xbox-FSR1.zip)，同目录附 [ZIP SHA-256](../../local/releases/windows/DiabloIII-Windows-2.7.7.92380-zhCN-Xbox-FSR1.zip.sha256)。下列归档身份与最初交付成品一致，诊断中的安装文件可能继续变化。
+`Launch.cmd` 仍保留；发行 ZIP 解压后仍以它为入口。
+
+旧 `D:\Program Files` 安装已迁移到 `D:\Games\DiabloIII` 并删除旧位置；原交付位置的外部 ZIP 也已解压/删除。工作区中的完整 ZIP 于 2026-10-21 作为安装目录重复副本清理，当前完整运行副本为 `D:\Games\DiabloIII`。下列归档身份与最初交付成品一致，诊断中的安装文件可能继续变化。
 
 | 项目 | 结果 |
 | --- | --- |
 | ZIP 大小 | 22,324,923,511 bytes，约 22.32GB |
 | ZIP SHA-256 | `c1a235a7396a0b61e7b7a33f3a446993478a37620ac31eba213b5dcc98fd88d4` |
+| 归档状态 | 2026-10-21 已作为安装目录重复副本清理（释放约 20.79 GiB） |
 | ZIP 内容 | 168 个条目，167 个文件由 `SHA256SUMS.txt` 覆盖 |
 | 运行时 SHA-256 | `64e0c3ce898da18552920c7862e223b0513671b2c61dfb957f3d3cf11c266087` |
 | 游戏 | Title ID `01001B300B9BE000`，版本 `2.7.7.92380` |
 | 主模块 BuildID | `2607A74F5DF7754CC0357B5DF7E496931355D8CA` |
 | 上游源码基线 | ScarletNX `dbf8915965367e8a9616b19e5a0c1eddafaf28f3` |
 
-使用现存安装中的 `Launch.cmd` 启动；重新安装时完整解压保留的 ZIP 后再运行，不要从压缩软件内直接启动。
+现存安装使用带图标的快捷方式启动；需要重新部署时从安装目录复制，或按构建说明用 `--source` 指定基线 ZIP 重新打包，不要从压缩软件内直接启动。
 
 ## 内容与默认设置
 

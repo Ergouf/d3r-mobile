@@ -1,0 +1,71 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 26f9cde..e872fa6 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -861,6 +861,58 @@ static int ui_skill_icon(UiPick* p, u32 serial) {
+     return 0;
+ }
+ 
++/* The console prompt's two buttons are text widgets without a +0x118
++   callback; the game handles the prompt through A/B.  A pointer click on the
++   button bar therefore had no callback owner and was logged as missed.  Map a
++   real click on the left/right button to the game's own B/A action.  Only the
++   observed prompt shape is accepted: a 0x90AE3D8 bar (about 132x66) with two
++   visible 0x90ABB48 children, under a 0x90AF208 dialog root (about 558x127). */
++static int ui_dialog_buttons(UiPick* p, u32 serial) {
++    for (size_t i = 0; i < g_ui_child_count; i++) {
++        u64 bar = g_ui_children[i].obj, vt, data, parent_key, root, rvt;
++        u32 count;
++        float br[4], rr[4];
++        if (!bar || !read64(bar, &vt) || vt != 0x90AE3D8) continue;
++        if (!read32(bar + 0x68, &count) || count != 2 || !read64(bar + 0x60, &data)) continue;
++        if (!ui_visible(p->map, bar) || !readable(bar + 0x88, 16)) continue;
++        memcpy(br, GP(bar + 0x88), sizeof br);
++        if (!(br[2] - br[0] >= 120 && br[2] - br[0] <= 150 &&
++              br[3] - br[1] >= 50 && br[3] - br[1] <= 80)) continue;
++        if (!read64(bar + 0x38, &parent_key) || !(root = ui_object(p->map, parent_key)) ||
++            !read64(root, &rvt) || rvt != 0x90AF208 || !readable(root + 0x88, 16)) continue;
++        memcpy(rr, GP(root + 0x88), sizeof rr);
++        if (!(rr[2] - rr[0] >= 540 && rr[2] - rr[0] <= 580 &&
++              rr[3] - rr[1] >= 110 && rr[3] - rr[1] <= 145)) continue;
++        u64 button[2] = {0, 0};
++        int seen = 0;
++        for (u32 j = 0; j < 2; j++) {
++            u64 child, cvt;
++            u32 flags;
++            if (!read64(data + (u64)j * 24ull + 8, &child) || !child ||
++                !read64(child, &cvt) || cvt != 0x90ABB48 ||
++                !read32(child + 0x18, &flags) || !(flags & 4) ||
++                !readable(child + 0x88, 16)) continue;
++            button[seen++] = child;
++        }
++        if (seen != 2) continue;
++        float ax = *(float*)GP(button[0] + 0x88);
++        float bx = *(float*)GP(button[1] + 0x88);
++        u64 left = ax <= bx ? button[0] : button[1];
++        u64 right = ax <= bx ? button[1] : button[0];
++        int left_inside = ui_inside(p, left);
++        int right_inside = ui_inside(p, right);
++        if (!left_inside && !right_inside) continue;
++        u64 pad = right_inside ? (1ull << 0) : (1ull << 1);
++        int queued = native_action_press(pad);
++        LOG("native: UI dialog button %u %s bar=%llx root=%llx -> %s\n",
++            serial, right_inside ? "confirm(A)" : "cancel(B)",
++            (unsigned long long)bar, (unsigned long long)root,
++            queued ? "queued" : "rejected");
++        return 1;
++    }
++    return 0;
++}
++
+ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     UiPick p = {.cpu = cpu};
+     GuestResult r;
+@@ -881,6 +933,7 @@ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     if (ui_tab_click(&p)) return;
+     if (ui_equipment_icon(&p, press->serial)) return;
+     if (ui_skill_icon(&p, press->serial)) return;
++    if (ui_dialog_buttons(&p, press->serial)) return;
+     if (!read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
+         !read32(subs + 8, &sub_count) || sub_count > 1024) sub_count = 0;
+     int focused = 0, menu_owner = 0;

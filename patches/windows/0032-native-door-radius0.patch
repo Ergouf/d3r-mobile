@@ -1,0 +1,34 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index fd25e8a..3abd316 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1259,13 +1259,13 @@ static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+         memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
+         LOG("native: door probe %08x sno %u dist %.2f cylinder %.2f\n", id, sno,
+             hypotf(p[0] - pos->x, p[1] - pos->y), cylinder[4]);
+-        if (!isfinite(cylinder[4]) || cylinder[4] <= 0 || cylinder[4] > 64) {
++        if (!isfinite(cylinder[4]) || cylinder[4] > 64) {
+             LOG("native: door skip %08x cylinder %.2f\n", id, cylinder[4]);
+             continue;
+         }
+         if (hypotf(p[0] - pos->x, p[1] - pos->y) > 120.0f) continue;
+         if (!project_point(cpu, place, p[0], p[1], p[2], base)) continue;
+-        float height = fminf(cylinder[4], 3.0f);
++        float height = (cylinder[4] > 0 && cylinder[4] <= 64) ? fminf(cylinder[4], 3.0f) : 2.0f;
+         if (!project_point(cpu, place, p[0], p[1], p[2] + height, top)) {
+             top[0] = base[0]; top[1] = base[1];
+         }
+@@ -1353,6 +1353,13 @@ static void world_tick(CPU* cpu) {
+             g_goal.entity = door;
+             g_goal.entity_goal = 1;
+             g_goal.approach = 3.6f;
++            float ddx = pos.x - door.x, ddy = pos.y - door.y;
++            float dd = hypotf(ddx, ddy);
++            if (dd > 0.001f)
++                g_goal.target = (WorldPos){door.x + ddx / dd * g_goal.approach,
++                    door.y + ddy / dd * g_goal.approach, door.z, door.place};
++            else
++                g_goal.target = door;
+             g_goal.active = 1; g_goal.actor = actor; g_goal.serial = p.serial;
+             g_goal.ticks = g_goal.stuck = 0; g_goal.previous = pos;
+             LOG("native: door candidate %u handle %08x sno %u power %d (%.2f,%.2f,%.2f) distance %.2f\n",

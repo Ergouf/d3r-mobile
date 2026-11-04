@@ -1,0 +1,43 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 560f0d2..f614b58 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -40,6 +40,8 @@
+ /* The game's own operate entry accepts a target this close; a far target is
+    walked up to first, then submitted once. */
+ #define INTERACT_RANGE 2.8f
++/* Farthest distance a natural operate was observed to be accepted from. */
++#define OPERATE_RANGE 4.8f
+ #define INTERACT_APPROACH 1.6f
+ #define ENTITY_STRIDE 0x360u
+ #define CONTROLLER_STRIDE 0x410u
+@@ -313,10 +315,11 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+         goal->entity = (WorldPos){p[0], p[1], p[2], place};
+         goal->attack = cap == 0;
+         goal->power = cap ? cap : ATTACK_POWER;
+-        /* entity+0x80 word 4 is read as a height by the assist path, so it is
+-           only a coarse standoff here and is clamped; an attack always uses the
+-           fixed melee standoff. */
+-        goal->approach = cap ? fmaxf(INTERACT_APPROACH, fminf(cylinder[4] + 0.4f, 3.6f))
++        /* entity+0x80 is {x, y, base_z, height, radius}: [3] is the height and
++           [4] the radius (0x8A34FA0 squares [4] for the horizontal test and adds
++           [3] for the top).  Stand outside the radius, with a margin, and clamp
++           so a very wide object still leaves a reachable walk point. */
++        goal->approach = cap ? fmaxf(INTERACT_APPROACH, fminf(cylinder[4] + 0.8f, 4.0f))
+                              : ATTACK_APPROACH;
+     }
+     if (found > 0) LOG("native: cylinder hit %08x depth %.3f terrain %.3f power %d%s\n",
+@@ -995,8 +998,12 @@ static void world_tick(CPU* cpu) {
+         if (d > 0.001f) g_goal.target = (WorldPos){g_goal.entity.x + dx / d * g_goal.approach,
+             g_goal.entity.y + dy / d * g_goal.approach, g_goal.entity.z, place};
+         float reached = hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y);
++        /* Some props are walled in so the player cannot get closer than ~3 units
++           even though the game accepts their operate from farther (4.79 measured
++           on SNO 341800).  Submit at up to OPERATE_RANGE; the game still rejects
++           a genuinely out-of-range request. */
+         float reach = g_goal.attack ? g_goal.approach + 0.5f
+-                                    : fmaxf(INTERACT_RANGE, g_goal.approach + 0.8f);
++                                    : fmaxf(OPERATE_RANGE, g_goal.approach + 0.8f);
+         if (reached <= reach) {
+             int ok = g_goal.attack ? submit_attack(cpu, player_object, &g_goal)
+                                    : submit_interact(cpu, player_object, &g_goal);

@@ -1,0 +1,241 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 26110a6..4ff464a 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -13,6 +13,7 @@
+ #include <math.h>
+ #include <string.h>
+ #include <float.h>
++#include <stdlib.h>
+ 
+ #define UI_PC 0x8331490ull
+ #define GAME_PC 0x804F9C0ull
+@@ -338,8 +339,46 @@ typedef struct {
+     u64 control, row, hit_owner, hit_callback;
+     u32 index;
+     int kind; /* 1 = button, 2 = list row, 3 = disabled/blocked */
++    int root_mode; /* no input focus: the click chose an active subscriber root */
+ } UiPick;
+ 
++/* Registry children by parent key.  The registry is the only tree the live UI
++   exposes when a page is open without an input focus (options, main menu). */
++typedef struct {
++    u64 parent, obj;
++} UiChild;
++#define UI_CHILD_MAX 32768u
++static UiChild g_ui_children[UI_CHILD_MAX];
++static unsigned g_ui_child_count;
++
++static int ui_child_cmp(const void* a, const void* b) {
++    u64 pa = ((const UiChild*)a)->parent, pb = ((const UiChild*)b)->parent;
++    return pa < pb ? -1 : pa > pb;
++}
++
++static void ui_build_children(u64 map) {
++    u32 mask, total;
++    u64 buckets, node;
++    g_ui_child_count = 0;
++    if (!read32(map, &mask) || mask > 262143 || !read64(map + 0x10, &buckets) ||
++        !read32(map + 4, &total) || total > 262143) return;
++    for (u32 i = 0; i <= mask; i++) {
++        if (!read64(buckets + (u64)i * 8, &node) || !node) continue;
++        for (unsigned g = 0; node && g < 1024; g++) {
++            u64 next, obj, parent;
++            if (!read64(node, &next)) break;
++            if (read64(node + 0x10, &obj) && obj && read64(obj + 0x38, &parent) &&
++                parent != UINT64_MAX && g_ui_child_count < UI_CHILD_MAX)
++                g_ui_children[g_ui_child_count++] = (UiChild){parent, obj};
++            node = next;
++        }
++    }
++    if (g_ui_child_count)
++        qsort(g_ui_children, g_ui_child_count, sizeof(UiChild), ui_child_cmp);
++    if (g_ui_child_count == UI_CHILD_MAX)
++        LOG("native: UI child index truncated at %u\n", UI_CHILD_MAX);
++}
++
+ static int ui_code(u64 pc) {
+     return pc >= g_code_lo && pc < g_code_hi && !(pc & 3);
+ }
+@@ -383,10 +422,13 @@ static int ui_visible(u64 map, u64 obj) {
+ static int ui_inside(UiPick* pick, u64 obj) {
+     const u64 scratch = g_stack_top - 0x1B000;
+     GuestResult r;
+-    float clip[4];
++    float clip[4], raw[4];
+     u64 args[3] = {obj};
+-    if (!readable(obj + 0x88, 16) ||
+-        !guest_call(pick->cpu, 0x83B7EE0, args, 1, NULL, 0, &r) || !readable(r.x0, 16)) return 0;
++    if (!readable(obj + 0x88, 16)) return 0;
++    memcpy(raw, GP(obj + 0x88), sizeof raw);
++    for (unsigned i = 0; i < 4; i++) if (!isfinite(raw[i])) return 0;
++    if (raw[2] <= raw[0] || raw[3] <= raw[1]) return 0;
++    if (!guest_call(pick->cpu, 0x83B7EE0, args, 1, NULL, 0, &r) || !readable(r.x0, 16)) return 0;
+     args[0] = obj + 0x88; args[1] = r.x0; args[2] = scratch;
+     if (!guest_call(pick->cpu, 0x8A385B0, args, 3, NULL, 0, NULL)) return 0;
+     memcpy(clip, GP(scratch), sizeof clip);
+@@ -401,9 +443,10 @@ static int ui_visit(UiPick* p, u64 obj, unsigned depth) {
+     u32 flags, count;
+     GuestResult r;
+     if (!obj || ++p->visited > 20000 || depth > 48 || !read32(obj + 0x18, &flags) ||
+-        !(flags & 4) || !read64(obj, &vt)) return 0;
++        !read64(obj, &vt)) return 0;
++    int visible = (flags & 4) != 0;
+     if (!read64(vt + 0xE0, &method)) return 0;
+-    if (method == 0x838C6C0 && obj == p->focused && ui_inside(p, obj)) {
++    if (method == 0x838C6C0 && (obj == p->focused || p->root_mode) && ui_inside(p, obj)) {
+         u64 model, model_vt, size_pc, allow_pc;
+         u32 page, columns;
+         if (!read64(obj + 0x258, &model) || !read64(model, &model_vt) ||
+@@ -418,8 +461,7 @@ static int ui_visit(UiPick* p, u64 obj, unsigned depth) {
+             u64 key, row;
+             i64 index = (i32)page < 0 ? -1 : (i64)page * columns + i;
+             if (!read64(data + i * 8ull, &key) || !(row = ui_object(p->map, key)) ||
+-                !read32(row + 0x18, &flags) || !(flags & 4) || index < 0 || index >= size ||
+-                !ui_inside(p, row)) continue;
++                index < 0 || index >= size || !ui_inside(p, row)) continue;
+             args[0] = model; args[1] = obj; args[2] = (u32)index;
+             if (!guest_call(p->cpu, allow_pc, args, 3, NULL, 0, &r)) return 0;
+             p->kind = r.x0 ? 2 : 3;
+@@ -428,10 +470,24 @@ static int ui_visit(UiPick* p, u64 obj, unsigned depth) {
+             return 1;
+         }
+     }
+-    if (!read32(obj + 0x68, &count) || count > 4096 || !read64(obj + 0x60, &data)) return 0;
+-    for (u32 i = count; i-- > 0;) {
+-        u64 child;
+-        if (read64(data + i * 24ull + 8, &child) && ui_visit(p, child, depth + 1)) return 1;
++    if (!visible && !p->root_mode) return 0;
++    u64 key, parent_key;
++    if (!read64(obj + 0x30, &key)) return 0;
++    unsigned kids = 0;
++    size_t lo = 0, hi = g_ui_child_count;
++    while (lo < hi) {
++        size_t mid = lo + (hi - lo) / 2;
++        if (g_ui_children[mid].parent < key) lo = mid + 1; else hi = mid;
++    }
++    for (size_t j = lo; j < g_ui_child_count && g_ui_children[j].parent == key; j++) {
++        kids++;
++        if (ui_visit(p, g_ui_children[j].obj, depth + 1)) return 1;
++    }
++    if (!kids && read32(obj + 0x68, &count) && count <= 4096 && read64(obj + 0x60, &data)) {
++        for (u32 i = count; i-- > 0;) {
++            u64 child;
++            if (read64(data + i * 24ull + 8, &child) && ui_visit(p, child, depth + 1)) return 1;
++        }
+     }
+     if (read64(vt + 0x60, &method) && method == 0x8392410 && ui_inside(p, obj)) {
+         u32 enabled;
+@@ -456,32 +512,100 @@ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     UiPick p = {.cpu = cpu};
+     GuestResult r;
+     const u64 scratch = g_stack_top - 0x1A000;
+-    u64 global, world, manager, key, vt, method, table;
++    u64 global, world, manager, key, vt, method, table, subs, entries;
++    u32 sub_count = 0;
+     int pixel[2];
+     if ((u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - press->frame) > 120 ||
+         !pointer_pixel(cpu, press, pixel) || !read64(0x914F840, &global) ||
+         !read64(global + 0x10, &world) || !read64(world + 0xB80, &manager) ||
+         !read64(manager, &p.map)) return;
+-    if (!guest_call(cpu, 0x832D180, NULL, 0, NULL, 0, &r) ||
+-        !read64(r.x0, &key) || !(p.focused = ui_object(p.map, key))) return;
+-    if (!ui_visible(p.map, p.focused)) return;
+-    p.owner = p.focused;
++    memcpy(GP(scratch), pixel, sizeof pixel);
++    u64 args[3] = {scratch, scratch + 0x20};
++    if (!guest_call(cpu, 0x8350BF0, args, 2, NULL, 0, NULL)) return;
++    memcpy(p.point, GP(scratch + 0x20), sizeof p.point);
++    if (!isfinite(p.point[0]) || !isfinite(p.point[1])) return;
++    ui_build_children(p.map);
++    if (!read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
++        !read32(subs + 8, &sub_count) || sub_count > 1024) sub_count = 0;
++    int focused = 0;
++    if (guest_call(cpu, 0x832D180, NULL, 0, NULL, 0, &r) && read64(r.x0, &key)) {
++        u64 obj = ui_object(p.map, key);
++        if (obj && ui_visible(p.map, obj)) { p.focused = obj; focused = 1; }
++    }
++    if (focused) {
++        p.owner = p.focused;
++    } else {
++        /* No input focus (main menu, options page): choose the active
++           subscribed page that contains the click, smallest rectangle first. */
++        float best = FLT_MAX;
++        for (u32 i = 0; i < sub_count; i++) {
++            u64 root;
++            float* rect;
++            float area;
++            if (!read64(entries + (u64)i * 8, &root) || !root || !ui_visible(p.map, root) ||
++                !readable(root + 0x88, 16)) continue;
++            rect = (float*)GP(root + 0x88);
++            area = (rect[2] - rect[0]) * (rect[3] - rect[1]);
++            if (!(area > 0) || area >= best || !ui_inside(&p, root)) continue;
++            best = area;
++            p.focused = root;
++        }
++        if (!p.focused) {
++            LOG("native: UI pointer %u no active page at (%d,%d)\n", press->serial, pixel[0], pixel[1]);
++            return;
++        }
++        p.root_mode = 1;
++        p.owner = p.focused;
++    }
+     for (unsigned i = 0; p.owner && i < 64; i++) {
+         u32 flags;
+-        if (!read32(p.owner + 0x18, &flags) || !(flags & 4)) return;
++        if (!read32(p.owner + 0x18, &flags)) return;
++        if (!(flags & 4)) {
++            if (!p.root_mode) return;
++            p.owner = ui_parent(p.map, p.owner);
++            continue;
++        }
++        if (p.root_mode && !ui_visible(p.map, p.owner)) {
++            p.owner = ui_parent(p.map, p.owner);
++            continue;
++        }
+         if (read64(p.owner, &vt) && read64(vt + 0xB0, &method) && method == 0x83B81F0 &&
+             read64(p.owner + 0x118, &table) && read64(table + 0x20, &p.callback) && ui_code(p.callback)) break;
+         p.owner = ui_parent(p.map, p.owner);
+     }
+-    if (!p.owner || !ui_code(p.callback)) return;
+-    memcpy(GP(scratch), pixel, sizeof pixel);
+-    u64 args[3] = {scratch, scratch + 0x20};
+-    if (!guest_call(cpu, 0x8350BF0, args, 2, NULL, 0, NULL)) return;
+-    memcpy(p.point, GP(scratch + 0x20), sizeof p.point);
+-    if (!isfinite(p.point[0]) || !isfinite(p.point[1]) || !ui_visit(&p, p.owner, 0)) {
++    if (!p.owner || !ui_code(p.callback)) {
++        LOG("native: UI pointer %u no callback owner (root %llx)\n", press->serial,
++            (unsigned long long)p.focused);
++        return;
++    }
++    if (!ui_visit(&p, p.owner, 0)) {
++        /* A focused button only covers its own subtree.  A click elsewhere in
++           the same page must search from the page root, not from the focused
++           leaf (main menu, dialogs). */
++        u64 root = p.focused, parent;
++        while (root && (parent = ui_parent(p.map, root)) && ui_visible(p.map, parent))
++            root = parent;
++        if (root && root != p.owner && ui_visible(p.map, root)) {
++            u64 owner2 = root;
++            p.callback = 0;
++            for (unsigned i = 0; owner2 && i < 64; i++) {
++                if (!ui_visible(p.map, owner2)) { owner2 = ui_parent(p.map, owner2); continue; }
++                if (read64(owner2, &vt) && read64(vt + 0xB0, &method) && method == 0x83B81F0 &&
++                    read64(owner2 + 0x118, &table) && read64(table + 0x20, &p.callback) &&
++                    ui_code(p.callback)) break;
++                owner2 = ui_parent(p.map, owner2);
++            }
++            if (owner2 && ui_code(p.callback)) {
++                p.owner = owner2;
++                p.hit_owner = 0; p.hit_callback = 0; p.kind = 0; p.visited = 0;
++                p.root_mode = 1;
++                if (ui_visit(&p, owner2, 0)) goto hit;
++            }
++        }
+         LOG("native: UI pointer %u missed (%d,%d)\n", press->serial, pixel[0], pixel[1]);
+         return;
+     }
++hit:
+     if (p.kind == 3) {
+         LOG("native: UI pointer %u disabled control %llx\n", press->serial, (unsigned long long)p.control);
+         return;

@@ -1,0 +1,38 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index d4b25fd..d0e2b1a 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -122,6 +122,10 @@ void native_world_cancel(void) {
+     pm_unlock(&g_pointer_lock);
+ }
+ 
++int native_world_ui_blocked(void) {
++    return __atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) != 0;
++}
++
+ /* Source CPU, including its concurrent poll request, remains untouched. */
+ static int guest_call(const CPU* source, u64 pc, const u64* args, unsigned count,
+                       const float* floats, unsigned float_count, GuestResult* result) {
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+index 9fbd03a..a1523ff 100644
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -8,4 +8,5 @@ void native_world_install(void);
+ /* Safe-area coordinates and pixel dimensions, before removing presentation bars. */
+ int native_world_click(float x, float y, u32 width, u32 height, u64 fallback_pad);
+ void native_world_cancel(void);
++int native_world_ui_blocked(void);
+ #endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 36fb657..2ead17c 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -482,7 +482,7 @@ static u64 keymap(SDL_Scancode k) {
+         case SDL_SCANCODE_3: return 1ull << 9;     /* ZR */
+         case SDL_SCANCODE_RETURN: return 1ull << 10;
+         case SDL_SCANCODE_BACKSPACE: return 1ull << 11;
+-        case SDL_SCANCODE_TAB: return 1ull << 15; /* map: bit observed to open the map */
++        case SDL_SCANCODE_TAB: return native_world_ui_blocked() ? 0 : 1ull << 15; /* map-only D-pad Down; not a menu move */
+         case SDL_SCANCODE_LEFT: return 1ull << 12;
+         case SDL_SCANCODE_UP: return 1ull << 13;
+         case SDL_SCANCODE_RIGHT: return 1ull << 14;

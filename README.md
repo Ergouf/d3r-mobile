@@ -1,6 +1,6 @@
 # Diablo III 兼容运行项目
 
-本项目包含两个独立路径：Android ARM64 原生兼容层，以及基于 ScarletNX 的 Windows 运行时与 FSR1 增强。当前验收状态统一见 [docs/STATUS.md](docs/STATUS.md)。
+本项目包含两个独立路径：Android ARM64 原生兼容层，以及基于 ScarletNX 的 Windows 运行时与 FSR1 增强。当前验收状态统一见 [docs/STATUS.md](docs/STATUS.md)，Windows 原生键鼠入口见 [KBM 交接](docs/windows/HANDOFF-20261104-CURRENT.md)。
 
 远程仓库：[Ergouf/d3r-mobile](https://github.com/Ergouf/d3r-mobile)。
 
@@ -14,8 +14,11 @@
 | Android 源码接口与保留约束 | [Android 架构](docs/android/ARCHITECTURE.md) |
 | Windows 工具链与构建 | [Windows 构建](docs/windows/BUILD.md) |
 | Windows 成品位置及校验值 | [Windows 发行记录](docs/windows/RELEASE.md) |
+| Windows 当前 KBM 交接 | [键鼠交接](docs/windows/HANDOFF-20261104-CURRENT.md) |
+| Windows 键盘/鼠标操作 | [KBM 操作说明](docs/windows/KBM-INPUT-GUIDE.md) |
+| Windows Quick Resume | [快速恢复说明](docs/windows/QUICK-RESUME.md) |
 
-Windows 当前启动入口为 `D:\Games\DiabloIII\Launch.cmd`；完整 ZIP 归档保留在 [local/releases/windows/](local/releases/windows/)，默认 FSR1、原生 1×、阴影与中文，该版本没有帧生成。120Hz 下严重卡顿正在诊断，FSR 最终实战验收尚未完成。Android 已进入第一章，但持续稳定 60 FPS、完整任务链和 OEM 生成帧仍未验收。
+Windows 当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`（直接启动运行时，无控制台窗口），`Launch.cmd` 仍保留；完整 ZIP 归档已作为安装目录的重复副本清理，重打包时需显式指定基线 ZIP。当前版本默认 FSR1、原生 1×、阴影与中文，没有帧生成。120Hz 下严重卡顿正在诊断，FSR 最终实战验收尚未完成。Android 已进入第一章，但持续稳定 60 FPS、完整任务链和 OEM 生成帧仍未验收。
 
 ## 目录约定
 

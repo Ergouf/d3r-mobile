@@ -1,0 +1,109 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 6df79bc..fd25e8a 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1223,6 +1223,74 @@ static int assist_target(const CPU* cpu, u64 table, u64 player_object, const Wor
+     return 1;
+ }
+ 
++
++/* Known door/portal SNOs and the click-time projection fallback.  The camera
++   ray sometimes misses a doorway's thin collider even when the click is right
++   on the door; this gate accepts a click within 24 px of the projected door
++   and 8 world units of the player, then submits the game's operate record.
++   It only covers the listed SNOs; ordinary props/NPCs keep the ray/assist path. */
++static int door_sno(u32 sno) {
++    return sno == 178293u || /* inn door */
++           sno == 90419u ||  /* trOut_NewTristram_Gate_Town */
++           sno == 175467u;   /* g_Portal_Rectangle_Blue */
++}
++
++static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
++                               const int pixel[2], WorldPos* found, u32* found_handle,
++                               u32* found_controller, u32* found_power, u32* found_sno) {
++    u32 limit, shift;
++    u64 buckets;
++    float best = 24.0f;
++    int hit = 0;
++    if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
++        limit > 65536 || !read64(table + 0x120, &buckets)) return 0;
++    for (u32 i = 0; i < limit; i++) {
++        u64 bucket, entry;
++        u32 id, place, cid, sno;
++        float p[3], cylinder[5], base[2], top[2];
++        if (!read64(buckets + ((u64)i >> shift) * 8, &bucket) || !bucket) continue;
++        entry = bucket + (u64)(i & ((1u << shift) - 1)) * ENTITY_STRIDE;
++        if (!read32(entry, &id) || !id || id == 0xFFFFFFFFu ||
++            !read32(entry + 0xA0, &place) || place != pos->place ||
++            !read32(entry + 0x14, &cid) || cid == 0xFFFFFFFFu ||
++            !read32(entry + 0x18, &sno) || !door_sno(sno) ||
++            !readable(entry + 0x60, 12) || !readable(entry + 0x80, sizeof cylinder)) continue;
++        memcpy(p, GP(entry + 0x60), sizeof p);
++        memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
++        LOG("native: door probe %08x sno %u dist %.2f cylinder %.2f\n", id, sno,
++            hypotf(p[0] - pos->x, p[1] - pos->y), cylinder[4]);
++        if (!isfinite(cylinder[4]) || cylinder[4] <= 0 || cylinder[4] > 64) {
++            LOG("native: door skip %08x cylinder %.2f\n", id, cylinder[4]);
++            continue;
++        }
++        if (hypotf(p[0] - pos->x, p[1] - pos->y) > 120.0f) continue;
++        if (!project_point(cpu, place, p[0], p[1], p[2], base)) continue;
++        float height = fminf(cylinder[4], 3.0f);
++        if (!project_point(cpu, place, p[0], p[1], p[2] + height, top)) {
++            top[0] = base[0]; top[1] = base[1];
++        }
++        float y0 = fminf(base[1], top[1]), y1 = fmaxf(base[1], top[1]);
++        float cy = pixel[1] < y0 ? y0 : (pixel[1] > y1 ? y1 : pixel[1]);
++        float dx = pixel[0] - (base[0] + top[0]) * 0.5f;
++        float d = hypotf(dx, pixel[1] - cy);
++        if (d > best) continue;
++        u64 cap_args[1] = {entry};
++        GuestResult cap;
++        int cap_ok = guest_call(cpu, CAP_POWER_PC, cap_args, 1, NULL, 0, &cap);
++        LOG("native: door measure %08x sno %u screen %.2f cap_ok %d cap %d\n", id, sno, d,
++            cap_ok, cap_ok ? (int)(i32)cap.x0 : -999);
++        if (!cap_ok || (i32)cap.x0 <= 0 || (u32)cap.x0 == ASSIST_ACTION) continue;
++        best = d;
++        *found = (WorldPos){p[0], p[1], p[2], place};
++        *found_handle = id;
++        *found_controller = cid;
++        *found_power = (u32)cap.x0;
++        *found_sno = sno;
++        hit = 1;
++    }
++    return hit;
++}
++
+ static void world_tick(CPU* cpu) {
+     PointerPress p;
+     u32 actor;
+@@ -1251,6 +1319,8 @@ static void world_tick(CPU* cpu) {
+         int ground_ok = ground_target(cpu, pixel, &pos, &ground, &occlusion);
+         int picked = pick_entity(cpu, table, &ray, occlusion, &pos, actor, &g_goal);
+         WorldPos candidate;
++        WorldPos door;
++        u32 door_handle = 0, door_controller = 0, door_power = 0, door_sno_value = 0;
+         if (picked == 0 &&
+             assist_candidate_near(cpu, table, &pos, pixel, ASSIST_GATE_DISTANCE, &candidate, NULL,
+                                   actor))
+@@ -1274,6 +1344,20 @@ static void world_tick(CPU* cpu) {
+             LOG("native: entity goal %u handle %08x power %d (%.2f,%.2f,%.2f) distance %.2f\n",
+                 p.serial, g_goal.handle, (int)g_goal.power, g_goal.entity.x, g_goal.entity.y,
+                 g_goal.entity.z, hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y));
++        } else if (door_candidate_near(cpu, table, &pos, pixel, &door, &door_handle,
++                                       &door_controller, &door_power, &door_sno_value)) {
++            g_goal.handle = door_handle;
++            g_goal.controller = door_controller;
++            g_goal.power = door_power;
++            g_goal.sno = door_sno_value;
++            g_goal.entity = door;
++            g_goal.entity_goal = 1;
++            g_goal.approach = 3.6f;
++            g_goal.active = 1; g_goal.actor = actor; g_goal.serial = p.serial;
++            g_goal.ticks = g_goal.stuck = 0; g_goal.previous = pos;
++            LOG("native: door candidate %u handle %08x sno %u power %d (%.2f,%.2f,%.2f) distance %.2f\n",
++                p.serial, door_handle, door_sno_value, (int)door_power, door.x, door.y, door.z,
++                hypotf(door.x - pos.x, door.y - pos.y));
+         } else {
+             if (!ground_ok) return;
+             g_goal.target = ground;
