@@ -1,24 +1,25 @@
 # Diablo III Windows 原生键鼠交接
 
-更新时间：2026-11-06。此文件是 Windows KBM 工作的唯一当前入口；历史逐轮报告已经合并删除，详细实验摘要保留在 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)，实际使用说明见 [KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md)，PC 功能差距表见 [KBM-PARITY-20261106.md](KBM-PARITY-20261106.md)。
+更新时间：2026-11-07。此文件是 Windows KBM 工作的唯一当前入口；历史逐轮报告已经合并删除，详细实验摘要保留在 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)，实际使用说明见 [KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md)，PC 功能差距表见 [KBM-PARITY-20261106.md](KBM-PARITY-20261106.md)。
 
 ## 当前基线
 
-- 安装 `0117`（`F0AC6A9BA2E573FF7B8BF69A81C83379DACA3AB6194D1D2EF4CDD2F9BD65A490`，PID `127220`）。补丁链 `0001`–`0115` 排除归档的 `0029/0030`，重放 PASS。
+- 当前候选安装 `0122`（`32BC5885F48B3CF299BD4604ECB29B54B146264D50191DFE9CC0C11639314FE8`，冷启动 PID `256044`）。补丁链 `0001`–`0118` 排除归档的 `0029/0030`，重放 PASS。当前安装仍是候选，不是用户验收版。
 - 本轮已完成并实测：
   - Q 药水：受伤到 `1353340.25` 后按 Q，日志 `native: world command potion bit=5 -> returned/1`，HP 回到 `1353916`；满血时同指令 returned/0。
   - 地图页脚键鼠文案：连续采样均为 `[拖拽] 移动地图 / [Esc] 关闭 / [滚轮] 镜头拉近 / [滚轮] 镜头拉远 / [复位] 地图重定位 / [重置] 重置镜头`，无 `{icon:l1}`/`{icon:r1}`；M 关闭后 HUD 正常。
   - 底栏点击：`footer cell 0 pad 1 -> queued`、`cell 1 pad 2`、`cell 2 pad 4`；世界页选哭泣山谷后点 cell 0，HUD 变为“哭泣山谷/传送点”。
   - 世界地图传送：荒废的墓地 `selection=7`、哭泣山谷 `selection=6`、大教堂一层 `selection=2`，原生 A 后 HUD 地点变化。
-  - 技能 1/4：同一只 `sno 6646` 怪 HP `510351.28→357437.88`（按 1）、`357437.88→0`（按 4，击杀）；四键日志 `mouse skill slot=2/3/4/5 ... -> 1`。
-  - 回城：Esc → 退出 → 接受 → 主菜单 → 继续，HUD 回到新崔斯特姆。
+  - 技能栏换装：`0122` 技能页点击后能打开原生选择器；技能 2 已换“天谴”（零基槽 2 power `291804→266627`），技能 3 已换“天堂之怒”（零基槽 3 power `243853→316014`），六槽最终为 `[285903,353492,291804,266627,316014,239137]`；自由配置 `ElectiveMode` 已落盘为 `1`。
+  - 技能 2/3 伤害：`0121` 同一构建链上技能 2 对 `sno 6646` HP `77854.578→0`；技能 3 对另一只 `sno 6646` HP `527575.875→318562.5→0.01`。`0122` 只改了底栏路由，尚未重复同一套伤害采样。
+  - 地图页“世界”页签：鼠标点击后出现五幕地点、第一幕节点和“悬赏任务”页脚；但悬赏覆盖层 `bountyoverlayworldmap` 仍保持隐藏。
 - 未完成：
-  - 技能 2/3 的实际效果（可能是 buff）；技能页换装卡在 ring 查找：Frida 能在 `p.map` 的 bucket 4430 找到 ring，但 C 侧 `ui_find_key` 全表返回 0，桶节点 perm=3、key 可读。
-  - 地图页“世界”页签点击没有 `map tab` 日志，悬赏列表未打开，悬赏追踪未验收。
+  - 悬赏追踪没有业务结果：键盘 `1` 和底栏第三格都实际发出 ZL（trace `pad=0x100`），逐次注入 L/R/L3/R3/ZL/ZR 后覆盖层仍未显示；不能把页脚文案或映射日志当作完成。
   - 城镇传送门 CAP=0/纯鼠标两端、堆叠拆分/数量选择、键位重绑定、大秘境入口。
   - 启动 frame10 停滞仍有冷启动反例。
 - UI 点击链路结论：底栏点击不产生可消费的 UI 分发事件，已在 `native_world_click` 对 `y>0.8` 的四格直接映射 A/B/X/Y；技能槽和地图页签仍受同一链路影响。
 - 测试存档：718003 金、425 血岩、材料 903/895/948、工匠等级 `[4,9,10,0]`、39 件物品、仓库 3 件。
+- 本轮证据文件：`out/windows/kbm/session/takeover-font-startup/0121-loadout-final.json`、`0121-skill2-damage-retest.json`、`0121-skill3-damage.json`；地图/悬赏反例为 `0122-bounty-prebefore.json`、`0122-map-pad-scan.json`、`0122-footer-cell2-trace.json`、`0122-bounty-after-footer.json`；补丁链回放为 `0118-replay.txt`。
 
 ## 当前已验证
 

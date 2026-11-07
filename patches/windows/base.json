@@ -871,6 +871,27 @@
       "changed_files_lf_sha256": {
         "src/nx/runtime/native_ui.c": "d0c7d97caf7ff03af775c37aefea5e626a0b1c0670f0d02c3b7b42b3a8c7542e"
       }
+    },
+    {
+      "patch": "0116-native-page-pointer-guards.patch",
+      "patch_sha256": "bff76681885db543a252e19fcc44da7653b4ab2ac10d93490a29c35090581616",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "d4ffbd283d71775c47f9b65e71e4740144071a3fc5a3a5277800d046692504cf"
+      }
+    },
+    {
+      "patch": "0117-native-skill-choice-pointer.patch",
+      "patch_sha256": "a12656bace9b9e61998b8147532a731521669be132dc8b4f8ffb71a35983e967",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "08390188bbedcba86b83a3eaf94d90f869770108dedc1d446563511cdd8d74b8"
+      }
+    },
+    {
+      "patch": "0118-native-footer-hint-routing.patch",
+      "patch_sha256": "41649e5409ab8472cb9097f49211cbad3a65a6e875b402501a699e7b975bd89b",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "18e8d7be4df7a9bc07f9b7dc53b797a5b7d7e1873560f61c754198549bf13ea8"
+      }
     }
   ]
 }

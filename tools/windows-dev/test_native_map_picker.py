@@ -29,7 +29,8 @@ static void w32(u64 a,u32 v){memcpy(GP(a),&v,4);}
 static void wf(u64 a,float v){memcpy(GP(a),&v,4);}
 static u64 ui_object(u64 m,u64 k){(void)m;for(int i=1;i<16;i++)if(keys[i]==k)return i*0x1000;return 0;}
 static int ui_visible(u64 m,u64 o){(void)m;u32 f;return kbm_read32(o+0x18,&f)&&(f&4);}
-static int ui_within(u64 m,u64 o,u64 root){(void)m;return root==0x2000&&(o==root||o==0x3000||o==0x4000);}
+static int ui_within(u64 m,u64 o,u64 root){(void)m;return (root==0x8000&&o!=0x9000)||(o==root)||(root==0x2000&&(o==0x3000||o==0x4000));}
+static int ui_code(u64 pc){return pc>=0x8000000&&pc<0x9000000;}
 static int ui_inside(UiPick* p,u64 o){float r[4];memcpy(r,GP(o+0x88),16);return clip&&p->point[0]>=r[0]&&p->point[0]<r[2]&&p->point[1]>=r[1]&&p->point[1]<r[3];}
 static int guest_call(const CPU* c,u64 pc,const u64* a,unsigned n,const float* f,unsigned nf,GuestResult* r){
  (void)c;(void)n;(void)f;(void)nf;
@@ -51,6 +52,10 @@ static void reset(unsigned first){
  keys[2]=ui_path_key("root.normallayer.waypointmap_main");
  keys[3]=100;keys[4]=101;keys[5]=200;
  w32(0x2018,4);w32(0x3018,4);w32(0x4018,4);w32(0x5018,4);
+ keys[8]=1;w32(0x8018,4);
+ w64(0x914F840,0x60000);w64(0x60010,0x61000);w64(0x61b80,0x62000);w64(0x62000,1);
+ w64(0x62010,0x63000);w64(0x63000,0x64000);w32(0x63008,1);w64(0x64000,0x2000);
+ w64(0x2000,0x66000);w64(0x660b0,0x83B81F0);w64(0x2118,0x65000);
  w64(0x9154E30,0x20000);w64(0x20028,0x21000);w64(0x20030,2);w32(0x20044,0);
  for(unsigned i=0;i<2;i++){
   u64 row=0x21000+i*24,obj=0x3000+i*0x1000;
@@ -93,6 +98,12 @@ int main(void){
  reset(58);w32(0x25040,0);CHECK("disabled-tab",ui_map_click(&p,12)==1&&!calls);
  reset(58);w64(0x25038,0);CHECK("wrong-tab-callback",ui_map_click(&p,13)==0&&!calls);
  reset(58);w32(0x2018,0);CHECK("closed-map",ui_map_click(&p,14)==0&&!calls);
+ reset(58);focus=200;w32(0x5018,0);CHECK("hidden-stale-focus-tab",ui_map_click(&p,24)==1&&changed_tab==2);
+ reset(58);w32(0x63008,0);CHECK("unsubscribed-map",ui_map_click(&p,25)==0&&!calls);
+ reset(58);w64(0x62000,2);CHECK("registry-changed",ui_map_click(&p,26)==0&&!calls);
+ reset(58);w32(0x63008,2);w64(0x64008,0x9000);w32(0x9018,4);CHECK("overlay-without-focus",ui_map_click(&p,27)==0&&!calls);
+ reset(58);w32(0x63008,2);w64(0x64008,0xa000);w32(0xa018,4);w64(0xa000,0x66000);w64(0xa118,0x67000);w64(0x67020,0x8387180);CHECK("other-page-input-owner",ui_map_click(&p,28)==0&&!calls);
+ reset(58);w32(0x63008,2);w64(0x64008,0x9000);CHECK("hidden-overlay",ui_map_click(&p,29)==1&&changed_tab==2);
  reset(58);world_map();p.point[0]=200;p.point[1]=300;CHECK("world-act-five-id-400",ui_map_click(&p,15)==1&&chapter==400&&calls==1&&details==-1);
  reset(58);world_map();p.point[0]=600;CHECK("world-act-one-id-zero",ui_map_click(&p,16)==1&&chapter==0&&calls==1&&details==-1);
  reset(58);world_map();focus=200;CHECK("world-modal-guard",ui_map_click(&p,17)==0&&!calls);
@@ -110,7 +121,7 @@ def main():
     source=read_runtime()
     OUT.mkdir(parents=True,exist_ok=True)
     c=OUT/'map.c'; exe=OUT/'map.exe'
-    c.write_text(PRELUDE+function(source,'ui_path_key')+function(source,'ui_map_click')+CASES,encoding='utf-8')
+    c.write_text(PRELUDE+function(source,'ui_path_key')+function(source,'ui_pointer_page_allowed')+function(source,'ui_map_click')+CASES,encoding='utf-8')
     subprocess.run(['D:/workspace/msys2/msys64/clang64/bin/clang.exe','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-parameter',str(c),'-o',str(exe)],check=True)
     return subprocess.run([str(exe)]).returncode
 

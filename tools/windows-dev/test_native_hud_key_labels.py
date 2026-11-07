@@ -47,6 +47,8 @@ static u64 g_stack_top;
 static int g_enabled = 1;
 static unsigned g_guest_call_depth;
 static GuestFn g_label_original;
+static u64 g_footer_object;
+static char g_footer_original[512], g_footer_display[512];
 static int warn_calls, lookup_calls;
 #define GP(a) (memory + (a))
 #define WARN(...) do { warn_calls++; if (0) printf(__VA_ARGS__); } while (0)
@@ -320,6 +322,15 @@ int main(void) {
     ok = guest_call(&cpu, 0x123456, args, 2, NULL, 0, &r);
     CHECK("direct-call-unresolved-depth", ok == 0 && g_guest_call_depth == 0 && lookup_calls == 1);
 
+    /* Footer setter calls share this hook and keep their pad template cached. */
+    fixture();
+    cpu.x[30] = 0;
+    strcpy((char*)GP(ORIGINAL), "{icon:button2} Close");
+    world_label(&cpu, LABEL_PC);
+    CHECK("footer-setter-rebuilds-text", label_calls == 1 && !strcmp(label_text, "[Esc] Close"));
+    CHECK("footer-preserves-template-owner", g_footer_object == cpu.x[0] &&
+          !strcmp(g_footer_original, "{icon:button2} Close") && !strcmp(g_footer_display, "[Esc] Close"));
+
     printf("%d checks; %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
@@ -344,7 +355,8 @@ def main() -> int:
         raise SystemExit("world_label no longer uses the native binding lookup")
     if "0xDB74" not in label or "0x3E0" not in label:
         raise SystemExit("world_label no longer compares the HUD input-player copy")
-    code = (PRELUDE + defines(source) + STUBS + function(source, "guest_call") + label + CASES)
+    code = (PRELUDE + defines(source) + STUBS + function(source, "guest_call")
+            + function(source, "footer_transform") + label + CASES)
     OUT.mkdir(parents=True, exist_ok=True)
     c, exe = OUT / "hud-key-labels.c", OUT / "hud-key-labels.exe"
     c.write_text(code, "utf-8")
@@ -352,7 +364,7 @@ def main() -> int:
     subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror", str(c), "-o", str(exe)], check=True)
     result = subprocess.run([str(exe)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(result.stdout, end="")
-    record = {"source_sha256": hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
+    record = {"source_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
               "scope": __doc__, "returncode": result.returncode,
               "checks": 0, "failures": -1, "stdout": result.stdout}
     for line in result.stdout.splitlines():

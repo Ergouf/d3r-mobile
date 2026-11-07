@@ -1,0 +1,102 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1256,12 +1256,43 @@
+    is a deferred mirror and is not checked.  The right-side
+    category title/description follows the selector; the equipped skill
+    name/info pane is not the selector's state. */
++/* Mouse-opened pages can inherit a hidden keyboard focus from the last page.
++   Require an input subscription in this page, and let visible modal owners
++   veto the click, rather than treating that stale focus as the active owner. */
++static int ui_pointer_page_allowed(UiPick* p, u64 first, u64 second) {
++    GuestResult r;
++    u64 global, world, manager, map, subs, entries, normal, key, focus;
++    u32 count;
++    if (!first || !ui_visible(p->map, first) ||
++        !kbm_read64(0x914F840, &global) || !kbm_read64(global + 0x10, &world) ||
++        !kbm_read64(world + 0xB80, &manager) || !kbm_read64(manager, &map) || map != p->map ||
++        !kbm_read64(manager + 0x10, &subs) || !kbm_read64(subs, &entries) ||
++        !kbm_read32(subs + 8, &count) || !count || count > 1024 ||
++        !(normal = ui_object(map, 1)) ||
++        !guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &r) || !kbm_read64(r.x0, &key)) return 0;
++    focus = key == UINT64_MAX ? 0 : ui_object(map, key);
++    if (focus && ui_visible(map, focus) && !ui_within(map, focus, first) &&
++        (!second || !ui_within(map, focus, second))) return 0;
++    int subscribed = 0;
++    for (u32 i = 0; i < count; i++) {
++        u64 obj, vt, method, callbacks, callback;
++        if (!kbm_read64(entries + i * 8ull, &obj)) return 0;
++        if (!obj || !ui_visible(map, obj)) continue;
++        if (!ui_within(map, obj, normal)) return 0;
++        if (!kbm_read64(obj, &vt) || !kbm_read64(vt + 0xB0, &method) || method != 0x83B81F0) continue;
++        if (ui_within(map, obj, first) || (second && ui_within(map, obj, second))) subscribed = 1;
++        else if (kbm_read64(obj + 0x118, &callbacks) && callbacks &&
++                 kbm_read64(callbacks + 0x20, &callback) && ui_code(callback)) return 0;
++    }
++    return subscribed;
++}
++
+ static int ui_skill_icon(UiPick* p, u32 serial) {
+-    UiTabState state = {0};
+-    GuestResult r;
+     u64 ring, ring_key, vt, children, holder, controller, selector;
+-    u64 entries, nentries, focus_key, focus, callback;
++    u64 entries, nentries, callback;
+     u32 count, selected;
++    const u64 page = ui_object(p->map, ui_path_key("root.normallayer.consoleskillselection_main"));
++    if (!page || !ui_visible(p->map, page)) return 0;
+     /* The skill page's navigation record can lag behind the visible page
+        (tab reads 0 while consoleskillselection_main is shown). Trust the
+        loadout ring's own visibility instead. */
+@@ -1298,11 +1329,7 @@
+         }
+         return 0;
+     }
+-    if (!guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &r) ||
+-        !kbm_read64(r.x0, &focus_key)) return 0;
+-    if (focus_key != UINT64_MAX &&
+-        (!(focus = ui_object(p->map, focus_key)) || !ui_visible(p->map, focus) ||
+-         !ui_within(p->map, focus, state.page))) return 0;
++    if (!ui_pointer_page_allowed(p, page, 0)) return 0;
+     if (!kbm_read64(0x9158040, &holder) || !kbm_read64(holder, &controller) ||
+         !kbm_read64(0x9158068, &callback) ||
+         (callback != 0x83848A0 && callback != 0x8384C20)) return 0;
+@@ -1321,14 +1348,19 @@
+             u64 entry_key;
+             if (!kbm_read64(entries + (u64)j * 16 + 8, &entry_key) ||
+                 entry_key != key) continue;
+-            if (selected == j) {
+-                if (!p->hover) LOG("native: UI skill icon %u unchanged slot=%u\n", serial, j);
+-                return 1;
+-            }
+             u64 args[3] = {selector, child + 0x30, callback};
+-            int complete = guest_call(p->cpu, 0x838F650, args, 3, NULL, 0, NULL);
++            int complete = selected == j || guest_call(p->cpu, 0x838F650, args, 3, NULL, 0, NULL);
+             int changed = complete && kbm_read32(selector + 0x28, &selected) &&
+                 selected == j;
++            if (changed && !p->hover) {
++                u32 mode;
++                /* Native skill-page accept enters the active/passive chooser
++                   through this state transition. A pointer click invokes that
++                   transition directly after selecting its own icon. */
++                if (!kbm_read32(controller + 0x1F8, &mode) || mode != 0) return 1;
++                const u64 open[] = {controller, j < 6 ? 1 : 3};
++                changed = guest_call(p->cpu, 0x837F120, open, 2, NULL, 0, NULL);
++            }
+             LOG("native: UI %sskill icon %u slot=%u -> %s\n", p->hover ? "hover " : "", serial, j,
+                 changed ? "selected" : "incomplete");
+             return 1;
+@@ -1538,12 +1570,7 @@
+     const int waypoint_on = waypoint && ui_visible(p->map, waypoint);
+     if (!local_on && !waypoint_on) return 0;
+     GuestResult r;
+-    u64 focus_key, focus;
+-    if (!guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &r) || !kbm_read64(r.x0, &focus_key)) return 0;
+-    if (focus_key != UINT64_MAX && (!(focus = ui_object(p->map, focus_key)) ||
+-        !ui_visible(p->map, focus) ||
+-        !((local_on && ui_within(p->map, focus, local)) ||
+-          (waypoint_on && ui_within(p->map, focus, waypoint))))) return 0;
++    if (!ui_pointer_page_allowed(p, local_on ? local : waypoint, local_on && waypoint_on ? waypoint : 0)) return 0;
+ 
+     /* Region / Act / World tabs are navigation group 8, not character tabs. */
+     if (p->point[1] >= 39 && p->point[1] < 63) {

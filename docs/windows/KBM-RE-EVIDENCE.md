@@ -22,6 +22,15 @@
 - 读存档时原 D3Edit 检出仅有未跟踪 `__pycache__`，不满足 clean 校验；读取使用同一提交 `f561c58` 的独立干净 worktree `local/tools/d3edit-readonly-20261105`，逐源文件 SHA-256、protobuf/XOR 字节往返检查均通过。未删除原缓存或修改来源；读脚本 `out/windows/kbm/session/read_save_0058.py`。
 - 56 阶段补丁链重放 PASS、43 个测试套件全绿。`0058` 实机完成后先退出当前游戏到主菜单，再 SDL_QUIT 正常关闭，最终 5 个冷检查点文件 SHA-256 已核对。
 
+## 0116–0122：技能选择器、世界页签与底栏动作
+
+- 当前候选构建 `0122`，SHA-256 `32BC5885F48B3CF299BD4604ECB29B54B146264D50191DFE9CC0C11639314FE8`；补丁链 `0001–0118`（排除 `0029/0030`）重放 PASS，地图选择器 32 项、HUD 标签 56 项均 0 失败。
+- 技能页失败根因已纠正：Frida 与 C 侧 `ui_object`/`ui_find_key` 都能在 `p.map` 的 bucket 4430 找到 ring；实际拦截是页面打开后仍保留隐藏的旧输入焦点，`ui_skill_icon` 又把它与未赋值的 `state.page=0` 比较。`0116-native-page-pointer-guards.patch` 以 NormalLayer 输入订阅、可见模态 owner 和 registry 一致性守卫页面；`0117-native-skill-choice-pointer.patch` 在模式 1/2/3 直接调用原生 `0x823FCE0` 选择、`0x8383CC0/0x83841C0/0x8384280` 应用技能/符文，模式 0 的图标点击通过 `0x837F120` 进入选择器。
+- 换装实测：技能 2 换“天谴”后零基槽 2 power `291804→266627`；技能 3 换“天堂之怒”后零基槽 3 power `243853→316014`；六槽 `[285903,353492,291804,266627,316014,239137]`。`ElectiveMode` 由游戏内“游戏功能”页切换并在离开选项页后落盘为 `1`。证据 `0121-loadout-final.json`、`0120-skill2-set.json`、`0121-skill3-set.json`。
+- 技能伤害：`0121` 同一构建链对 `sno 6646` 施放技能 2，HP `77854.578→0`（`passed=true`）；技能 3 对另一只 `sno 6646`，HP `527575.875→318562.5→0.01`（`passed=true`）。两轮均在施放前连续三次确认同一 target actor 和 HP 不变，实体回收后停止采样；当前 `0122` 只改写底栏路由，尚未重跑技能伤害。证据 `0121-skill2-damage-retest.json`、`0121-skill3-damage.json`。
+- 地图“世界”页签：鼠标点击后五幕地点、第一幕节点和“悬赏任务”页脚出现，`ui_map_click` 返回 1；证据 `0122-bounty-prebefore.json`。
+- 悬赏覆盖层仍是反例：键盘 `1` 和底栏第三格都实际发出 ZL（`0122-footer-cell2-trace.json` 中 `ui_footer_legend_click -> action pad=0x100 result=1`），但 `bountyoverlayworldmap` 保持隐藏；逐次注入 L/R/L3/R3/ZL/ZR（`0122-map-pad-scan.json`）仍未显示。`0118-native-footer-hint-routing.patch` 修的是 cell 从实时图例解析（旧实现 cell 2 固定发 X），不等于悬赏业务完成。
+
 ## 输入与运行时
 
 - 游戏：`01001B300B9BE000.exe`；当前安装版 SHA-256 `4F4C0D7265C5E2354B197ECF95B93F3B56D9A19F6DD36145387CF87047B43F13`（`0060` 构建；`OPERATE_RANGE` 4.8 + 宝箱 SNO 白名单 6.2）。历史快照以各自 build 哈希为准。

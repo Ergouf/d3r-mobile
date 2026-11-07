@@ -1,0 +1,27 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -49,20 +49,9 @@
+     p = (PointerPress){x, y, width, height, fallback_pad, ++g_serial,
+         (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED)};
+     if (fallback_pad & NATIVE_POINTER_UI_EVENTS) {
+-        /* The legend bar sits at the bottom of every console page and its
+-           clicks often arrive without a UI dispatch event. Map the four fixed
+-           cells straight to the native A/B/X/Y action, as a real pad press. */
+-        if ((fallback_pad & NATIVE_POINTER_UI_DOWN) && y > 0.8f) {
+-            static const u64 pads[4] = {1, 2, 4, 8};
+-            int cell = (int)(x * 4.0f);
+-            if (cell >= 0 && cell < 4) {
+-                int queued = native_action_press(pads[cell]);
+-                LOG("native: footer cell %d pad %llx -> %s\n", cell,
+-                    (unsigned long long)pads[cell], queued ? "queued" : "rejected");
+-                pm_unlock(&g_pointer_lock);
+-                return queued;
+-            }
+-        }
++        /* world_game drains this queue even without a UI dispatch event.
++           Resolve footer cells from their live legend template on that game
++           thread: the third hint can be L2 (bounties), not always X. */
+         int queued = native_ui_queue_locked(&p);
+         LOG("native: world click queued %d count %u\n", queued, g_ui_count);
+         pm_unlock(&g_pointer_lock);

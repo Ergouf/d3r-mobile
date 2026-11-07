@@ -182,13 +182,18 @@ function skillScene(cpu, req) {
     if(r.returned && r.ret) { try { power=gm.add(r.ret).readU32(); } catch(e) { power='err'; } }
     out.slots.push({slot, returned:r.returned, ptr:r.ret, power});
   }
+  out.ok=out.slots.every(s=>s.returned && s.ptr && typeof s.power==='number');
   return out;
 }
 function hpScene(cpu, req) {
   const e=req.entity;
+  const actor=g32(e), sno=g32(e+0x18);
+  if(req.actor!==undefined && actor!==req.actor)
+    return {ok:false,entity:hx(e),actor:hx(actor),sno,error:'entity identity changed'};
   const hcur=callGuest(cpu,0x8474B30,[e,0xFFFFF073],null,null);
   const hmax=callGuest(cpu,0x8474B30,[e,0xFFFFF074],null,null);
-  return {ok:true,entity:hx(e),hp:{cur:hcur.returned?hcur.f0:null,max:hmax.returned?hmax.f0:null}};
+  return {ok:hcur.returned&&hmax.returned,entity:hx(e),actor:hx(actor),sno,
+    hp:{cur:hcur.returned?hcur.f0:null,max:hmax.returned?hmax.f0:null}};
 }
 function interactScene(cpu, req) {
   const s=frameScene(cpu);
@@ -251,6 +256,8 @@ def main() -> None:
     if args.submit and args.target is None:
         ap.error("--submit needs --target")
     build = assert_installed()
+    from session_driver import _process_identity
+    identity = _process_identity(args.pid)
     device = frida.get_local_device()
     if not any(p.pid == args.pid and p.name.lower() == "01001b300b9be000.exe" for p in device.enumerate_processes()):
         raise SystemExit("expected game PID is no longer running")
@@ -281,6 +288,7 @@ def main() -> None:
     finally:
         session.detach()
     data["build"] = build
+    data["identity"] = identity
     data["req"] = req
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(data, indent=2), "utf-8")

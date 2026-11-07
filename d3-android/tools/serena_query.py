@@ -15,12 +15,15 @@ def rpc(method, params, ident=1):
         payload["id"] = ident
     response = requests.post(URL, headers=headers, json=payload, timeout=180)
     response.raise_for_status()
+    # SSE is UTF-8. requests otherwise defaults text/event-stream to Latin-1,
+    # whose decoded CJK bytes can contain NEL and split a JSON data line.
+    response.encoding = "utf-8"
     if "Mcp-Session-Id" in response.headers:
         headers["Mcp-Session-Id"] = response.headers["Mcp-Session-Id"]
     if not response.text:
         return {}
     if response.headers.get("content-type", "").startswith("text/event-stream"):
-        return json.loads(next(line[6:] for line in response.text.splitlines() if line.startswith("data: ")))
+        return json.loads(next(line[6:] for line in response.text.split("\n") if line.startswith("data: ")))
     return response.json()
 
 
