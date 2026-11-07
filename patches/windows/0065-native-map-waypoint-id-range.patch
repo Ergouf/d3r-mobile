@@ -1,0 +1,14 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1969,7 +1969,9 @@
+         u32 index;
+         float point[2];
+         const u64 row = data + i * 24;
+-        if (!readable(row, 24) || !read32(row + 8, &index) || index != i ||
++        /* +8 is the global waypoint id (Act V starts at 58), while the
++           controller selection and detail refresh use this act's row index. */
++        if (!readable(row, 24) || !read32(row + 8, &index) || index >= 256 ||
+             !read64(row + 16, &key) || !(obj = ui_object(p->map, key)) ||
+             !read64(obj, &vt) || vt != 0x90AF208 || !ui_visible(p->map, obj) ||
+             !ui_within(p->map, obj, waypoint) || !ui_inside(p, obj)) continue;

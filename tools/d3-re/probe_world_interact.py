@@ -73,7 +73,8 @@ function scene(cpu, req) {
       gp(scratch+0x400).writeU64(data);
       callGuest(cpu,0x86c8db0,[manager,scratch+0x400],null,null);
     }
-    out.entities.push({id:hx(id),entry:hx(e),type,sno,pos:p,distance,screen,
+    const health=(type===1||type===7)?callGuest(cpu,0x8474b30,[e,0xfffff073],null,null).f0:null;
+    out.entities.push({id:hx(id),entry:hx(e),type,sno,pos:p,distance,screen,health,
       place:g32(e+0xa0),gizmo:gp(e+0x148).readS32(),flags:gp(e+0x160).readU16(),bytes:hexBytes(e,0x60),def});
   }
   out.entities.sort((a,b)=>a.distance-b.distance);

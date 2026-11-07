@@ -1,0 +1,61 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -98,6 +98,7 @@
+ static int g_hotkey_tab = -1, g_hotkey_frames;
+ /* 1 while a character page owns the input, for the frontend's hotkey gate. */
+ static int g_char_page;
++static int g_char_tab = -1;
+ /* Last click's goal kind, read by the frontend for click-and-hold repeats. */
+ static int g_hold_kind;
+ static unsigned g_world_command;
+@@ -209,6 +210,10 @@
+ 
+ int native_ui_char_page(void) {
+     return __atomic_load_n(&g_char_page, __ATOMIC_ACQUIRE);
++}
++
++int native_ui_char_tab(void) {
++    return __atomic_load_n(&g_char_tab, __ATOMIC_ACQUIRE);
+ }
+ 
+ void native_ui_hotkey(int tab) {
+@@ -2902,11 +2907,13 @@
+                    read64(world + 0xB80, &manager) && read64(manager, &map) &&
+                    ui_tab_state(map, &state);
+         __atomic_store_n(&g_char_page, page, __ATOMIC_RELEASE);
++        __atomic_store_n(&g_char_tab, page ? state.current : -1, __ATOMIC_RELEASE);
+         if (page && __atomic_load_n(&g_hotkey_tab, __ATOMIC_ACQUIRE) < 0) {
+             /* the page changed: a pending request for another page is stale */
+         }
+     } else {
+         __atomic_store_n(&g_char_page, 0, __ATOMIC_RELEASE);
++        __atomic_store_n(&g_char_tab, -1, __ATOMIC_RELEASE);
+     }
+     if (blocked && __atomic_load_n(&g_hotkey_tab, __ATOMIC_ACQUIRE) >= 0) {
+         int tab = __atomic_load_n(&g_hotkey_tab, __ATOMIC_ACQUIRE);
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -34,4 +34,6 @@
+ void native_ui_hotkey(int tab);
+ /* 1 while a character page owns input; other dialogs retain their bindings. */
+ int native_ui_char_page(void);
++/* Current character tab 0..4, or -1 when no character page owns input. */
++int native_ui_char_tab(void);
+ #endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1329,6 +1329,11 @@
+                         int menu = native_world_ui_blocked();
+                         /* Other dialogs retain their own skill/revive bindings. */
+                         if (!menu || native_ui_char_page()) {
++                            if (menu && native_ui_char_tab() == tab) {
++                                /* PC habit: the same panel key closes its page. */
++                                native_action_press(1ull << 1);
++                                break;
++                            }
+                             if (!menu) native_action_press(1ull << 10); /* open the page */
+                             native_ui_hotkey(tab);
+                             break;

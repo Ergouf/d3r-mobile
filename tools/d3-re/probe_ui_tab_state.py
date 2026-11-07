@@ -1,4 +1,4 @@
-"""Read the five character pages, tab labels, and active UI subscribers.
+"""Read character pages, active navigation group, vendor mode and subscribers.
 
 No input, guest calls, or guest memory writes. Run separately from other
 Frida probes. Object words are diagnostic data, not a selected-tab heuristic.
@@ -87,7 +87,18 @@ rpc.exports={dump(names){
     if(count>64)throw new Error('invalid navigation group');
     for(let i=0;i<count;i++)entries.push({index:i,open:q(data+i*0x18),close:q(data+i*0x18+8),enabled:u(data+i*0x18+0x10)});
   }
-  return {manager,map,navigation,group,selected:group?u(group+0x18):null,entries,
+  let groupIndex=null;
+  for(let i=0;i<33;i++)if(group&&q(navigation+i*8)===group){groupIndex=i;break;}
+  const controller=q(q(0x9158028));
+  const vendor=controller?{controller,vt:q(controller),active:u(controller+0x18),mode:u(controller+0x200)}:null;
+  const smithHolder=q(0x91598b0), smith=smithHolder?q(smithHolder):0;
+  const blacksmith=smith?{controller:smith,vt:q(smith),active:u(smith+0x18),mode:u(smith+0x200)}:null;
+  const jewelerHolder=q(0x9159948), jewelerController=jewelerHolder?q(jewelerHolder):0;
+  const jeweler=jewelerController?{controller:jewelerController,vt:q(jewelerController),active:u(jewelerController+0x18),mode:u(jewelerController+0x200)}:null;
+  const mysticHolder=q(0x9153e68), mysticController=mysticHolder?q(mysticHolder):0;
+  const mystic=mysticController?{controller:mysticController,vt:q(mysticController),active:u(mysticController+0x18),mode:u(mysticController+0x200)}:null;
+  return {manager,map,navigation,group,groupIndex,player:group?u(group+0x1c):null,
+    selected:group?u(group+0x18):null,entries,vendor,blacksmith,jeweler,mystic,
     pages,tabs:tabs.sort((a,b)=>a.rect[0]-b.rect[0]),parents:[...parents.values()],subscribers};
 }};
 """
@@ -111,7 +122,8 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print("navigation", hex(result["navigation"]), "group", hex(result["group"]),
-          "selected", result["selected"], "entries", result["entries"])
+          "index", result["groupIndex"], "selected", result["selected"],
+          "vendor", result["vendor"], "blacksmith", result["blacksmith"], "entries", result["entries"])
     for page in result["pages"]:
         print(page["name"], hex(page["obj"]), page.get("visible"))
     for item in result["tabs"]:

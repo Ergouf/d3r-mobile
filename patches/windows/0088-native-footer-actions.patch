@@ -1,0 +1,39 @@
+diff --git a/src/nx/runtime/native_labels.c b/src/nx/runtime/native_labels.c
+--- a/src/nx/runtime/native_labels.c
++++ b/src/nx/runtime/native_labels.c
+@@ -26,6 +26,13 @@
+             const u64 replacement = g_stack_top - 0x1A000;
+             if (kbm_readable(replacement, length)) {
+                 memcpy(GP(replacement), out, length);
++                /* ui_footer_legend_click reads the object back; keep the template
++                   so the bar's hint cells still resolve to their pad actions. */
++                if (strlen(footer) < sizeof g_footer_original) {
++                    memcpy(g_footer_original, footer, strlen(footer) + 1);
++                    memcpy(g_footer_display, out, length);
++                    g_footer_object = cpu->x[0];
++                }
+                 cpu->x[1] = replacement;
+             }
+         }
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -84,7 +84,8 @@
+     int pan_y = __atomic_exchange_n(&g_map_pan_y, 0, __ATOMIC_RELAXED);
+     int recenter = __atomic_exchange_n(&g_map_recenter, 0, __ATOMIC_RELAXED);
+     int reset = __atomic_exchange_n(&g_map_reset_zoom, 0, __ATOMIC_RELAXED);
+-    if (!map || (!zoom && !pan_x && !pan_y && !recenter && !reset)) return;
++    if (!map) return;
++    if (!zoom && !pan_x && !pan_y && !recenter && !reset) return;
+     for (unsigned i = 0; i < sizeof paths / sizeof paths[0]; i++)
+         map_camera_adjust(map, ui_object(map, ui_path_key(paths[i])),
+                           zoom, pan_x, pan_y, recenter, reset);
+@@ -1376,7 +1377,7 @@
+     unsigned length = capacity < sizeof text - 1 ? capacity : sizeof text - 1;
+     memcpy(text, GP(pointer), length);
+     text[length] = 0;
+-    if (footer == g_footer_object && !strcmp(text, g_footer_display))
++    if (footer == g_footer_object && g_footer_original[0])
+         memcpy(text, g_footer_original, strlen(g_footer_original) + 1);
+     for (const char* at = text; hints < 8 && (at = strstr(at, "{icon:"));) {
+         unsigned n = 0;

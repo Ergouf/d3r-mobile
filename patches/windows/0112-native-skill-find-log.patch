@@ -1,0 +1,21 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1257,11 +1257,13 @@
+             u32 pmask = 0, ptotal = 0;
+             kbm_read32(p->map, &pmask);
+             kbm_read32(p->map + 4, &ptotal);
+-            LOG("native: skill icon pre miss ring=%llx vis=%d key=%llx map=%llx mask=%u total=%u\n",
++            const u64 dbg_key = ui_path_key(
++                "root.normallayer.consoleskillselection_main.layoutroot.skillloadout");
++            LOG("native: skill icon pre miss ring=%llx vis=%d key=%llx map=%llx mask=%u total=%u find=%llx\n",
+                 (unsigned long long)ring, ring ? ui_visible(p->map, ring) : 0,
+-                (unsigned long long)ui_path_key(
+-                    "root.normallayer.consoleskillselection_main.layoutroot.skillloadout"),
+-                (unsigned long long)p->map, pmask, ptotal);
++                (unsigned long long)dbg_key,
++                (unsigned long long)p->map, pmask, ptotal,
++                (unsigned long long)ui_find_key(p->map, dbg_key));
+         }
+         return 0;
+     }

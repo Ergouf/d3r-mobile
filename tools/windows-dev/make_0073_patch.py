@@ -1,0 +1,67 @@
+"""Generate patches/windows/0073-native-skillbar-labels.patch from the live tree."""
+from __future__ import annotations
+import hashlib, json, shutil, subprocess, tempfile
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "reference/ScarletNX-src"
+PATCHES = ROOT / "patches/windows"
+NAME = "0073-native-skillbar-labels.patch"
+FILES = [
+    "src/nx/runtime/native_world.c",
+    "src/nx/runtime/platform/backend/sdl3.c",
+]
+
+def run(args, cwd=None):
+    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+def lf_hash(data: bytes) -> str:
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+def main() -> int:
+    meta = json.loads((PATCHES / "base.json").read_text(encoding="utf-8"))
+    chain = [meta["patch"]] + [entry["patch"] for entry in meta.get("extra_patches", [])]
+    if NAME in chain:
+        chain = chain[:chain.index(NAME)]
+    work = Path(tempfile.mkdtemp(prefix="snx-0073-", dir=ROOT / "out"))
+    tree = work / "tree"
+    add = run(["git", "-C", str(SRC), "worktree", "add", "--detach", str(tree), meta["base_commit"]])
+    if add.returncode:
+        print(add.stderr)
+        return 2
+    try:
+        run(["git", "-C", str(tree), "config", "core.autocrlf", "false"])
+        for name in chain:
+            applied = run(["git", "-C", str(tree), "apply", "--ignore-whitespace", "--whitespace=nowarn", str(PATCHES / name)])
+            if applied.returncode:
+                print(name, applied.stderr)
+                return 3
+        run(["git", "-C", str(tree), "add", "-A"])
+        committed = run(["git", "-C", str(tree), "-c", "user.email=snx@local", "-c", "user.name=snx", "commit", "-m", "intermediate through 0072"])
+        if committed.returncode:
+            print(committed.stderr)
+            return 4
+        for rel in FILES:
+            (tree / rel).write_bytes((SRC / rel).read_bytes().replace(b"\r\n", b"\n"))
+        run(["git", "-C", str(tree), "add", "-N", *FILES])
+        diff = run(["git", "-C", str(tree), "diff", "--", *FILES])
+        if diff.returncode or not diff.stdout.strip():
+            print("empty", diff.stdout, diff.stderr)
+            return 5
+        out = PATCHES / NAME
+        out.write_bytes(diff.stdout.replace("\r\n", "\n").encode("utf-8"))
+        entry = {
+            "patch": NAME,
+            "patch_sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
+            "changed_files_lf_sha256": {rel: lf_hash((tree / rel).read_bytes()) for rel in FILES},
+        }
+        meta["extra_patches"] = [item for item in meta.get("extra_patches", []) if item["patch"] != NAME] + [entry]
+        (PATCHES / "base.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8", newline="\n")
+        print(json.dumps(entry, indent=2))
+    finally:
+        assert work.resolve().is_relative_to((ROOT / "out").resolve()) and tree.resolve().parent == work.resolve()
+        run(["git", "-C", str(SRC), "worktree", "remove", "--force", str(tree)])
+        shutil.rmtree(work, ignore_errors=True)
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

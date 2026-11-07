@@ -1,0 +1,22 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -408,7 +408,7 @@
+                           "right button casts the hero's secondary skill (loadout slot 1). Q uses the equipped potion;\n"
+                           "T channels town recall. C = inventory, S = skills, J = journal, P = paragon, M = map;\n"
+                           "these panel keys work from the world or character page (Ctrl aliases also work).\n"
+-                          "PC skill digits 1-4 select loadout slots 3-6; empty slots stay empty; Space closes a character page; M toggles the map.\n"
++                          "PC skill digits 1-4 select loadout slots 3-6; empty slots stay empty; Space closes a character page or map; M toggles the map.\n"
+                           "Esc opens pause in the world and closes dialogs when a game UI is open.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+@@ -1294,7 +1294,8 @@
+                             NATIVE_COMMAND_POTION : NATIVE_COMMAND_RECALL);
+                     break;
+                 }
+-                if (e.key.scancode == SDL_SCANCODE_SPACE && !e.key.repeat && native_ui_char_page()) {
++                if (e.key.scancode == SDL_SCANCODE_SPACE && !e.key.repeat &&
++                    (native_ui_char_page() || native_world_map_open())) {
+                     /* PC Space closes the character windows; outside a character page it stays
+                        the A/skill key and the menu confirm key. */
+                     native_action_press(1ull << 1);

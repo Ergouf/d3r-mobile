@@ -1,0 +1,71 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index d17937e..d124c92 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1578,14 +1578,17 @@ static int ui_dialog_buttons(UiPick* p, u32 serial) {
+     return 0;
+ }
+ 
+-/* The footer legend names the pad button behind each hint.  A click on the
+-   leftmost hint forwards that button, which is the console UI's stand-in for
+-   the PC action the hint describes (close a dialogue, accept a prompt). */
++/* The footer legend names the pad button behind each hint.  Hints are laid
++   out left to right in equal cells across the legend bar, so the click's cell
++   selects the hint and that hint's icon tag names the pad button.  Besides the
++   ABXY hints this carries the stick hints the console UI uses for actions that
++   have no child button (dye removal is L3; the party/friend hints are L1/R1). */
+ static int ui_footer_legend_click(UiPick* p, u32 serial) {
+-    static const char tag[] = "{icon:button";
+     u64 footer, pointer;
+     u32 capacity;
+     char text[512];
++    char names[8][12];
++    unsigned hints = 0;
+     float rect[4];
+     footer = ui_object(p->map, ui_path_key(
+         "root.normallayer.consolebuttonlegend_main.layoutroot.buttonlegend"));
+@@ -1594,16 +1597,37 @@ static int ui_footer_legend_click(UiPick* p, u32 serial) {
+         !read64(footer + 0x398, &pointer) || !read32(footer + 0x3A0, &capacity) ||
+         !pointer || !capacity || capacity > 1024 || !readable(pointer, capacity)) return 0;
+     memcpy(rect, GP(footer + 0x88), sizeof rect);
+-    if (p->point[0] > rect[0] + 240.0f) return 0;
+     unsigned length = capacity < sizeof text - 1 ? capacity : sizeof text - 1;
+     memcpy(text, GP(pointer), length);
+     text[length] = 0;
+-    const char* at = strstr(text, tag);
+-    if (!at) return 0;
+-    char digit = at[sizeof tag - 1];
+-    if (digit < '1' || digit > '4') return 0;
+-    int queued = native_action_press(1ull << (digit - '1'));
+-    LOG("native: UI footer legend %u button%c -> %s\n", serial, digit,
++    for (const char* at = text; hints < 8 && (at = strstr(at, "{icon:"));) {
++        unsigned n = 0;
++        at += 6;
++        while (*at && *at != ',' && *at != '}' && n + 1 < sizeof names[0]) names[hints][n++] = *at++;
++        names[hints][n] = 0;
++        if (!n || strstr(names[hints], "_label")) continue; /* sprite-only tag */
++        hints++;
++    }
++    if (!hints) return 0;
++    int cell = (int)((p->point[0] - rect[0]) / 240.0f);
++    if (cell < 0) return 0;
++    if ((float)hints * 240.0f > (rect[2] - rect[0]) + 8.0f) {
++        /* Geometry not understood: keep the original leftmost-hint behaviour. */
++        if (cell) return 0;
++        cell = 0;
++    } else if ((unsigned)cell >= hints) {
++        return 0;
++    }
++    const char* name = names[cell];
++    u64 pad = 0;
++    if (!strcmp(name, "button1")) pad = 1ull << 0;
++    else if (!strcmp(name, "button2")) pad = 1ull << 1;
++    else if (!strcmp(name, "button3")) pad = 1ull << 2;
++    else if (!strcmp(name, "button4")) pad = 1ull << 3;
++    else if (!strcmp(name, "l3")) pad = 1ull << 4;
++    if (!pad) return 0;
++    int queued = native_action_press(pad);
++    LOG("native: UI footer legend %u %s -> %s\n", serial, name,
+         queued ? "queued" : "rejected");
+     return queued ? 1 : 0;
+ }

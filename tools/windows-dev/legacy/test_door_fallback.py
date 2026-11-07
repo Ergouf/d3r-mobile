@@ -62,8 +62,9 @@ static int check(const char* name,int expected) {
     int got=door_candidate_near(NULL,0x100,&pos,&ray,occlusion,ground_ok,pixel,
                                &found,&handle,&controller,&power,&sno);
     int pass=got==expected;
+    u32 expected_sno;read32(0x800+0x18,&expected_sno);
     if(got)pass=pass&&handle==0x77000000&&controller==0x78000001&&power==30021&&
-        sno==178293&&found.place==42&&found.x==40;
+        sno==expected_sno&&found.place==42&&found.x==40;
     printf("%s %s\n",pass?"PASS":"FAIL",name);return !pass;
 }
 int main(void) {
@@ -90,6 +91,14 @@ int main(void) {
     reset();cap_value=ASSIST_ACTION;failed+=check("assist-power-rejected",0);
     reset();pixel[0]=125;failed+=check("outside-screen-radius",0);
     reset();pos.x=-81;failed+=check("outside-world-distance",0);
+    reset();w32(0x800+0x18,191492);failed+=check("hearth-portal-zero-radius",1);
+    reset();w32(0x800+0x18,196657);failed+=check("town-portal-zero-radius",1);
+    reset();w32(0x800+0x18,176002);failed+=check("blue-arch-portal",1);
+    reset();w32(0x800+0x18,176001);failed+=check("orange-arch-portal",1);
+    reset();w32(0x800+0x18,191492);occlusion=50;failed+=check("occluded-hearth-portal",0);
+    reset();wf(0x800+0x8c,8);pixel[1]=25;failed+=check("authored-height-portal-hit",1);
+    reset();wf(0x800+0x8c,NAN);failed+=check("invalid-height",0);
+    reset();wf(0x800+0x8c,-1);failed+=check("negative-height",0);
     return failed?1:0;
 }
 '''
@@ -105,7 +114,9 @@ def main() -> int:
     end = source.index("static void world_tick(", start)
     args.out.mkdir(parents=True, exist_ok=True)
     c_path, exe_path = args.out / "door-fallback.c", args.out / "door-fallback.exe"
-    c_path.write_text(PRELUDE + source[start:end] + CASES, "utf-8")
+    portal_start = source.index("static int portal_sno(")
+    portal_end = source.index("static int walk_into_sno(", portal_start)
+    c_path.write_text(PRELUDE + source[portal_start:portal_end] + source[start:end] + CASES, "utf-8")
     built = subprocess.run([args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", str(c_path),
                             "-o", str(exe_path)], capture_output=True, text=True)
     if built.returncode:

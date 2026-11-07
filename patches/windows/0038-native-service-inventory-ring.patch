@@ -1,0 +1,301 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 89eb790..ab42402 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -700,20 +700,27 @@ static int ui_inside(UiPick* pick, u64 obj) {
+            pick->point[1] >= clip[1] && pick->point[1] < clip[3];
+ }
+ 
+-static int ui_service_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_count) {
+-    typedef struct {
+-        const char* name;
+-        u32 group, count;
+-        u64 holder, vtable;
+-        u64 opens[5], closes[5];
+-        u32 modes[5];
+-        float left[5];
+-    } Service;
++/* Service ABI whitelist shared by tabs and the service's equipment wheel. */
++typedef struct {
++    const char* name;
++    u32 group, count;
++    u64 holder, vtable;
++    u64 opens[5], closes[5];
++    u32 modes[5];
++    float left[5];
++} UiServiceSpec;
++typedef struct {
++    const UiServiceSpec* spec;
++    u64 controller, page;
++    u32 current, mode, enabled[5];
++} UiServiceState;
++
++static int ui_service_state(u64 map, UiServiceState* state) {
+     /* Every service page keeps its own navigation group, controller global,
+        controller vtable, per-slot callbacks and mode table.  The jeweller mixes
+        open-only and open+close slots, so the close callback is compared per
+        slot instead of being rejected or accepted for the whole service. */
+-    static const Service services[] = {
++    static const UiServiceSpec services[] = {
+         {"vendor", 2, 4, 0x9158028, 0x90AB418,
+          {0x837DF30, 0x837DF60, 0x837DF90, 0x837DFC0},
+          {0, 0, 0, 0}, {1, 0, 2, 3},
+@@ -731,10 +738,10 @@ static int ui_service_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_
+          {0, 0, 0, 0}, {0, 1, 2, 3},
+          {126, 303, 505, 682}},
+     };
+-    const Service* service = NULL;
++    const UiServiceSpec* service = NULL;
+     u64 holder, navigation, group, data, count, controller, page, vtable;
+     u32 current, player, active, mode, enabled[5];
+-    if (!sub_count || !read64(0x9152080, &holder) || !holder ||
++    if (!read64(0x9152080, &holder) || !holder ||
+         !read64(holder, &navigation) || !navigation ||
+         !read64(navigation + 0x108, &group) || !group) return 0;
+     for (unsigned i = 0; i < sizeof services / sizeof services[0]; i++) {
+@@ -749,7 +756,8 @@ static int ui_service_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_
+         !read32(group + 0x18, &current) || current >= service->count ||
+         !read32(group + 0x1C, &player) || player != 0 ||
+         !read64(service->holder, &holder) || !holder || !read64(holder, &controller) || !controller ||
+-        !read64(controller, &vtable) || (service->vtable && vtable != service->vtable) ||
++        !read64(controller, &vtable) || vtable != service->vtable ||
++        !read32(controller + 0xC, &player) || player != 0 ||
+         !read32(controller + 0x18, &active) || active != 1 ||
+         !read32(controller + 0x200, &mode) || mode != service->modes[current]) return 0;
+     for (unsigned i = 0; i < service->count; i++) {
+@@ -758,8 +766,21 @@ static int ui_service_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_
+             !read64(data + i * 0x18 + 8, &close) || close != service->closes[i] ||
+             !read32(data + i * 0x18 + 0x10, &enabled[i]) || enabled[i] > 1) return 0;
+     }
+-    page = ui_object(p->map, ui_path_key("root.normallayer.consoleinventoryring_main"));
+-    if (!page || !ui_visible(p->map, page)) return 0;
++    page = ui_object(map, ui_path_key("root.normallayer.consoleinventoryring_main"));
++    if (!page || !ui_visible(map, page)) return 0;
++    *state = (UiServiceState){.spec = service, .controller = controller, .page = page,
++                              .current = current, .mode = mode};
++    memcpy(state->enabled, enabled, sizeof enabled);
++    return 1;
++}
++
++static int ui_service_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_count) {
++    UiServiceState state = {0};
++    if (!sub_count || !ui_service_state(p->map, &state)) return 0;
++    const UiServiceSpec* service = state.spec;
++    u64 page = state.page;
++    u32 current = state.current;
++    const u32* enabled = state.enabled;
+     u64 parent = 0, target_obj = 0;
+     unsigned seen = 0;
+     int target = -1;
+@@ -934,6 +955,41 @@ typedef struct {
+    and prompt.  0x837CDA0 is navigation, not a slot setter: its second
+    argument is not the target slot.  +0x200 is 0xFFFF on a freshly opened
+    page and is not a selection gate; +0x204 is not updated by 0x81FCFD0. */
++static int ui_wheel_allowed(UiPick* p, u64 manager) {
++    UiTabState state = {0};
++    u64 subs, entries, normal, owner;
++    u32 count;
++    if (ui_tab_state(p->map, &state)) {
++        if (state.current != 0 && state.current != 1) return 0;
++    } else {
++        UiServiceState service = {0};
++        if (!ui_service_state(p->map, &service)) return 0;
++        state.page = service.page;
++        state.current = 0; /* services share the inventory page and callback */
++    }
++    if (!read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
++        !read32(subs + 8, &count) || !count || count > 1024) return 0;
++    normal = ui_object(p->map, 1);
++    owner = ui_object(p->map, ui_path_key(state.current == 0 ?
++        "root.normallayer.consoleinventoryring_main.layoutroot" :
++        "root.normallayer.consoleskillselection_main.layoutroot"));
++    if (!normal || !owner || !ui_visible(p->map, normal)) return 0;
++    int subscribed = 0;
++    for (u32 i = 0; i < count; i++) {
++        u64 obj, vt, method, table, callback;
++        if (!read64(entries + i * 8ull, &obj)) return 0;
++        if (!obj || !ui_visible(p->map, obj)) continue;
++        if (!ui_within(p->map, obj, normal)) return 0;
++        if (!read64(obj, &vt) || !read64(vt + 0xB0, &method) || method != 0x83B81F0 ||
++            !read64(obj + 0x118, &table) || !table || !read64(table + 0x20, &callback) ||
++            !ui_code(callback)) continue;
++        if (!ui_within(p->map, obj, state.page)) return 0;
++        if (obj == owner && callback == (state.current == 0 ? 0x81FB910ull : 0x8387180ull))
++            subscribed = 1;
++    }
++    return subscribed;
++}
++
+ static int ui_equipment_icon(UiPick* p, u32 serial) {
+     static const UiEquipSlot slots[] = {
+         {"button_armleft", 0}, {"button_armright", 1},
+@@ -948,46 +1004,80 @@ static int ui_equipment_icon(UiPick* p, u32 serial) {
+         "root.normallayer.consoleinventoryring_main.layoutroot.inventoryring.";
+     UiTabState state = {0};
+     u64 ring, ring_key, vt, holder, controller, focus_key, focus;
+-    u32 count, selected, active;
++    u64 selector, entries, nentries, selector_ring, cursor_key, binding;
++    u64 global, world, manager;
++    u32 count, selected, active, native_selected, enabled, rotates, group = 0;
+     GuestResult r;
+     char path[sizeof prefix + 32];
+-    if (!ui_tab_state(p->map, &state) || state.current != 0 ||
+-        !(ring = ui_object(p->map, ui_path_key(
++    if (ui_tab_state(p->map, &state)) {
++        if (state.current != 0 || !read64(0x9157F58, &holder) ||
++            !read64(holder, &controller) || !read64(controller, &vt) || vt != 0x90AAEE0) return 0;
++    } else {
++        UiServiceState service = {0};
++        if (!ui_service_state(p->map, &service)) return 0;
++        state.page = service.page;
++        controller = service.controller;
++        group = service.spec->group;
++    }
++    if (!(ring = ui_object(p->map, ui_path_key(
+             "root.normallayer.consoleinventoryring_main.layoutroot.inventoryring"))) ||
+         !ui_visible(p->map, ring) || !ui_within(p->map, ring, state.page) ||
+         !read64(ring, &vt) || vt != 0x90AF208 ||
++        !read64(ring + 0x48, &binding) || binding != controller ||
+         !read64(ring + 0x30, &ring_key) ||
+-        !read32(ring + 0x68, &count) || count != 15) return 0;
++        !read32(ring + 0x68, &count) || count != 15 ||
++        !read64(0x914F840, &global) || !read64(global + 0x10, &world) ||
++        !read64(world + 0xB80, &manager) || !ui_wheel_allowed(p, manager)) return 0;
+     /* The inventory page can remain visible behind another modal. */
+     if (!guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &r) ||
+         !read64(r.x0, &focus_key)) return 0;
+     if (focus_key != UINT64_MAX &&
+         (!(focus = ui_object(p->map, focus_key)) || !ui_visible(p->map, focus) ||
+          !ui_within(p->map, focus, state.page))) return 0;
++    selector = controller + 0xD0;
++    if (!read64(selector, &entries) || !read64(selector + 8, &nentries) || nentries != 14 ||
++        !read64(selector + 0x18, &selector_ring) || selector_ring != ring_key ||
++        !read64(selector + 0x20, &cursor_key) || cursor_key != ui_path_key(
++            "root.normallayer.consoleinventoryring_main.layoutroot.inventoryring.ringglow.cursor") ||
++        !read32(selector + 0x28, &native_selected) || native_selected >= nentries ||
++        !read32(selector + 0x2C, &enabled) || enabled != 1 ||
++        !read32(selector + 0x30, &rotates) || rotates != 1) return 0;
+     for (unsigned i = 0; i < sizeof slots / sizeof slots[0]; i++) {
+-        u64 button, parent_key;
++        u64 button, parent_key, key;
+         snprintf(path, sizeof path, "%s%s", prefix, slots[i].name);
+         button = ui_object(p->map, ui_path_key(path));
+         if (!button || !read64(button, &vt) || vt != 0x90AF208 ||
+             !read64(button + 0x38, &parent_key) || parent_key != ring_key ||
+-            !ui_visible(p->map, button) || !ui_inside(p, button)) continue;
+-        if (!read64(0x9157F58, &holder) || !read64(holder, &controller) ||
+-            !read64(controller, &vt) || vt != 0x90AAEE0 ||
+-            !read32(controller + 0x18, &active) || !active ||
++            !ui_visible(p->map, button) || !ui_inside(p, button) ||
++            !read64(button + 0x30, &key)) continue;
++        if (!read32(controller + 0x18, &active) || active != 1 ||
+             !read32(controller + 0x150, &selected) || selected >= 14) {
+             LOG("native: UI equipment icon %u blocked (%s), fall through\n", serial, slots[i].name);
+             return 0;
+         }
+-        if (selected == slots[i].slot) {
++        u32 native_slot = UINT32_MAX;
++        for (u32 j = 0; j < nentries; j++) {
++            u64 entry_key;
++            if (!read64(entries + (u64)j * 16 + 8, &entry_key)) return 0;
++            if (entry_key == key) {
++                if (native_slot != UINT32_MAX) return 0;
++                native_slot = j;
++            }
++        }
++        if (native_slot == UINT32_MAX) return 0;
++        if (selected == slots[i].slot && native_selected == native_slot) {
+             if (!p->hover) LOG("native: UI equipment icon %u unchanged (%s)\n", serial, slots[i].name);
+             return 1;
+         }
+-        u64 args[2] = {controller, slots[i].slot};
+-        int complete = guest_call(p->cpu, 0x81FCFD0, args, 2, NULL, 0, NULL);
+-        int changed = complete && read32(controller + 0x150, &selected) &&
++        /* The native callback clears the old icon, highlights the new icon and
++           dispatches its mapped category through this ring's bound controller. */
++        u64 args[3] = {selector, button + 0x30, 0x81FC6C0};
++        int complete = guest_call(p->cpu, 0x838F650, args, 3, NULL, 0, NULL);
++        int changed = complete && read32(selector + 0x28, &native_selected) &&
++            native_selected == native_slot && read32(controller + 0x150, &selected) &&
+             selected == slots[i].slot;
+-        LOG("native: UI %sequipment icon %u %s slot=%u -> %s\n", p->hover ? "hover " : "", serial,
+-            slots[i].name, slots[i].slot, changed ? "selected" : "incomplete");
++        LOG("native: UI %sequipment icon %u %s group=%u slot=%u -> %s\n", p->hover ? "hover " : "", serial,
++            slots[i].name, group, slots[i].slot, changed ? "selected" : "incomplete");
+         return 1;
+     }
+     return 0;
+@@ -1003,7 +1093,7 @@ static int ui_skill_icon(UiPick* p, u32 serial) {
+     UiTabState state = {0};
+     GuestResult r;
+     u64 ring, ring_key, vt, children, holder, controller, selector;
+-    u64 entries, nentries, focus_key, focus;
++    u64 entries, nentries, focus_key, focus, callback;
+     u32 count, selected;
+     if (!ui_tab_state(p->map, &state) || state.current != 1 ||
+         !(ring = ui_object(p->map, ui_path_key(
+@@ -1018,7 +1108,8 @@ static int ui_skill_icon(UiPick* p, u32 serial) {
+     if (focus_key != UINT64_MAX &&
+         (!(focus = ui_object(p->map, focus_key)) || !ui_visible(p->map, focus) ||
+          !ui_within(p->map, focus, state.page))) return 0;
+-    if (!read64(0x9158040, &holder) || !read64(holder, &controller)) return 0;
++    if (!read64(0x9158040, &holder) || !read64(holder, &controller) ||
++        !read64(0x9158068, &callback) || callback != 0x83848A0) return 0;
+     selector = controller + 0x168;
+     if (!read64(selector, &entries) || !read64(selector + 8, &nentries) ||
+         nentries != 11 || !read32(selector + 0x28, &selected) || selected >= nentries)
+@@ -1038,8 +1129,8 @@ static int ui_skill_icon(UiPick* p, u32 serial) {
+                 if (!p->hover) LOG("native: UI skill icon %u unchanged slot=%u\n", serial, j);
+                 return 1;
+             }
+-            u64 args[3] = {selector, child + 0x30, 0};
+-            int complete = guest_call(p->cpu, 0x838F4D0, args, 3, NULL, 0, NULL);
++            u64 args[3] = {selector, child + 0x30, callback};
++            int complete = guest_call(p->cpu, 0x838F650, args, 3, NULL, 0, NULL);
+             int changed = complete && read32(selector + 0x28, &selected) &&
+                 selected == j;
+             LOG("native: UI %sskill icon %u slot=%u -> %s\n", p->hover ? "hover " : "", serial, j,
+@@ -1054,33 +1145,7 @@ static int ui_skill_icon(UiPick* p, u32 serial) {
+ 
+ /* A wheel can stay visible behind a modal. Require its own subscribed callback
+    owner and reject other input layers/owners before checking the selector. */
+-static int ui_hover_allowed(UiPick* p, u64 manager) {
+-    UiTabState state = {0};
+-    u64 subs, entries, normal, owner;
+-    u32 count;
+-    if (!ui_tab_state(p->map, &state) || (state.current != 0 && state.current != 1) ||
+-        !read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
+-        !read32(subs + 8, &count) || !count || count > 1024) return 0;
+-    normal = ui_object(p->map, 1);
+-    owner = ui_object(p->map, ui_path_key(state.current == 0 ?
+-        "root.normallayer.consoleinventoryring_main.layoutroot" :
+-        "root.normallayer.consoleskillselection_main.layoutroot"));
+-    if (!normal || !owner || !ui_visible(p->map, normal)) return 0;
+-    int subscribed = 0;
+-    for (u32 i = 0; i < count; i++) {
+-        u64 obj, vt, method, table, callback;
+-        if (!read64(entries + i * 8ull, &obj)) return 0;
+-        if (!obj || !ui_visible(p->map, obj)) continue;
+-        if (!ui_within(p->map, obj, normal)) return 0;
+-        if (!read64(obj, &vt) || !read64(vt + 0xB0, &method) || method != 0x83B81F0 ||
+-            !read64(obj + 0x118, &table) || !table || !read64(table + 0x20, &callback) ||
+-            !ui_code(callback)) continue;
+-        if (!ui_within(p->map, obj, state.page)) return 0;
+-        if (obj == owner && callback == (state.current == 0 ? 0x81FB910ull : 0x8387180ull))
+-            subscribed = 1;
+-    }
+-    return subscribed;
+-}
++
+ 
+ /* Motion selects only the hovered wheel icon. Lists, buttons and page tabs keep
+    their click semantics. No full-registry child index is needed for a wheel. */
+@@ -1093,7 +1158,7 @@ static void ui_hover(const CPU* cpu, const HoverPoint* hover) {
+     if ((u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - hover->frame) > 4 ||
+         !pointer_pixel(cpu, &press, pixel) || !read64(0x914F840, &global) ||
+         !read64(global + 0x10, &world) || !read64(world + 0xB80, &manager) ||
+-        !read64(manager, &p.map) || !ui_hover_allowed(&p, manager)) return;
++        !read64(manager, &p.map) || !ui_wheel_allowed(&p, manager)) return;
+     memcpy(GP(scratch), pixel, sizeof pixel);
+     u64 args[3] = {scratch, scratch + 0x20};
+     if (!guest_call(cpu, 0x8350BF0, args, 2, NULL, 0, NULL)) return;

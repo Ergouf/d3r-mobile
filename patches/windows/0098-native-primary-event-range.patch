@@ -1,0 +1,13 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1160,7 +1160,8 @@
+ static int primary_event(CPU* cpu, u64* event) {
+     u32 type, player;
+     *event = cpu->x[0];
+-    return kbm_read32(*event, &type) && type == 0x19 && kbm_read32(*event + 0x28, &player) && player == 0;
++    if (!kbm_read32(*event, &type) || type < 0x19 || type > 0x20) return 0;
++    return kbm_read32(*event + 0x28, &player) && player == 0;
+ }
+ static void world_ui(CPU* cpu, u64 entry) {
+     u64 event, lr = cpu->x[30];

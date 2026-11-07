@@ -1,0 +1,24 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1245,10 +1245,16 @@
+         !kbm_read64(ring + 0x30, &ring_key) ||
+         !kbm_read64(ring + 0x60, &children) ||
+         !kbm_read32(ring + 0x68, &count) || count != 14) {
+-        LOG("native: skill icon pre miss ring=%llx vis=%d key=%llx\n",
+-            (unsigned long long)ring, ring ? ui_visible(p->map, ring) : 0,
+-            (unsigned long long)ui_path_key(
+-                "root.normallayer.consoleskillselection_main.layoutroot.skillloadout"));
++        {
++            u32 pmask = 0, ptotal = 0;
++            kbm_read32(p->map, &pmask);
++            kbm_read32(p->map + 4, &ptotal);
++            LOG("native: skill icon pre miss ring=%llx vis=%d key=%llx map=%llx mask=%u total=%u\n",
++                (unsigned long long)ring, ring ? ui_visible(p->map, ring) : 0,
++                (unsigned long long)ui_path_key(
++                    "root.normallayer.consoleskillselection_main.layoutroot.skillloadout"),
++                (unsigned long long)p->map, pmask, ptotal);
++        }
+         return 0;
+     }
+     if (!guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &r) ||

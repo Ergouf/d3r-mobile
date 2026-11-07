@@ -1,0 +1,19 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1156,11 +1156,12 @@
+     memcpy(rect, GP(footer + 0x88), sizeof rect);
+     if (p->point[0] > rect[0] + 240.0f) return 0;
+     if (pick_label) {
++        /* Each jeweller page exposes only its own first-action labels. */
+         if (ui_text_contains(footer, select)) label = select;
+-        else if (ui_text_contains(footer, combine)) label = combine;
+-        else if (ui_text_contains(footer, socket)) label = socket;
+-        else if (ui_text_contains(footer, remove)) label = remove;
+         else if (ui_text_contains(footer, cont)) label = cont;
++        else if (service.current == 0 && ui_text_contains(footer, combine)) label = combine;
++        else if (service.current == 1 && ui_text_contains(footer, socket)) label = socket;
++        else if (service.current == 2 && ui_text_contains(footer, remove)) label = remove;
+         else return 0;
+     } else if (!ui_text_contains(footer, label)) return 0;
+     if (!guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &r) ||

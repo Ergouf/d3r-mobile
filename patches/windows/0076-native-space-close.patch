@@ -1,0 +1,235 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -101,6 +101,14 @@
+ /* 1 while a character page owns the input, for the frontend's hotkey gate. */
+ static int g_char_page;
+ static int g_char_tab = -1;
++typedef struct {
++    u64 owner, context, model;
++    u32 kind, generation, mode, frame;
++} UiCloseTarget;
++enum { UI_CLOSE_SERVICE = 1, UI_CLOSE_CONVERSATION = 2, UI_CLOSE_PROMPT = 3 };
++/* Publish a game-thread snapshot; a key may only close that same UI instance. */
++static UiCloseTarget g_close_target, g_close_pending;
++static int g_close_scope;
+ /* Last click's goal kind, read by the frontend for click-and-hold repeats. */
+ static int g_hold_kind;
+ static unsigned g_world_command;
+@@ -212,12 +220,27 @@
+     g_world_command = 0;
+     g_ui_read = g_ui_count = 0;
+     g_skill_read = g_skill_count = 0;
++    g_close_target = (UiCloseTarget){0};
++    g_close_pending = (UiCloseTarget){0};
++    g_close_scope = 0;
+     __atomic_store_n(&g_item_drag_active, 0, __ATOMIC_RELEASE);
+     pm_unlock(&g_pointer_lock);
+ }
+ 
+ int native_world_ui_blocked(void) {
+     return __atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) != 0;
++}
++
++int native_ui_close_request(void) {
++    int consume;
++    pm_lock(&g_pointer_lock);
++    consume = g_close_scope;
++    if (consume && !g_close_pending.kind) {
++        g_close_pending = g_close_target;
++        g_close_pending.frame = (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED);
++    }
++    pm_unlock(&g_pointer_lock);
++    return consume;
+ }
+ 
+ int native_ui_char_page(void) {
+@@ -1365,6 +1388,126 @@
+             subscribed = 1;
+     }
+     return subscribed;
++}
++
++/* A normal page must own the focus and every visible callback subscription.
++   This keeps a service or conversation from closing behind another dialog. */
++static int ui_close_page_allowed(u64 map, u64 manager, u64 focus, u64 first, u64 second) {
++    u64 subs, entries, normal;
++    u32 count;
++    if (!focus || (!ui_within(map, focus, first) &&
++                   (!second || !ui_within(map, focus, second))) ||
++        !read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
++        !read32(subs + 8, &count) || !count || count > 1024 ||
++        !(normal = ui_object(map, 1))) return 0;
++    int subscribed = 0;
++    for (u32 i = 0; i < count; i++) {
++        u64 obj, vt, method, callbacks, callback;
++        if (!read64(entries + i * 8ull, &obj)) return 0;
++        if (!obj || !ui_visible(map, obj)) continue;
++        if (!ui_within(map, obj, normal)) return 0;
++        if (!read64(obj, &vt) || !read64(vt + 0xB0, &method) || method != 0x83B81F0 ||
++            !read64(obj + 0x118, &callbacks) || !read64(callbacks + 0x20, &callback) ||
++            !ui_code(callback)) continue;
++        if (!ui_within(map, obj, first) && (!second || !ui_within(map, obj, second))) return 0;
++        subscribed = 1;
++    }
++    return subscribed;
++}
++
++/* Return whether Space belongs to a known closeable UI, even when its focus
++   guard rejects the action. Rejection must never fall through to confirm. */
++static int ui_close_target(const CPU* cpu, u64 map, u64 manager, UiCloseTarget* target) {
++    u64 holder, navigation, focus_key, focus = 0, model;
++    u32 modal_count;
++    GuestResult r;
++    *target = (UiCloseTarget){0};
++    if (!map || !manager || !read64(0x9152080, &holder) ||
++        !read64(holder, &navigation) || !navigation ||
++        !read32(navigation + 0xAE8, &modal_count) || modal_count > 32) return 0;
++    if (guest_call(cpu, 0x832D180, NULL, 0, NULL, 0, &r) &&
++        read64(r.x0, &focus_key) && focus_key != UINT64_MAX) {
++        focus = ui_object(map, focus_key);
++        if (!focus || !ui_visible(map, focus)) focus = 0;
++    }
++    if (modal_count) {
++        u32 generation, style, player;
++        if (!focus || !read64(navigation + 0xAD8, &model) || !model ||
++            !read32(model, &generation) || !read32(model + 0xC, &player) ||
++            (player != 0 && player != UINT32_MAX) ||
++            !read32(model + 0xD0, &style) || style < 2 || style > 3) return 1;
++        for (u64 owner = focus, depth = 0; owner && depth < 64; depth++, owner = ui_parent(map, owner)) {
++            u64 vt, method, callbacks, callback;
++            if (!ui_visible(map, owner)) break;
++            if (!read64(owner, &vt) || !read64(vt + 0xB0, &method) || method != 0x83B81F0 ||
++                !read64(owner + 0x118, &callbacks) ||
++                !read64(callbacks + 0x20, &callback) || callback != 0x816AAB0) continue;
++            *target = (UiCloseTarget){owner, navigation, model, UI_CLOSE_PROMPT, generation, style, 0};
++            break;
++        }
++        return 1;
++    }
++    UiServiceState service = {0};
++    if (ui_service_state(map, &service)) {
++        UiPick p = {.cpu = cpu, .map = map};
++        u64 group;
++        if (ui_wheel_allowed(&p, manager) &&
++            ui_close_page_allowed(map, manager, focus, service.page, 0) &&
++            read64(navigation + 0x108, &group))
++            *target = (UiCloseTarget){service.controller, navigation, group, UI_CLOSE_SERVICE,
++                                     service.spec->group, service.current, 0};
++        return 1;
++    }
++    u64 options = ui_object(map, ui_path_key("root.normallayer.consoleconversationoptions_main"));
++    u64 dialog = ui_object(map, ui_path_key("root.normallayer.consoleconversationdialog_main"));
++    u32 player;
++    if (((options && ui_visible(map, options)) || (dialog && ui_visible(map, dialog))) &&
++        read32(manager + 0x58, &player) && player == 0) {
++        u64 options_ref, dialog_ref, options_key, dialog_key;
++        u32 actor;
++        if (read64(0x9154340, &options_ref) && read64(options_ref, &options_key) &&
++            ui_object(map, options_key) == options &&
++            read64(0x9154338, &dialog_ref) && read64(dialog_ref, &dialog_key) &&
++            ui_object(map, dialog_key) == dialog && read32(0x97F3840, &actor) &&
++            ui_close_page_allowed(map, manager, focus, options, dialog)) {
++            u64 owner = ui_within(map, focus, options) ? options : dialog;
++            *target = (UiCloseTarget){owner, manager, 0, UI_CLOSE_CONVERSATION, actor, 0, 0};
++        }
++        return 1;
++    }
++    return 0;
++}
++
++static int ui_close_tick(const CPU* cpu, u64 map, u64 manager) {
++    UiCloseTarget current = {0}, pending;
++    int scope = ui_close_target(cpu, map, manager, &current);
++    pm_lock(&g_pointer_lock);
++    pending = g_close_pending;
++    g_close_pending = (UiCloseTarget){0};
++    g_close_target = current;
++    g_close_scope = scope;
++    pm_unlock(&g_pointer_lock);
++    if (!pending.kind || (u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - pending.frame) > 4 ||
++        pending.kind != current.kind || pending.owner != current.owner ||
++        pending.context != current.context || pending.model != current.model ||
++        pending.generation != current.generation || pending.mode != current.mode) return 0;
++    u64 callback, args[2] = {0, 0};
++    unsigned count;
++    if (current.kind == UI_CLOSE_SERVICE) {
++        /* Native navigation-stack close, also used by the service's Back branch. */
++        callback = 0x816BB90; args[0] = 1; count = 2;
++    } else if (current.kind == UI_CLOSE_CONVERSATION) {
++        /* Native cancel hides both conversation roots and sends end-conversation. */
++        callback = 0x820EF90; args[0] = current.owner + 0x30; count = 2;
++    } else {
++        /* Native prompt cancel; never invoke its accept callback 0x816AAB0. */
++        callback = 0x816A9C0; count = 0;
++    }
++    int complete = guest_call(cpu, callback, args, count, NULL, 0, NULL);
++    LOG("native: UI Space close kind=%u owner=%llx -> %s\n", current.kind,
++        (unsigned long long)current.owner, complete ? "returned" : "incomplete");
++    native_world_cancel();
++    return 1; /* A close attempt consumes this frame's stale clicks and motion. */
+ }
+ 
+ static int ui_text_contains(u64 obj, const char* needle) {
+@@ -3063,10 +3206,11 @@
+         if (done) __atomic_store_n(&g_hotkey_tab, -1, __ATOMIC_RELEASE);
+     }
+     if (blocked) {
+-        u64 legend_global, legend_world, legend_manager, legend_map;
++        u64 legend_global, legend_world, legend_manager = 0, legend_map = 0;
+         if (read64(0x914F840, &legend_global) && read64(legend_global + 0x10, &legend_world) &&
+             read64(legend_world + 0xB80, &legend_manager) && read64(legend_manager, &legend_map))
+             ui_footer_relabel(cpu, legend_map);
++        if (ui_close_tick(cpu, legend_map, legend_manager)) return;
+         pm_lock(&g_pointer_lock);
+         g_skill_read = g_skill_count = 0;
+         pm_unlock(&g_pointer_lock);
+@@ -3086,6 +3230,10 @@
+             __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
+         }
+     } else {
++        pm_lock(&g_pointer_lock);
++        g_close_scope = 0;
++        g_close_target = g_close_pending = (UiCloseTarget){0};
++        pm_unlock(&g_pointer_lock);
+         HoverPoint h;
+         take_hover(&h);
+     }
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -23,6 +23,9 @@
+ /* Latest pointer position, same normalised coordinates as native_world_click. */
+ void native_world_hover(float x, float y, u32 width, u32 height);
+ int native_world_ui_blocked(void);
++/* Space requests a guarded native cancel/close for a service, conversation or
++   prompt. Return 1 also when its guard refuses, so it cannot become confirm. */
++int native_ui_close_request(void);
+ /* 1 while the local region/waypoint map owns the screen; used for M toggle. */
+ int native_world_map_open(void);
+ /* The last click's goal: 0 = none, 1 = walking, 2 = attacking an actor,
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1307,12 +1307,18 @@
+                             NATIVE_COMMAND_POTION : NATIVE_COMMAND_RECALL);
+                     break;
+                 }
+-                if (e.key.scancode == SDL_SCANCODE_SPACE && !e.key.repeat &&
++                if (e.key.scancode == SDL_SCANCODE_SPACE &&
++                    !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+                     (native_ui_char_page() || native_world_map_open())) {
+                     /* PC Space closes the character windows; outside a character page it stays
+                        the A/skill key and the menu confirm key. */
+-                    native_action_press(1ull << 1);
+-                    break;
++                    if (!e.key.repeat) native_action_press(1ull << 1);
++                    break;
++                }
++                if (e.key.scancode == SDL_SCANCODE_SPACE &&
++                    !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
++                    native_world_ui_blocked()) {
++                    if (e.key.repeat || native_ui_close_request()) break;
+                 }
+                 if (pc_skill_digit(e.key.scancode, e.key.repeat, e.key.mod)) break;
+                 if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI))) {

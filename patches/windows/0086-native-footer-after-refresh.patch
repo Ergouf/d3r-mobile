@@ -1,0 +1,55 @@
+diff --git a/src/nx/runtime/native_labels.c b/src/nx/runtime/native_labels.c
+--- a/src/nx/runtime/native_labels.c
++++ b/src/nx/runtime/native_labels.c
+@@ -132,9 +132,51 @@
+    ABXY hints this carries the stick hints the console UI uses for actions that
+    have no child button (dye removal is L3; the party/friend hints are L1/R1). */
+ 
++/* The navigation legend refresh at 0x816B950 writes the gamepad template after
++   world_ui's relabel, so the live footer otherwise snaps back to icons. Run the
++   same replacement once that refresh returns. sub sp,#0x40; the setter blr is
++   at +0x84. */
++#define LEGEND_REFRESH_PC 0x816B950ull
++static GuestFn g_legend_original;
++
++static int g_legend_busy;
++
++static void legend_relabel(CPU* cpu, u64 entry) {
++    u64 lr = cpu->x[30];
++    u64 global, world, manager, map;
++    /* The setter's own layout pass can call this refresh again. Only the outer
++       call replaces the template; re-entering just runs the original. */
++    if (__atomic_exchange_n(&g_legend_busy, 1, __ATOMIC_ACQ_REL)) {
++        g_legend_original(cpu, entry);
++        return;
++    }
++    g_legend_original(cpu, entry);
++    if (cpu->pc == lr && native_world_map_open() &&
++        kbm_read64(0x914F840, &global) && kbm_read64(global + 0x10, &world) &&
++        kbm_read64(world + 0xB80, &manager) && kbm_read64(manager, &map))
++        ui_footer_relabel(cpu, map);
++    __atomic_store_n(&g_legend_busy, 0, __ATOMIC_RELEASE);
++}
++
++static void install_legend_relabel(void) {
++    GuestFn* slot;
++    GuestFn f;
++    if (g_legend_original || LEGEND_REFRESH_PC < g_code_lo || LEGEND_REFRESH_PC >= g_code_hi ||
++        gr32(LEGEND_REFRESH_PC) != 0xD10103FFu || gr32(LEGEND_REFRESH_PC + 0x84) != 0xD63F0100u)
++        return;
++    slot = &g_disp[(LEGEND_REFRESH_PC - g_code_lo) / 4];
++    f = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
++    if (f && f != legend_relabel) {
++        g_legend_original = f;
++        __atomic_store_n(slot, legend_relabel, __ATOMIC_RELEASE);
++        LOG("native: footer relabel follows legend refresh\n");
++    }
++}
++
+ /* Installs the HUD text hook.  The setter's entry signature is validated first,
+    so a different game build leaves the original label path untouched. */
+ void native_labels_install(void) {
++    install_legend_relabel();
+     if (g_label_original || LABEL_PC < g_code_lo || LABEL_PC >= g_code_hi ||
+         HUD_POTION_LABEL_RETURN >= g_code_hi || gr32(LABEL_PC) != 0xD10303FFu ||
+         gr32(LABEL_PC + 4) != 0xA9066FFCu ||

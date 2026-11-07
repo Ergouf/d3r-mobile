@@ -1,0 +1,491 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -96,6 +96,18 @@
+ static int g_char_page;
+ /* Last click's goal kind, read by the frontend for click-and-hold repeats. */
+ static int g_hold_kind;
++static unsigned g_world_command;
++static u32 g_command_frame;
++
++void native_world_command(unsigned command) {
++    if (!__atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) ||
++        __atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) ||
++        (command != NATIVE_COMMAND_POTION && command != NATIVE_COMMAND_RECALL)) return;
++    pm_lock(&g_pointer_lock);
++    g_world_command |= command;
++    g_command_frame = (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED);
++    pm_unlock(&g_pointer_lock);
++}
+ 
+ static int readable(u64 address, u64 size) {
+     MemBlock b;
+@@ -167,6 +179,7 @@
+     pm_lock(&g_pointer_lock);
+     g_have_pointer = 0;
+     g_have_hover = 0;
++    g_world_command = 0;
+     pm_unlock(&g_pointer_lock);
+ }
+ 
+@@ -527,6 +540,97 @@
+     LOG("native: stand-still attack power %d at (%.2f,%.2f,%.2f) -> %d\n", (int)ATTACK_POWER,
+         aim.x, aim.y, aim.z, (int)(u32)r.x0);
+     return (u32)r.x0 == 1;
++}
++
++/* Q/T keep the game's equipped-potion lookup, health/cooldown checks and
++   recall restrictions. Resolve its current control layout only to build the
++   listener's native press event; do not publish or synthesize Npad input. */
++static void world_command_tick(const CPU* cpu) {
++    unsigned commands;
++    u32 frame;
++    pm_lock(&g_pointer_lock);
++    commands = g_world_command;
++    frame = g_command_frame;
++    g_world_command = 0;
++    pm_unlock(&g_pointer_lock);
++    if (!commands || native_world_ui_blocked() ||
++        (u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - frame) > 120) return;
++    u32 actor;
++    u64 entity, controller, player, table;
++    WorldPos pos;
++    if (!local_player(cpu, &actor, &entity, &controller, &pos, &player, &table) ||
++        !actor_alive(cpu, entity)) return;
++    const u64 event = g_stack_top - 0x18000;
++    for (unsigned command = 1; command <= 2; command <<= 1) {
++        if (!(commands & command)) continue;
++        u64 predicate = command == NATIVE_COMMAND_POTION ? 0x840C2B0 : 0x840C340;
++        unsigned matches = 0, selected = 0;
++        for (unsigned bit = 0; bit < 16; bit++) {
++            memset(GP(event), 0, 0x50);
++            *(u32*)GP(event) = 0x1D;
++            *(u32*)GP(event + 0x2C) = bit;
++            const u64 args[] = {event};
++            GuestResult r;
++            if (!guest_call(cpu, predicate, args, 1, NULL, 0, &r)) { matches = 0; break; }
++            if (r.x0) { matches++; selected = bit; }
++        }
++        if (matches != 1) continue;
++        if (command == NATIVE_COMMAND_RECALL) {
++            /* A previous click-to-walk goal must not keep submitting Walk and
++               immediately interrupt the recall channel. */
++            g_goal.active = 0;
++            __atomic_store_n(&g_hold_kind, 0, __ATOMIC_RELEASE);
++            pm_lock(&g_pointer_lock);
++            g_have_pointer = 0;
++            pm_unlock(&g_pointer_lock);
++        }
++        *(u32*)GP(event + 0x2C) = selected;
++        const u64 args[] = {event};
++        GuestResult r;
++        /* Full world listener retains all native action gates. */
++        int complete = guest_call(cpu, 0x80CF3A0, args, 1, NULL, 0, &r);
++        LOG("native: world command %s bit=%u -> %s/%u\n",
++            command == NATIVE_COMMAND_POTION ? "potion" : "recall", selected,
++            complete ? "returned" : "incomplete", complete ? (u32)r.x0 : 0);
++    }
++}
++
++static int submit_mouse_skill(const CPU* cpu, u64 player, const WorldPos* pos,
++                              const WorldPos* ground, int ground_ok, const WalkGoal* picked,
++                              int has_target, u64 table, unsigned slot) {
++    if (slot >= 6) return 0;
++    GuestResult r;
++    const u64 loadout[] = {player, slot};
++    u32 power;
++    if (!guest_call(cpu, 0x8525ED0, loadout, 2, NULL, 0, &r) ||
++        !read32(r.x0, &power) || !power || power == UINT32_MAX) return 0;
++    const u64 record = g_stack_top - 0x1CB00, path = record + 0x14;
++    u32* words = (u32*)GP(record);
++    u64 target = 0;
++    u32 type = 0;
++    int actor_target = has_target && picked->attack &&
++        lookup(table, picked->handle, ENTITY_STRIDE, &target) &&
++        read32(target + 0x14C, &type) && type == 1 && actor_alive(cpu, target);
++    if (!actor_target && !ground_ok) return 0;
++    memset(GP(record), 0, 0x80);
++    words[0] = actor_target ? picked->controller : UINT32_MAX;
++    words[1] = words[2] = power;
++    words[4] = UINT32_MAX;
++    if (actor_target) {
++        const u64 args[] = {path, picked->handle, 0, 0};
++        if (!guest_call(cpu, PATH_ACTOR_PC, args, 4, NULL, 0, NULL)) return 0;
++    } else {
++        WorldPos aim = *ground;
++        aim.z = pos->z + 4.37f;
++        memcpy(GP(record + 0x60), &aim, sizeof aim);
++        const u64 args[] = {path, record + 0x60};
++        if (!guest_call(cpu, PATH_POS_PC, args, 2, NULL, 0, NULL)) return 0;
++    }
++    const u64 args[] = {player, record, 1, 1};
++    if (!guest_call(cpu, ACTION_PC, args, 4, NULL, 0, &r)) return 0;
++    LOG("native: mouse skill slot=%u power=%u path=%u target=%08x -> %u\n",
++        slot, power, actor_target ? 1u : 2u, actor_target ? picked->handle : UINT32_MAX, (u32)r.x0);
++    return r.x0 == 1;
+ }
+ 
+ /* The attack record a natural A press builds when nothing is interactable:
+@@ -1784,6 +1888,94 @@
+     return queued ? 1 : 0;
+ }
+ 
++/* The console maps have no generic button callback at their nodes. Their
++   controller owns a {point,index,UIReference} vector (stride 0x18). Select the
++   clicked node through that vector and the native detail/highlight refresh. */
++static int ui_map_click(UiPick* p, u32 serial) {
++    const u64 local = ui_object(p->map, ui_path_key("root.normallayer.map_dialog_mainpage"));
++    const u64 waypoint = ui_object(p->map, ui_path_key("root.normallayer.waypointmap_main"));
++    const int local_on = local && ui_visible(p->map, local);
++    const int waypoint_on = waypoint && ui_visible(p->map, waypoint);
++    if (!local_on && !waypoint_on) return 0;
++    GuestResult r;
++    u64 focus_key, focus;
++    if (!guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &r) || !read64(r.x0, &focus_key)) return 0;
++    if (focus_key != UINT64_MAX && (!(focus = ui_object(p->map, focus_key)) ||
++        !ui_visible(p->map, focus) ||
++        !((local_on && ui_within(p->map, focus, local)) ||
++          (waypoint_on && ui_within(p->map, focus, waypoint))))) return 0;
++
++    /* Region / Act / World tabs are navigation group 8, not character tabs. */
++    if (p->point[1] >= 39 && p->point[1] < 63) {
++        static const float rects[3][2] = {{125,375},{357,607},{636,792}};
++        static const u64 opens[3] = {0x83EC6C0,0x823E1E0,0x823E7A0};
++        static const u64 closes[3] = {0x83EC8E0,0x823E760,0x823E9D0};
++        int target = -1;
++        float best = FLT_MAX;
++        for (unsigned i = 0; i < 3; i++) {
++            float d = fabsf(p->point[0] - (rects[i][0] + rects[i][1]) * .5f);
++            if (p->point[0] >= rects[i][0] && p->point[0] < rects[i][1] && d < best) {
++                best = d; target = (int)i;
++            }
++        }
++        u64 holder, nav, group, active, data, n;
++        u32 player, enabled;
++        if (target >= 0 && read64(0x9152080, &holder) && read64(holder, &nav) &&
++            read64(nav + 8 * 8, &group) && read64(nav + 0x108, &active) && group == active &&
++            read64(group, &data) && read64(group + 8, &n) && n == 3 &&
++            read32(group + 0x1C, &player) && player == 0) {
++            for (unsigned i = 0; i < 3; i++) {
++                u64 open, close;
++                if (!read64(data + i * 24, &open) || open != opens[i] ||
++                    !read64(data + i * 24 + 8, &close) || close != closes[i]) return 0;
++            }
++            if (!read32(data + target * 24 + 16, &enabled) || enabled != 1) return 1;
++            const u64 args[] = {8, (unsigned)target, 0, 0};
++            int ok = guest_call(p->cpu, 0x816F550, args, 4, NULL, 0, NULL);
++            LOG("native: map tab %u target=%d -> %s\n", serial, target, ok ? "returned" : "incomplete");
++            return 1;
++        }
++    }
++    if (!waypoint_on) return 0;
++    u64 state, data, count;
++    u32 player;
++    if (!read64(0x9154E30, &state) || !read64(state + 0x28, &data) ||
++        !read64(state + 0x30, &count) || !count || count > 256 ||
++        !read32(state + 0x20, &player) || player != 0) return 0;
++    int target = -1;
++    float best = 32.0f;
++    for (unsigned i = 0; i < count; i++) {
++        u64 key, obj, vt;
++        u32 index;
++        float point[2];
++        const u64 row = data + i * 24;
++        if (!readable(row, 24) || !read32(row + 8, &index) || index != i ||
++            !read64(row + 16, &key) || !(obj = ui_object(p->map, key)) ||
++            !read64(obj, &vt) || vt != 0x90AF208 || !ui_visible(p->map, obj) ||
++            !ui_within(p->map, obj, waypoint) || !ui_inside(p, obj)) continue;
++        memcpy(point, GP(row), sizeof point);
++        if (!isfinite(point[0]) || !isfinite(point[1])) continue;
++        const float distance = hypotf(p->point[0] - point[0], p->point[1] - point[1]);
++        if (distance < best) { best = distance; target = (int)i; }
++    }
++    if (target < 0) return 0;
++    /* These are controller selection fields, not the UI focus. They mirror
++       the native map navigation branch at 0x823DF98..0x823DFE0. */
++    const u64 args[] = {(unsigned)target};
++    if (!guest_call(p->cpu, 0x800F9F0, NULL, 0, NULL, 0, &r)) return 1;
++    *(u32*)GP(state + 0x44) = (u32)target;
++    *(u32*)GP(state + 0x50) = (u32)r.x0;
++    *(u32*)GP(state + 0x48) = 1;
++    int ok = guest_call(p->cpu, 0x823EF60, args, 1, NULL, 0, NULL);
++    if (guest_call(p->cpu, 0x8170BD0, NULL, 0, NULL, 0, &r)) {
++        const u64 dirty[] = {r.x0, 1};
++        guest_call(p->cpu, 0x81C0B80, dirty, 2, NULL, 0, NULL);
++    }
++    LOG("native: map node %u index=%d distance=%.2f -> %s\n", serial, target, best,
++        ok ? "returned" : "incomplete");
++    return 1;
++}
++
+ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     UiPick p = {.cpu = cpu};
+     GuestResult r;
+@@ -1801,6 +1993,7 @@
+     memcpy(p.point, GP(scratch + 0x20), sizeof p.point);
+     if (!isfinite(p.point[0]) || !isfinite(p.point[1])) return;
+     ui_build_children(p.map);
++    if (ui_map_click(&p, press->serial)) return;
+     if (ui_tab_click(&p)) return;
+     if (ui_settings_tab_click(&p, press->serial)) return;
+     if (ui_equipment_icon(&p, press->serial)) return;
+@@ -2196,6 +2389,12 @@
+         memset(&g_goal, 0, sizeof g_goal);
+         int ground_ok = ground_target(cpu, pixel, &pos, &ground, &occlusion);
+         int picked = pick_entity(cpu, table, &ray, occlusion, &pos, actor, &g_goal);
++        if (p.fallback & NATIVE_POINTER_SKILL) {
++            submit_mouse_skill(cpu, player_object, &pos, &ground, ground_ok,
++                               &g_goal, picked > 0, table, (unsigned)((p.fallback >> 8) & 0xFF));
++            __atomic_store_n(&g_hold_kind, 2, __ATOMIC_RELEASE);
++            return;
++        }
+         WorldPos candidate;
+         WorldPos door;
+         u32 door_handle = 0, door_controller = 0, door_power = 0, door_sno_value = 0;
+@@ -2521,9 +2720,10 @@
+     if (primary && readable(event + 0x30, sizeof axes)) memcpy(axes, GP(event + 0x30), sizeof axes);
+     g_game_original(cpu, entry);
+     if (!primary || cpu->pc != lr) return;
+-    if (fabsf(axes[0]) > 0.05f || fabsf(axes[1]) > 0.05f) { native_world_cancel(); return; }
+     if (__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) return;
+-    world_tick(cpu);
++    world_command_tick(cpu);
++    if (fabsf(axes[0]) > 0.05f || fabsf(axes[1]) > 0.05f) native_world_cancel();
++    else world_tick(cpu);
+     __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
+ }
+ 
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -7,6 +7,13 @@
+ void native_world_install(void);
+ /* Safe-area coordinates and pixel dimensions, before removing presentation bars. */
+ int native_world_click(float x, float y, u32 width, u32 height, u64 fallback_pad);
++/* Pointer intent flags. Skills use the hero's actual six-slot loadout. */
++#define NATIVE_POINTER_STAND_STILL 1u
++#define NATIVE_POINTER_SKILL 2u
++#define NATIVE_POINTER_SLOT(n) ((u64)(n) << 8)
++/* World commands are consumed on the game thread; no Npad state is produced. */
++enum { NATIVE_COMMAND_POTION = 1, NATIVE_COMMAND_RECALL = 2 };
++void native_world_command(unsigned command);
+ void native_world_cancel(void);
+ /* Latest pointer position, same normalised coordinates as native_world_click. */
+ void native_world_hover(float x, float y, u32 width, u32 height);
+@@ -18,7 +25,6 @@
+ /* PC panel hotkey: switch the character page to tab 0..4 (inventory, skills,
+    paragon, party, journal) as soon as that page owns the input. */
+ void native_ui_hotkey(int tab);
+-/* 1 while one of the character pages owns the input: the frontend only turns
+-   C/S/J into panel keys then, so a skill key on the death screen still works. */
++/* 1 while a character page owns input; other dialogs retain their bindings. */
+ int native_ui_char_page(void);
+ #endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -55,9 +55,9 @@
+    being attacked.  Shift makes a world click an attack in place. */
+ static int g_lmb_world;
+ static Uint64 g_hold_tick;
+-static float g_hold_x = -1.0f, g_hold_y = -1.0f;
+ /* The right button is the secondary skill in the world and B in a menu. */
+-static u64 g_mouse_skill;
++static int g_rmb_world;
++static Uint64 g_rmb_tick;
+ static int g_shift_down;
+ static float g_mouse_x = -1.0f, g_mouse_y = -1.0f;
+ static int mouse_steer_on(void) { return g_settings.mouse_steer && !g_opt_headless; }
+@@ -392,7 +392,7 @@
+ static const char* HELP = "Controller: A, B, X and Y where the console's are (gamepad_swap_ab=1 swaps A and B). Home: "
+                           "the game's menu.\n\n"
+                           "Keyboard (keys by position, as on a US layout):\n"
+-                          "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick (unless rebound)\n"
++                          "  Arrows = D-Pad. Legacy stick keys depend on the active PC shortcuts.\n"
+                           "  Defaults (keybinds.ini may change them): Space = A    Z = B    C = X    V = Y\n"
+                           "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n"
+                           "  The six skill keys are the a= b= x= y= l= r= lines of keybinds.ini next to the game;\n"
+@@ -404,9 +404,9 @@
+                           "into touches. Alt opens the skill wheel at the pointer and casts the highlighted slot on release.\n\n"
+                           "In the world the left button walks, attacks or operates; holding it keeps walking towards the\n"
+                           "pointer and keeps attacking a held monster, and Shift makes a click an attack in place. The\n"
+-                          "right button casts the secondary skill (slot r) instead of B; menus keep B on the right button.\n"
+-                          "Panel tabs: C = inventory, S = skills, J = journal. Plain letters work while a game UI is open;\n"
+-                          "Ctrl+C/S/J opens the page from the world, where C/S/J stay skill and stick keys.\n\n"
++                          "right button casts the hero's secondary skill (loadout slot 1). Q uses the equipped potion;\n"
++                          "T channels town recall. C = inventory, S = skills, J = journal from the world or character\n"
++                          "page (Ctrl aliases also work). Other dialogs keep their own action keys.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+ 
+@@ -1121,6 +1121,15 @@
+     }
+     pm_unlock(&g_hle.hid.input_lock);
+ }
++static int pc_world_pointer(float x, float y, u64 flags) {
++    int sx, sy, width, height;
++    float density = SDL_GetWindowPixelDensity(g_win);
++    backend_window_safe(&sx, &sy, &width, &height);
++    return density > 0 && width > 0 && height > 0 &&
++        native_world_click((x * density - sx) / width, (y * density - sy) / height,
++                           (u32)width, (u32)height, flags);
++}
++
+ void video_poll(void) {
+     SDL_Event e;
+     char* left;
+@@ -1162,6 +1171,10 @@
+             case SDL_EVENT_MOUSE_BUTTON_DOWN:
+             case SDL_EVENT_MOUSE_BUTTON_UP:
+                 hid_mouse_feed(&e);
++                if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
++                    if (e.button.button == SDL_BUTTON_LEFT) g_lmb_world = 0;
++                    if (e.button.button == SDL_BUTTON_RIGHT) g_rmb_world = 0;
++                }
+                 if (mouse_steer_on() && e.button.which != SDL_TOUCH_MOUSEID) {
+                     /* the buttons are player 1's: left A, right B, middle X, back Y, forward L */
+                     u64 bit = mouse_button_bit(e.button.button);
+@@ -1182,11 +1195,8 @@
+                             native_world_click(
+                                 (e.button.x * density - x) / width, (e.button.y * density - y) / height,
+                                 (u32)width, (u32)height, g_shift_down ? 1u : 0u);
+-                            /* Shift never walks, so there is no walk to hold. */
+-                            g_lmb_world = !g_shift_down;
++                            g_lmb_world = !native_world_ui_blocked();
+                             g_hold_tick = SDL_GetTicks();
+-                            g_hold_x = e.button.x;
+-                            g_hold_y = e.button.y;
+                         }
+                     } else {
+                         g_lmb_world = 0;
+@@ -1195,13 +1205,14 @@
+                 }
+                 if (e.button.which != SDL_TOUCH_MOUSEID && e.button.button == SDL_BUTTON_RIGHT &&
+                     !native_world_ui_blocked()) {
+-                    /* The PC's right button is the secondary skill.  A menu keeps
+-                       the right button as B and falls through to the pad path. */
++                    /* Resolve slot 1 from the hero loadout and aim at this ray.
++                       R is the console potion button, not the secondary slot. */
+                     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+-                        g_mouse_skill = 1ull << 7;
+-                        LOG("input: right button -> skill slot r\n");
+-                    } else {
+-                        g_mouse_skill = 0;
++                        g_mouse_x = e.button.x;
++                        g_mouse_y = e.button.y;
++                        g_rmb_world = pc_world_pointer(e.button.x, e.button.y,
++                            NATIVE_POINTER_SKILL | NATIVE_POINTER_SLOT(1));
++                        g_rmb_tick = SDL_GetTicks();
+                     }
+                     break;
+                 }
+@@ -1255,10 +1266,15 @@
+                 wsafe_set();
+                 break;
+             case SDL_EVENT_KEY_DOWN:
++                if (!mouse_steer_on() && (e.key.scancode == SDL_SCANCODE_Q ||
++                                          e.key.scancode == SDL_SCANCODE_T)) {
++                    if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)))
++                        native_world_command(e.key.scancode == SDL_SCANCODE_Q ?
++                            NATIVE_COMMAND_POTION : NATIVE_COMMAND_RECALL);
++                    break;
++                }
+                 if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI))) {
+-                    /* PC panel keys.  Plain C/S/J switch the character page tabs
+-                       while that page owns the input; Ctrl+C/S/J does it from the
+-                       world, where the plain letters stay skill/stick keys. */
++                    /* PC panel keys open from the world or switch character tabs. */
+                     int tab = -1;
+                     switch (e.key.scancode) {
+                         case SDL_SCANCODE_C: tab = 0; break;
+@@ -1268,11 +1284,8 @@
+                     }
+                     if (tab >= 0) {
+                         int menu = native_world_ui_blocked();
+-                        int ctrl = (e.key.mod & SDL_KMOD_CTRL) != 0;
+-                        /* Only steal the key while a character page owns the
+-                           input (or with Ctrl from the world).  Elsewhere the
+-                           key keeps its skill/revive meaning. */
+-                        if (ctrl || (menu && native_ui_char_page())) {
++                        /* Other dialogs retain their own skill/revive bindings. */
++                        if (!menu || native_ui_char_page()) {
+                             if (!menu) native_action_press(1ull << 10); /* open the page */
+                             native_ui_hotkey(tab);
+                             break;
+@@ -1280,7 +1293,7 @@
+                     }
+                 }
+                 if (e.key.scancode == SDL_SCANCODE_LSHIFT || e.key.scancode == SDL_SCANCODE_RSHIFT) {
+-                    g_shift_down = 1;
++                    g_shift_down |= e.key.scancode == SDL_SCANCODE_LSHIFT ? 1 : 2;
+                     break;
+                 }
+                 if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !e.key.repeat) {
+@@ -1322,8 +1335,10 @@
+                 if (!e.key.repeat) keys_held |= keymap(e.key.scancode);
+                 break;
+             case SDL_EVENT_KEY_UP:
++                if (!mouse_steer_on() && (e.key.scancode == SDL_SCANCODE_Q ||
++                                          e.key.scancode == SDL_SCANCODE_T)) break;
+                 if (e.key.scancode == SDL_SCANCODE_LSHIFT || e.key.scancode == SDL_SCANCODE_RSHIFT) {
+-                    g_shift_down = 0;
++                    g_shift_down &= ~(e.key.scancode == SDL_SCANCODE_LSHIFT ? 1 : 2);
+                     break;
+                 }
+                 if (e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) {
+@@ -1343,7 +1358,7 @@
+                 keys_held = 0;
+                 g_mouse_buttons = 0;
+                 g_lmb_world = 0;
+-                g_mouse_skill = 0;
++                g_rmb_world = 0;
+                 g_shift_down = 0;
+                 ui_lock();
+                 overlay_pointer_feed(0, 0, 0, 0, 0);
+@@ -1360,28 +1375,30 @@
+             case SDL_EVENT_GAMEPAD_REMOVED: gamepad_close(e.gdevice.which); break;
+         }
+     }
+-    /* Click-and-hold: repeat a held world click only for a walk (the pointer
+-       moved) or an attack (a fixed cadence).  Operate goals never repeat, so
++    /* Camera motion changes the world point even when the mouse is stationary.
++       Repeat held movement at a fixed cadence. Operate goals never repeat, so
+        holding over an NPC cannot reopen its dialog. */
+     if (native_world_ui_blocked()) {
+         g_lmb_world = 0;
+-        g_mouse_skill = 0;
++        g_rmb_world = 0;
++    } else if (g_rmb_world) {
++        Uint64 now = SDL_GetTicks();
++        if (now - g_rmb_tick >= 350 && pc_world_pointer(g_mouse_x, g_mouse_y,
++                NATIVE_POINTER_SKILL | NATIVE_POINTER_SLOT(1))) g_rmb_tick = now;
+     } else if (g_lmb_world) {
+         int kind = native_world_hold_kind();
+         Uint64 now = SDL_GetTicks();
+-        float moved = fabsf(g_mouse_x - g_hold_x) + fabsf(g_mouse_y - g_hold_y);
+         if ((kind == 2 && now - g_hold_tick >= 350) ||
+-            (kind == 1 && moved >= 8.0f && now - g_hold_tick >= 90)) {
++            (kind == 1 && now - g_hold_tick >= 90)) {
+             int x, y, width, height;
+             float density = SDL_GetWindowPixelDensity(g_win);
+             backend_window_safe(&x, &y, &width, &height);
+             if (density > 0 && width > 0 && height > 0 &&
+                 native_world_click((g_mouse_x * density - x) / width,
+                                    (g_mouse_y * density - y) / height,
+-                                   (u32)width, (u32)height, 0)) {
++                                   (u32)width, (u32)height,
++                                   g_shift_down ? NATIVE_POINTER_STAND_STILL : 0)) {
+                 g_hold_tick = now;
+-                g_hold_x = g_mouse_x;
+-                g_hold_y = g_mouse_y;
+             }
+         }
+     }
+@@ -1389,7 +1406,6 @@
+        scripted too, but the stick keys (40..47) are no npad buttons */
+     u64 s = unattended_buttons(), k = keys_held | s;
+     u64 nonpad = (k & 0xFFFFull) | (s & 0xFF0000ull), b;
+-    nonpad |= g_mouse_skill;
+     i32 st[4], pad[4], pad0[4];
+     u64 pb;
+     input_key_sticks(k, st);

@@ -1,0 +1,26 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -648,11 +648,22 @@
+    accepted, so the character page and world HUD cannot be redirected. */
+ static int ui_settings_tab_click(UiPick* p, u32 serial) {
+     static const float origins[4] = {126.0f, 303.0f, 505.0f, 682.0f};
++    static const u64 tab_keys[4] = {
++        10326274740709475165ull, 10326271442174590532ull,
++        10326272541686218743ull, 10326269243151334110ull,
++    };
+     u64 settings, vt;
+     u32 page;
+     int seen = 0, target = -1;
+     if (!read64(0x9152940, &settings) || !settings ||
+         !read32(settings + 4, &page) || page > 4) return 0;
++    /* Vendor tab strips share the same class and geometry.  Require the four
++       registered settings labels themselves, or a vendor click would be
++       redirected into 0x8186C90. */
++    for (int k = 0; k < 4; k++) {
++        u64 tab = ui_object(p->map, tab_keys[k]);
++        if (!tab || !ui_visible(p->map, tab)) return 0;
++    }
+     for (u32 i = 0; i < g_ui_child_count; i++) {
+         u64 obj = g_ui_children[i].obj;
+         float r[4];

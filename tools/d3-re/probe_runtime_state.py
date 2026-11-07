@@ -14,17 +14,18 @@ rpc.exports = {
     const g = base.add(RVA.world_goal);
     const u32 = o => g.add(o).readU32();
     const f32 = o => g.add(o).readFloat();
-    /* WalkGoal (native_world.c): 5 ints, then actor/serial/ticks/stuck, two
+    /* WalkGoal (native_world.c): 7 ints, then actor/serial/ticks/stuck, two
        WorldPos (16 bytes each), handle/controller/power/sno, entity, approach. */
     const goal = {
       active: u32(0), entity_goal: u32(4), submitted: u32(8),
       attack: u32(12), retries: u32(16),
-      actor: u32(20).toString(16), serial: u32(24), ticks: u32(28), stuck: u32(32),
-      target: [f32(36), f32(40), f32(44)], target_place: u32(48),
-      previous: [f32(52), f32(56), f32(60)],
-      handle: u32(68).toString(16), controller: u32(72).toString(16), power: u32(76),
-      sno: u32(80), entity: [f32(84), f32(88), f32(92)],
-      entity_place: u32(96), approach: f32(100), assist_pending: u32(104)
+      attack_retry: u32(20), stand_still: u32(24),
+      actor: u32(28).toString(16), serial: u32(32), ticks: u32(36), stuck: u32(40),
+      target: [f32(44), f32(48), f32(52)], target_place: u32(56),
+      previous: [f32(60), f32(64), f32(68)],
+      handle: u32(76).toString(16), controller: u32(80).toString(16), power: u32(84),
+      sno: u32(88), entity: [f32(92), f32(96), f32(100)],
+      entity_place: u32(104), approach: f32(108), assist_pending: u32(112)
     };
     return {
       enabled: base.add(RVA.world_enabled).readU32(),

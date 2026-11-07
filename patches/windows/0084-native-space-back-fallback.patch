@@ -1,0 +1,30 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -20,7 +20,10 @@
+ int native_ui_close_request(void) {
+     int consume;
+     pm_lock(&g_pointer_lock);
+-    consume = g_close_scope;
++    /* Scope alone is not a close. Difficulty and similar pages set scope
++       without a prompt, service or conversation target; swallowing Space
++       there leaves the page open. */
++    consume = g_close_scope && g_close_target.kind;
+     if (consume && !g_close_pending.kind) {
+         g_close_pending = g_close_target;
+         g_close_pending.frame = (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED);
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1335,6 +1335,11 @@
+                     native_world_ui_blocked()) {
+                     if (e.key.repeat) break;
+                     if (native_ui_close_request()) { native_ui_compare_set(0); break; }
++                    /* No specialized owner: use the same Back action as Esc.
++                       Falling through would press A and accept the focused row. */
++                    native_ui_compare_set(0);
++                    native_action_press(1ull << 1);
++                    break;
+                 }
+                 if (pc_skill_digit(e.key.scancode, e.key.repeat, e.key.mod)) break;
+                 if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI))) {

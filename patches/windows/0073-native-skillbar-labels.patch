@@ -1,0 +1,162 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index ea53a08..bf92608 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1859,6 +1859,57 @@ static int ui_dialog_buttons(UiPick* p, u32 serial) {
+     return 0;
+ }
+ 
++/* The console footer stores {icon:buttonN}. Show the PC control that actually
++   sends that button. button4, l3, l1 and r1 have no PC key yet, so those glyphs stay. */
++static void ui_footer_relabel(u64 map) {
++    static const struct { const char* icon; const char* label; } map_label[] = {
++        {"button1", "\xE5\xB7\xA6\xE9\x94\xAE"}, /* left mouse */
++        {"button2", "Esc"},
++        {"button3", "Alt"},
++    };
++    u64 footer, pointer;
++    u32 capacity;
++    char text[512], out[512];
++    unsigned length, o = 0;
++    int changed = 0;
++    footer = ui_object(map, ui_path_key(
++        "root.normallayer.consolebuttonlegend_main.layoutroot.buttonlegend"));
++    if (!footer || !ui_visible(map, footer) ||
++        !read64(footer + 0x398, &pointer) || !read32(footer + 0x3A0, &capacity) ||
++        !pointer || capacity < 2 || capacity > 1024 || !readable(pointer, capacity)) return;
++    length = capacity < sizeof text - 1 ? capacity : (unsigned)sizeof text - 1;
++    memcpy(text, GP(pointer), length);
++    text[length] = 0;
++    length = (unsigned)strlen(text);
++    for (unsigned i = 0; i < length && o + 1 < sizeof out; ) {
++        if (text[i] == 123 && !strncmp(text + i + 1, "icon:", 5)) {
++            unsigned j = i + 6, n = 0;
++            char name[12];
++            const char* label = NULL;
++            while (text[j] && text[j] != ',' && text[j] != 125 && n + 1 < sizeof name)
++                name[n++] = text[j++];
++            name[n] = 0;
++            while (text[j] && text[j] != 125) j++;
++            if (text[j] == 125) j++;
++            for (unsigned k = 0; n && k < sizeof map_label / sizeof map_label[0]; k++)
++                if (!strcmp(name, map_label[k].icon)) label = map_label[k].label;
++            if (label) {
++                size_t ln = strlen(label);
++                if (o + ln >= sizeof out) break;
++                memcpy(out + o, label, ln);
++                o += (unsigned)ln;
++                changed = 1;
++                i = j;
++                continue;
++            }
++        }
++        out[o++] = text[i++];
++    }
++    out[o] = 0;
++    if (!changed || o + 1 > capacity) return;
++    memcpy(GP(pointer), out, o + 1);
++}
++
+ /* The footer legend names the pad button behind each hint.  Hints are laid
+    out left to right in equal cells across the legend bar, so the click's cell
+    selects the hint and that hint's icon tag names the pad button.  Besides the
+@@ -1881,12 +1932,42 @@ static int ui_footer_legend_click(UiPick* p, u32 serial) {
+     unsigned length = capacity < sizeof text - 1 ? capacity : sizeof text - 1;
+     memcpy(text, GP(pointer), length);
+     text[length] = 0;
+-    for (const char* at = text; hints < 8 && (at = strstr(at, "{icon:"));) {
+-        unsigned n = 0;
+-        at += 6;
+-        while (*at && *at != ',' && *at != '}' && n + 1 < sizeof names[0]) names[hints][n++] = *at++;
+-        names[hints][n] = 0;
+-        if (!n || strstr(names[hints], "_label")) continue; /* sprite-only tag */
++    const char* at = text;
++    while (hints < 8 && *at) {
++        const char* icon_at = NULL;
++        for (const char* scan = at; *scan; scan++)
++            if (scan[0] == 123 && !strncmp(scan + 1, "icon:", 5)) { icon_at = scan; break; }
++        const char* label_at = NULL;
++        const char* label_name = NULL;
++        size_t label_len = 0;
++        static const struct { const char* label; const char* name; } known[] = {
++            {"\xE5\xB7\xA6\xE9\x94\xAE", "button1"},
++            {"Esc", "button2"},
++            {"Alt", "button3"},
++        };
++        for (unsigned k = 0; k < sizeof known / sizeof known[0]; k++) {
++            const char* found = strstr(at, known[k].label);
++            if (!found) continue;
++            if (!label_at || found < label_at) {
++                label_at = found;
++                label_name = known[k].name;
++                label_len = strlen(known[k].label);
++            }
++        }
++        if (icon_at && (!label_at || icon_at <= label_at)) {
++            unsigned n = 0;
++            at = icon_at + 6;
++            while (*at && *at != ',' && *at != 125 && n + 1 < sizeof names[0]) names[hints][n++] = *at++;
++            names[hints][n] = 0;
++            while (*at && *at != 125) at++;
++            if (*at == 125) at++;
++            if (!n || strstr(names[hints], "_label")) continue; /* sprite-only tag */
++            hints++;
++            continue;
++        }
++        if (!label_at) break;
++        memcpy(names[hints], label_name, strlen(label_name) + 1);
++        at = label_at + label_len;
+         hints++;
+     }
+     if (!hints) return 0;
+@@ -2932,6 +3013,10 @@ static void world_ui(CPU* cpu, u64 entry) {
+         if (done) __atomic_store_n(&g_hotkey_tab, -1, __ATOMIC_RELEASE);
+     }
+     if (blocked) {
++        u64 legend_global, legend_world, legend_manager, legend_map;
++        if (read64(0x914F840, &legend_global) && read64(legend_global + 0x10, &legend_world) &&
++            read64(legend_world + 0xB80, &legend_manager) && read64(legend_manager, &legend_map))
++            ui_footer_relabel(legend_map);
+         PointerPress p;
+         g_goal.active = 0;
+         __atomic_store_n(&g_cancel, 1, __ATOMIC_RELEASE);
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index fccf742..5aacd30 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -408,7 +408,7 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
+                           "right button casts the hero's secondary skill (loadout slot 1). Q uses the equipped potion;\n"
+                           "T channels town recall. C = inventory, S = skills, J = journal, P = paragon, M = map;\n"
+                           "these panel keys work from the world or character page (Ctrl aliases also work).\n"
+-                          "PC skill digits 1-4 select loadout slots 3-6; empty slots stay empty; Space closes a character page or map; M toggles the map; Alt compares items in a game UI.\n"
++                          "PC digits 1-4 cast loadout slots 3-6 (the console X/Y/B/L buttons). Empty slots stay empty. Space closes a character page or map; M toggles the map; Alt compares items in a game UI.\n"
+                           "Esc opens pause in the world and closes dialogs when a game UI is open.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+@@ -1305,17 +1305,18 @@ void video_poll(void) {
+                 }
+                 if (!native_world_ui_blocked() && !e.key.repeat &&
+                     !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) {
+-                    /* PC skill bar digits 1..4 are loadout slots 3..6.  Empty
+-                       loadout slots stay empty; menus keep their normal digits. */
+-                    int slot = -1;
++                    /* PC 1..4 are loadout slots 2..5. The console binds those
++                       to X, Y, B and L. R remains the right-click secondary slot.
++                       Empty slots stay empty; menus keep their normal digits. */
++                    u64 pad = 0;
+                     switch (e.key.scancode) {
+-                        case SDL_SCANCODE_1: slot = 2; break;
+-                        case SDL_SCANCODE_2: slot = 3; break;
+-                        case SDL_SCANCODE_3: slot = 4; break;
+-                        case SDL_SCANCODE_4: slot = 5; break;
++                        case SDL_SCANCODE_1: pad = SKILL_PAD[2]; break; /* X, slot 2 */
++                        case SDL_SCANCODE_2: pad = SKILL_PAD[3]; break; /* Y, slot 3 */
++                        case SDL_SCANCODE_3: pad = SKILL_PAD[1]; break; /* B, slot 4 */
++                        case SDL_SCANCODE_4: pad = SKILL_PAD[4]; break; /* L, slot 5 */
+                         default: break;
+                     }
+-                    if (slot >= 0) { native_action_press(SKILL_PAD[slot]); break; }
++                    if (pad) { native_action_press(pad); break; }
+                 }
+                 if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI))) {
+                     /* PC panel keys open from the world or switch character tabs. */

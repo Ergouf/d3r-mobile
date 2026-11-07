@@ -1,0 +1,56 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1057,6 +1057,44 @@
+ /* Console menus expose the A action as a footer legend rather than a child
+    button. This click maps only the leftmost craft hint, after verifying the
+    service, page, controller, wheel/focus/overlay gate and exact legend. */
++/* Some towns keep several cached copies of the vendor tab strip in the
++   registry.  The strict per-slot callback whitelist then sees duplicate slots
++   and refuses the click.  This narrower fallback accepts only the verified
++   vendor group/controller and the four fixed tab rectangles, so cached copies
++   cannot retarget another service. */
++static int ui_vendor_tab_click_fallback(UiPick* p, u32 serial) {
++    static const float left[4] = {126.0f, 303.0f, 505.0f, 682.0f};
++    u64 holder, nav, group, entry, holder2, controller, vt, data, count64;
++    u32 current, player, active, mode;
++    int target = -1;
++    if (!read64(0x9152080, &holder) || !holder ||
++        !read64(holder, &nav) || !nav ||
++        !read64(nav + 0x108, &group) || !group ||
++        !read64(nav + 2 * 8, &entry) || entry != group) return 0;
++    if (!read64(0x9158028, &holder2) || !holder2 ||
++        !read64(holder2, &controller) || !controller ||
++        !read64(controller, &vt) || vt != 0x90AB418 ||
++        !read32(controller + 0x18, &active) || active != 1 ||
++        !read32(controller + 0xC, &player) || player != 0 ||
++        !read32(controller + 0x200, &mode)) return 0;
++    if (!read64(group, &data) || !read64(group + 8, &count64) || count64 != 4 ||
++        !read32(group + 0x18, &current) || current >= 4) return 0;
++    if (p->point[1] < 39.0f || p->point[1] >= 63.0f) return 0;
++    for (int i = 0; i < 4; i++)
++        if (p->point[0] >= left[i] && p->point[0] < left[i] + 156.0f) target = i;
++    if (target < 0) return 0;
++    if ((u32)target == current) {
++        LOG("native: vendor tab unchanged current=%u target=%d serial=%u mode=%u\n",
++            current, target, serial, mode);
++        return 1;
++    }
++    u64 args[4] = {2, (u32)target, 0, 0};
++    int complete = guest_call(p->cpu, 0x816F550, args, 4, NULL, 0, NULL);
++    LOG("native: vendor tab fallback current=%u target=%d serial=%u mode=%u -> %s\n",
++        current, target, serial, mode, complete ? "returned" : "incomplete");
++    return 1;
++}
++
+ static int ui_service_action_click(UiPick* p, u32 serial) {
+     static const char craft[] = "\xE6\x89\x93\xE9\x80\xA0";
+     static const char salvage[] = "\xE5\x88\x86\xE8\xA7\xA3";
+@@ -1422,6 +1460,7 @@
+     if (!read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
+         !read32(subs + 8, &sub_count) || sub_count > 1024) sub_count = 0;
+     if (ui_service_tab_click(&p, press->serial, entries, sub_count)) return;
++    if (ui_vendor_tab_click_fallback(&p, press->serial)) return;
+     int focused = 0, menu_owner = 0;
+     if (guest_call(cpu, 0x832D180, NULL, 0, NULL, 0, &r) && read64(r.x0, &key)) {
+         u64 obj = ui_object(p.map, key);

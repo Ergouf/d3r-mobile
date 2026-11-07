@@ -1,0 +1,16 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1246,6 +1246,12 @@
+     if (!primary || cpu->pc != lr) return;
+     if (__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) return;
+     world_command_tick(cpu);
++    /* A click on the legend bar does not always raise a UI dispatch event;
++       drain any queued UI press here as well so footer cells still work. */
++    if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE)) {
++        PointerPress press;
++        if (native_ui_take_pointer(&press)) ui_click(cpu, &press);
++    }
+     if (fabsf(axes[0]) > 0.05f || fabsf(axes[1]) > 0.05f) native_world_cancel();
+     else world_tick(cpu);
+     __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);

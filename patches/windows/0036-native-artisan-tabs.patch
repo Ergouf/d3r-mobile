@@ -1,0 +1,156 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 73ac60c..c627da0 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -664,26 +664,62 @@ static int ui_inside(UiPick* pick, u64 obj) {
+            pick->point[1] >= clip[1] && pick->point[1] < clip[3];
+ }
+ 
+-static int ui_vendor_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_count) {
+-    static const u64 callbacks[4] = {0x837DF30, 0x837DF60, 0x837DF90, 0x837DFC0};
+-    static const u32 modes[4] = {1, 0, 2, 3};
+-    static const float left[4] = {126.0f, 303.0f, 505.0f, 682.0f};
+-    u64 holder, navigation, group, current_group, data, count, controller, page;
+-    u32 current, player, active, mode, enabled[4];
++static int ui_service_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_count) {
++    typedef struct {
++        const char* name;
++        u32 group, count;
++        u64 holder, vtable;
++        u64 opens[5], closes[5];
++        u32 modes[5];
++        float left[5];
++    } Service;
++    /* Every service page keeps its own navigation group, controller global,
++       controller vtable, per-slot callbacks and mode table.  The jeweller mixes
++       open-only and open+close slots, so the close callback is compared per
++       slot instead of being rejected or accepted for the whole service. */
++    static const Service services[] = {
++        {"vendor", 2, 4, 0x9158028, 0x90AB418,
++         {0x837DF30, 0x837DF60, 0x837DF90, 0x837DFC0},
++         {0, 0, 0, 0}, {1, 0, 2, 3},
++         {126, 303, 505, 682}},
++        {"blacksmith", 5, 5, 0x91598B0, 0x90AFC60,
++         {0x8419140, 0x8419170, 0x84191A0, 0x84191D0, 0x8419200},
++         {0, 0, 0, 0, 0}, {0, 1, 2, 3, 4},
++         {90, 246, 402, 558, 714}},
++        {"jeweler", 6, 4, 0x9159948, 0x90AFE78,
++         {0x84276A0, 0x84276D0, 0x8427720, 0x8427780},
++         {0, 0x8427700, 0x8427750, 0}, {0, 1, 2, 3},
++         {126, 303, 505, 682}},
++        {"mystic", 7, 4, 0x9153E68, 0x90A3750,
++         {0x81DFB00, 0x81DFB30, 0x81DFB60, 0x81DFB90},
++         {0, 0, 0, 0}, {0, 1, 2, 3},
++         {126, 303, 505, 682}},
++    };
++    const Service* service = NULL;
++    u64 holder, navigation, group, data, count, controller, page, vtable;
++    u32 current, player, active, mode, enabled[5];
+     if (!sub_count || !read64(0x9152080, &holder) || !holder ||
+         !read64(holder, &navigation) || !navigation ||
+-        !read64(navigation + 2 * 8, &group) || !group ||
+-        !read64(navigation + 0x108, &current_group) || current_group != group ||
+-        !read64(group, &data) || !read64(group + 8, &count) || count != 4 ||
+-        !read32(group + 0x18, &current) || current >= 4 ||
++        !read64(navigation + 0x108, &group) || !group) return 0;
++    for (unsigned i = 0; i < sizeof services / sizeof services[0]; i++) {
++        u64 candidate;
++        if (!read64(navigation + services[i].group * 8, &candidate) || candidate != group) continue;
++        /* Two whitelisted slots pointing at one group object would pick the
++           wrong service, so an ambiguous match is rejected instead. */
++        if (service) return 0;
++        service = &services[i];
++    }
++    if (!service || !read64(group, &data) || !read64(group + 8, &count) || count != service->count ||
++        !read32(group + 0x18, &current) || current >= service->count ||
+         !read32(group + 0x1C, &player) || player != 0 ||
+-        !read64(0x9158028, &holder) || !holder || !read64(holder, &controller) || !controller ||
++        !read64(service->holder, &holder) || !holder || !read64(holder, &controller) || !controller ||
++        !read64(controller, &vtable) || (service->vtable && vtable != service->vtable) ||
+         !read32(controller + 0x18, &active) || active != 1 ||
+-        !read32(controller + 0x200, &mode) || mode != modes[current]) return 0;
+-    for (unsigned i = 0; i < 4; i++) {
++        !read32(controller + 0x200, &mode) || mode != service->modes[current]) return 0;
++    for (unsigned i = 0; i < service->count; i++) {
+         u64 open, close;
+-        if (!read64(data + i * 0x18, &open) || open != callbacks[i] ||
+-            !read64(data + i * 0x18 + 8, &close) || close ||
++        if (!read64(data + i * 0x18, &open) || open != service->opens[i] ||
++            !read64(data + i * 0x18 + 8, &close) || close != service->closes[i] ||
+             !read32(data + i * 0x18 + 0x10, &enabled[i]) || enabled[i] > 1) return 0;
+     }
+     page = ui_object(p->map, ui_path_key("root.normallayer.consoleinventoryring_main"));
+@@ -700,8 +736,8 @@ static int ui_vendor_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_c
+         if (!isfinite(rect[0]) || !isfinite(rect[1]) || !isfinite(rect[2]) || !isfinite(rect[3]) ||
+             fabsf(rect[1] - 39.0f) > 1.0f || fabsf(rect[3] - 63.0f) > 1.0f ||
+             fabsf(rect[2] - rect[0] - 156.0f) > 1.0f) continue;
+-        for (unsigned slot = 0; slot < 4; slot++) {
+-            if (fabsf(rect[0] - left[slot]) > 1.0f) continue;
++        for (unsigned slot = 0; slot < service->count; slot++) {
++            if (fabsf(rect[0] - service->left[slot]) > 1.0f) continue;
+             if ((seen & (1u << slot)) || (parent && parent != g_ui_children[i].parent)) return 0;
+             seen |= 1u << slot;
+             parent = g_ui_children[i].parent;
+@@ -712,8 +748,8 @@ static int ui_vendor_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_c
+             }
+         }
+     }
+-    if (seen != 0xF || target < 0 || !ui_inside(p, target_obj)) return 0;
+-    /* Vendor labels have no callback table. Only the active vendor subscriber
++    if (seen != (1u << service->count) - 1 || target < 0 || !ui_inside(p, target_obj)) return 0;
++    /* Service labels have no callback table. Only the active inventory subscriber
+        authorizes their navigation group; a modal subscriber owns the click. */
+     u64 owner = ui_object(p->map, ui_path_key("root.normallayer.consoleinventoryring_main.layoutroot"));
+     /* Layer roots use reserved UIReference IDs, not FNV path keys. Normal is
+@@ -726,14 +762,14 @@ static int ui_vendor_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_c
+         if (!read64(subscribers + i * 8ull, &obj)) return 1;
+         if (!obj || !ui_visible(p->map, obj)) continue;
+         if (!ui_within(p->map, obj, normal)) {
+-            LOG("native: UI vendor tab %u blocked by other input layer\n", serial);
++            LOG("native: UI %s tab %u blocked by other input layer\n", service->name, serial);
+             return 1;
+         }
+         if (!read64(obj, &vt) || !read64(vt + 0xB0, &method) || method != 0x83B81F0 ||
+             !read64(obj + 0x118, &table) || !table || !read64(table + 0x20, &callback) ||
+             !ui_code(callback)) continue;
+         if (!ui_within(p->map, obj, page)) {
+-            LOG("native: UI vendor tab %u blocked by other callback owner\n", serial);
++            LOG("native: UI %s tab %u blocked by other callback owner\n", service->name, serial);
+             return 1;
+         }
+         if (obj == owner && callback == 0x81FB910) subscribed = 1;
+@@ -744,19 +780,19 @@ static int ui_vendor_tab_click(UiPick* p, u32 serial, u64 subscribers, u32 sub_c
+         !read64(result.x0, &focus_key)) return 1;
+     if (focus_key != UINT64_MAX && (!(focus = ui_object(p->map, focus_key)) ||
+         !ui_visible(p->map, focus) || !ui_within(p->map, focus, page))) {
+-        LOG("native: UI vendor tab %u blocked by focus\n", serial);
++        LOG("native: UI %s tab %u blocked by focus\n", service->name, serial);
+         return 1;
+     }
+     if (!enabled[target] || current == (u32)target) {
+-        LOG("native: UI vendor tab %u %s current=%u target=%d\n", serial,
++        LOG("native: UI %s tab %u %s current=%u target=%d\n", service->name, serial,
+             enabled[target] ? "unchanged" : "disabled", current, target);
+         return 1;
+     }
+-    /* Native group 2, never the character group's selector or global confirm. */
+-    u64 args[4] = {2, (u32)target, 0, 0};
++    /* Select this service's exact group; never send a global confirm. */
++    u64 args[4] = {service->group, (u32)target, 0, 0};
+     int complete = guest_call(p->cpu, 0x816F550, args, 4, NULL, 0, NULL);
+-    LOG("native: UI vendor tab %u current=%u target=%d -> %s\n", serial,
+-        current, target, complete ? "returned" : "incomplete");
++    LOG("native: UI service %s tab %u group=%u current=%u target=%d -> %s\n", service->name,
++        serial, service->group, current, target, complete ? "returned" : "incomplete");
+     return 1;
+ }
+ 
+@@ -1055,7 +1091,7 @@ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     if (ui_dialog_buttons(&p, press->serial)) return;
+     if (!read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
+         !read32(subs + 8, &sub_count) || sub_count > 1024) sub_count = 0;
+-    if (ui_vendor_tab_click(&p, press->serial, entries, sub_count)) return;
++    if (ui_service_tab_click(&p, press->serial, entries, sub_count)) return;
+     int focused = 0, menu_owner = 0;
+     if (guest_call(cpu, 0x832D180, NULL, 0, NULL, 0, &r) && read64(r.x0, &key)) {
+         u64 obj = ui_object(p.map, key);

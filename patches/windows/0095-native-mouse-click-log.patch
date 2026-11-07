@@ -1,0 +1,13 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1226,6 +1226,9 @@
+                         g_mouse_y = e.button.y;
+                         if (density > 0 && width > 0 && height > 0) {
+                             g_lmb_ui = native_world_ui_blocked();
++                            LOG("native: mouse click raw %.1f %.1f density %.3f safe %d %d %d %d\n",
++                                (double)e.button.x, (double)e.button.y, (double)density,
++                                x, y, width, height);
+                             /* A map press becomes a pan if the pointer moves, otherwise the
+                                original click is delivered on release. */
+                             if (g_lmb_ui && native_world_map_open()) {

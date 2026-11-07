@@ -1,0 +1,30 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -74,7 +74,18 @@
+     memcpy(GP(local + 0x1F8), pan, sizeof pan);
+ }
+ 
++static void map_hide_tab_icons(u64 map) {
++    static const u64 keys[] = {11174367840934117803ull, 11174368940445746014ull};
++    for (unsigned i = 0; i < sizeof keys / sizeof keys[0]; i++) {
++        u64 obj = ui_object(map, keys[i]);
++        u32 flags;
++        if (obj && kbm_read32(obj + 0x18, &flags) && (flags & 4))
++            *(u32*)GP(obj + 0x18) = flags & ~4u;
++    }
++}
++
+ void native_map_apply(u64 map) {
++
+     static const char* const paths[] = {
+         "root.normallayer.map_dialog_mainpage.localmap",
+         "root.normallayer.waypointmap_main.layoutroot.overlaycontainer.worldmap",
+@@ -85,6 +96,7 @@
+     int recenter = __atomic_exchange_n(&g_map_recenter, 0, __ATOMIC_RELAXED);
+     int reset = __atomic_exchange_n(&g_map_reset_zoom, 0, __ATOMIC_RELAXED);
+     if (!map) return;
++    if (native_world_map_open()) map_hide_tab_icons(map);
+     if (!zoom && !pan_x && !pan_y && !recenter && !reset) return;
+     for (unsigned i = 0; i < sizeof paths / sizeof paths[0]; i++)
+         map_camera_adjust(map, ui_object(map, ui_path_key(paths[i])),

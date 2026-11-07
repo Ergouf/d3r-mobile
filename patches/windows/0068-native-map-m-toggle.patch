@@ -1,0 +1,56 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -2502,6 +2502,15 @@
+    and 120 world units of the player. A valid click-time terrain depth must
+    place the door in front of the occluder before it can become an operate goal.
+    It only covers the listed SNOs; ordinary props/NPCs keep the ray/assist path. */
++int native_world_map_open(void) {
++    u64 global, world, manager, map, local, waypoint;
++    if (!read64(0x914F840, &global) || !read64(global + 0x10, &world) ||
++        !read64(world + 0xB80, &manager) || !read64(manager, &map)) return 0;
++    local = ui_object(map, ui_path_key("root.normallayer.map_dialog_mainpage"));
++    waypoint = ui_object(map, ui_path_key("root.normallayer.waypointmap_main"));
++    return (local && ui_visible(map, local)) || (waypoint && ui_visible(map, waypoint));
++}
++
+ static int door_sno(u32 sno) {
+     return sno == 178293u || /* inn door */
+            sno == 90419u ||  /* trOut_NewTristram_Gate_Town */
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -23,6 +23,8 @@
+ /* Latest pointer position, same normalised coordinates as native_world_click. */
+ void native_world_hover(float x, float y, u32 width, u32 height);
+ int native_world_ui_blocked(void);
++/* 1 while the local region/waypoint map owns the screen; used for M toggle. */
++int native_world_map_open(void);
+ /* The last click's goal: 0 = none, 1 = walking, 2 = attacking an actor,
+    3 = operating/approaching an interactable.  The frontend repeats a held
+    click for 1 and 2 only. */
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -408,7 +408,7 @@
+                           "right button casts the hero's secondary skill (loadout slot 1). Q uses the equipped potion;\n"
+                           "T channels town recall. C = inventory, S = skills, J = journal, P = paragon, M = map;\n"
+                           "these panel keys work from the world or character page (Ctrl aliases also work).\n"
+-                          "PC skill digits 1-4 select loadout slots 3-6; empty slots stay empty; Space closes a character page.\n"
++                          "PC skill digits 1-4 select loadout slots 3-6; empty slots stay empty; Space closes a character page; M toggles the map.\n"
+                           "Esc opens pause in the world and closes dialogs when a game UI is open.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+@@ -499,8 +499,10 @@
+         case SDL_SCANCODE_3: return 1ull << 9;     /* ZR */
+         case SDL_SCANCODE_RETURN: return 1ull << 10;
+         case SDL_SCANCODE_BACKSPACE: return 1ull << 11;
+-        case SDL_SCANCODE_TAB:
+-        case SDL_SCANCODE_M: return native_world_ui_blocked() ? 0 : 1ull << 15; /* map-only D-pad Down; not a menu move */
++        case SDL_SCANCODE_TAB: return native_world_ui_blocked() ? 0 : 1ull << 15; /* map-only D-pad Down; not a menu move */
++        case SDL_SCANCODE_M:
++            if (!native_world_ui_blocked()) return 1ull << 15;
++            return native_world_map_open() ? (1ull << 1) : 0;
+         case SDL_SCANCODE_LEFT: return 1ull << 12;
+         case SDL_SCANCODE_UP: return 1ull << 13;
+         case SDL_SCANCODE_RIGHT: return 1ull << 14;

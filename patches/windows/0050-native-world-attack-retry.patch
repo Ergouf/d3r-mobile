@@ -1,0 +1,35 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 4749d6e..279015e 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -52,6 +52,10 @@ typedef struct { float x, y; u32 width, height; u64 fallback; u32 serial, frame;
+ typedef struct { u64 x0; float f0; } GuestResult;
+ typedef struct {
+     int active, entity_goal, submitted, attack, retries;
++    /* A wide prop with no operate power is picked as an attack whose standoff
++       is the cylinder radius.  The game rejects an attack from that standoff,
++       so walk up to melee range once and submit again there. */
++    int attack_retry;
+     u32 actor, serial, ticks, stuck;
+     WorldPos target, previous;
+     u32 handle, controller, power;
+@@ -2069,6 +2073,19 @@ static void world_tick(CPU* cpu) {
+             LOG("native: entity goal %u %s %08x power %d at %.2f -> %s\n", g_goal.serial,
+                 g_goal.attack ? "attack" : "operate", g_goal.handle, (int)g_goal.power, reached,
+                 ok ? "accepted" : "rejected");
++            if (!ok && g_goal.attack && !g_goal.attack_retry &&
++                g_goal.approach > ATTACK_APPROACH + 0.1f) {
++                /* A wide static prop (crafting backbone and similar) reports no
++                   operate power, so the pick becomes an attack standing outside
++                   its collision radius.  The game refuses that attack; keep the
++                   click and walk up to melee range, then submit once more. */
++                g_goal.approach = ATTACK_APPROACH;
++                g_goal.attack_retry = 1;
++                g_goal.ticks = g_goal.stuck = 0;
++                LOG("native: entity goal %u retry at attack range %.2f\n", g_goal.serial,
++                    g_goal.approach);
++                return;
++            }
+             g_goal.active = 0;
+             return;
+         }

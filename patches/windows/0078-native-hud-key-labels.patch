@@ -1,0 +1,99 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -17,6 +17,8 @@
+ 
+ #define UI_PC 0x8331490ull
+ #define GAME_PC 0x804F9C0ull
++#define LABEL_PC 0x83AD9D0ull
++#define HUD_LABEL_RETURN 0x841D050ull
+ #define PLAYER_PC 0x8525360ull
+ #define RAY_PC 0x826C7B0ull
+ #define GROUND_PC 0x813E6A0ull
+@@ -93,7 +95,9 @@
+ static int g_have_pointer, g_cancel, g_enabled, g_ui_blocked = 1, g_busy;
+ static u32 g_serial;
+ static u64 g_stack_top;
+-static GuestFn g_ui_original, g_game_original;
++static GuestFn g_ui_original, g_game_original, g_label_original;
++/* Label hooks must not nest a second call onto the shared native-call stack. */
++static unsigned g_guest_call_depth;
+ static WalkGoal g_goal;
+ /* Pending character-page tab request from a panel hotkey.  Runs on the game
+    thread from world_ui once the page owns the input. */
+@@ -275,6 +279,7 @@
+                       const float* floats, unsigned float_count, GuestResult* result) {
+     CPU n = *source;
+     unsigned steps = 0;
++    __atomic_add_fetch(&g_guest_call_depth, 1, __ATOMIC_ACQ_REL);
+     n.pc = pc;
+     n.x[30] = 0;
+     n.x[31] = g_stack_top;
+@@ -294,10 +299,47 @@
+     if (n.pc) {
+         WARN("native: world call %llx incomplete at %llx (%u steps)\n",
+              (unsigned long long)pc, (unsigned long long)n.pc, steps);
++        __atomic_sub_fetch(&g_guest_call_depth, 1, __ATOMIC_ACQ_REL);
+         return 0;
+     }
+     if (result) { result->x0 = n.x[0]; memcpy(&result->f0, &n.v[0], 4); }
++    __atomic_sub_fetch(&g_guest_call_depth, 1, __ATOMIC_ACQ_REL);
+     return 1;
++}
++
++/* The world HUD has its own KeyBinding labels. Its virtual text-setter call
++   supplies a real skill-slot binding, independently of the menu footer. */
++static void world_label(CPU* cpu, u64 entry) {
++    u64 vt, setter;
++    u32 player, label_player, input_player, binding;
++    if (entry == LABEL_PC && cpu->x[30] == HUD_LABEL_RETURN && cpu->x[2] == 0 &&
++        __atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) &&
++        !__atomic_load_n(&g_guest_call_depth, __ATOMIC_ACQUIRE) &&
++        cpu->x[22] >= 0x28 && g_stack_top >= 0x17000 &&
++        read32(cpu->x[19], &player) && player == 0 &&
++        read32(cpu->x[19] + 0xDB74, &input_player) &&
++        read32(cpu->x[0] + 0x3E0, &label_player) && label_player == input_player &&
++        read64(cpu->x[0], &vt) && read64(vt + 0x110, &setter) && setter == LABEL_PC &&
++        read32(cpu->x[22] - 0x28, &binding) && binding < 8) {
++        GuestResult r;
++        const u64 args[] = {binding, cpu->x[19]};
++        /* Use the game's inverse binding lookup, including a loaded control
++           profile; the six visual HUD positions are not loadout order. */
++        if (guest_call(cpu, 0x840C650, args, 2, NULL, 0, &r) && r.x0 < 6) {
++            static const char* labels[] = {
++                "\xE5\xB7\xA6\xE9\x94\xAE", "\xE5\x8F\xB3\xE9\x94\xAE", "1", "2", "3", "4"
++            };
++            const char* text = labels[r.x0];
++            u64 replacement = g_stack_top - 0x17000;
++            size_t length = strlen(text) + 1;
++            if (readable(replacement, length)) {
++                memcpy(GP(replacement), text, length);
++                cpu->x[1] = replacement;
++            }
++        }
++    }
++    /* The real setter copies, tokenizes and lays out this string as usual. */
++    g_label_original(cpu, entry);
+ }
+ 
+ 
+@@ -3352,6 +3394,19 @@
+         GuestFn f = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+         if (f && f != world_game) { g_game_original = f; __atomic_store_n(slot, world_game, __ATOMIC_RELEASE); }
+     }
++    if (!g_label_original && LABEL_PC >= g_code_lo && LABEL_PC < g_code_hi &&
++        HUD_LABEL_RETURN < g_code_hi && gr32(LABEL_PC) == 0xD10303FFu &&
++        gr32(LABEL_PC + 4) == 0xA9066FFCu &&
++        gr32(HUD_LABEL_RETURN - 4) == 0xD63F0100u &&
++        gr32(HUD_LABEL_RETURN - 8) == 0x2A1F03E2u) {
++        GuestFn* slot = &g_disp[(LABEL_PC - g_code_lo) / 4];
++        GuestFn f = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
++        if (f && f != world_label) {
++            g_label_original = f;
++            __atomic_store_n(slot, world_label, __ATOMIC_RELEASE);
++            LOG("native: HUD skill key labels installed (native text setter)\n");
++        }
++    }
+     if (g_ui_original && g_game_original && !__atomic_exchange_n(&g_enabled, 1, __ATOMIC_ACQ_REL))
+         LOG("native: world pointer installed (camera ray -> client Walk / actor operate)\n");
+ }

@@ -1,0 +1,53 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -430,12 +430,15 @@
+ static int submit_mouse_skill(const CPU* cpu, u64 player, const WorldPos* pos,
+                               const WorldPos* ground, int ground_ok, const WalkGoal* picked,
+                               int has_target, u64 table, unsigned slot) {
+-    if (slot >= 6) return 0;
++    if (slot >= 6) { LOG("native: skill slot %u out of range\n", slot); return 0; }
+     GuestResult r;
+     const u64 loadout[] = {player, slot};
+     u32 power;
+     if (!guest_call(cpu, 0x8525ED0, loadout, 2, NULL, 0, &r) ||
+-        !kbm_read32(r.x0, &power) || !power || power == UINT32_MAX) return 0;
++        !kbm_read32(r.x0, &power) || !power || power == UINT32_MAX) {
++        LOG("native: skill slot %u loadout read failed (ret %u)\n", slot, (unsigned)r.x0);
++        return 0;
++    }
+     const u64 record = g_stack_top - 0x1CB00, path = record + 0x14;
+     u32* words = (u32*)GP(record);
+     u64 target = 0;
+@@ -443,7 +446,11 @@
+     int actor_target = has_target && picked->attack &&
+         kbm_lookup(table, picked->handle, ENTITY_STRIDE, &target) &&
+         kbm_read32(target + 0x14C, &type) && type == 1 && kbm_actor_alive(cpu, target);
+-    if (!actor_target && !ground_ok) return 0;
++    if (!actor_target && !ground_ok) {
++        LOG("native: skill slot %u no ground (target=%d attack=%d)\n",
++            slot, has_target, has_target ? picked->attack : 0);
++        return 0;
++    }
+     memset(GP(record), 0, 0x80);
+     words[0] = actor_target ? picked->controller : UINT32_MAX;
+     words[1] = words[2] = power;
+@@ -456,10 +463,16 @@
+         aim.z = pos->z + 4.37f;
+         memcpy(GP(record + 0x60), &aim, sizeof aim);
+         const u64 args[] = {path, record + 0x60};
+-        if (!guest_call(cpu, PATH_POS_PC, args, 2, NULL, 0, NULL)) return 0;
++        if (!guest_call(cpu, PATH_POS_PC, args, 2, NULL, 0, NULL)) {
++            LOG("native: skill slot %u ground path failed\n", slot);
++            return 0;
++        }
+     }
+     const u64 args[] = {player, record, 1, 1};
+-    if (!guest_call(cpu, ACTION_PC, args, 4, NULL, 0, &r)) return 0;
++    if (!guest_call(cpu, ACTION_PC, args, 4, NULL, 0, &r)) {
++        LOG("native: skill slot %u action call failed\n", slot);
++        return 0;
++    }
+     LOG("native: mouse skill slot=%u power=%u path=%u target=%08x -> %u\n",
+         slot, power, actor_target ? 1u : 2u, actor_target ? picked->handle : UINT32_MAX, (u32)r.x0);
+     return r.x0 == 1;

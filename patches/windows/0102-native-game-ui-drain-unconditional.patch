@@ -1,0 +1,13 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1248,8 +1248,7 @@
+     /* A click on the legend bar does not always raise the 0x19 UI dispatch
+        event; drain queued UI presses on every game tick while UI is blocked,
+        before the primary-event gate, so footer cells still work. */
+-    if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) &&
+-        !__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) {
++    if (!__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) {
+         PointerPress press;
+         if (native_ui_take_pointer(&press)) ui_click(cpu, &press);
+         __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);

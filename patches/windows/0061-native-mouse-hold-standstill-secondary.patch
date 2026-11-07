@@ -1,0 +1,298 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 4095131..dcee93b 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -56,6 +56,8 @@ typedef struct {
+        is the cylinder radius.  The game rejects an attack from that standoff,
+        so walk up to melee range once and submit again there. */
+     int attack_retry;
++    /* Shift-click: attack from where the hero stands and never walk. */
++    int stand_still;
+     u32 actor, serial, ticks, stuck;
+     WorldPos target, previous;
+     u32 handle, controller, power;
+@@ -87,6 +89,8 @@ static u32 g_serial;
+ static u64 g_stack_top;
+ static GuestFn g_ui_original, g_game_original;
+ static WalkGoal g_goal;
++/* Last click's goal kind, read by the frontend for click-and-hold repeats. */
++static int g_hold_kind;
+ 
+ static int readable(u64 address, u64 size) {
+     MemBlock b;
+@@ -165,6 +169,10 @@ int native_world_ui_blocked(void) {
+     return __atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) != 0;
+ }
+ 
++int native_world_hold_kind(void) {
++    return __atomic_load_n(&g_hold_kind, __ATOMIC_ACQUIRE);
++}
++
+ /* Source CPU, including its concurrent poll request, remains untouched. */
+ static int guest_call(const CPU* source, u64 pc, const u64* args, unsigned count,
+                       const float* floats, unsigned float_count, GuestResult* result) {
+@@ -476,6 +484,35 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+ }
+ 
+ 
++/* A stand-still click on the ground: the same empty-swing record, aimed at the
++   clicked point instead of the hero. */
++static int submit_ground_attack(const CPU* cpu, u64 player_object, const WorldPos* player,
++                                const WorldPos* point) {
++    const u64 record = g_stack_top - 0x1CB00, path = record + 0x14;
++    u32* words = (u32*)GP(record);
++    WorldPos aim = *point;
++    memset(GP(record), 0, 0x80);
++    words[0] = 0xFFFFFFFFu;
++    words[1] = words[2] = ATTACK_POWER;
++    words[3] = 0;
++    words[4] = 0xFFFFFFFFu;
++    aim.z = player->z + 4.37f;
++    memcpy(GP(record + 0x60), &aim, sizeof aim);
++    u64 build[] = {path, record + 0x60};
++    if (!guest_call(cpu, PATH_POS_PC, build, 2, NULL, 0, NULL)) return 0;
++    u32 type, id;
++    if (!read32(path, &type) || !read32(path + 4, &id) || type != 2 || id != 0xFFFFFFFFu) {
++        LOG("native: stand-still path mismatch type %u id %08x\n", type, id);
++        return 0;
++    }
++    u64 submit[] = {player_object, record, 1, 1};
++    GuestResult r;
++    if (!guest_call(cpu, ACTION_PC, submit, 4, NULL, 0, &r)) return 0;
++    LOG("native: stand-still attack power %d at (%.2f,%.2f,%.2f) -> %d\n", (int)ATTACK_POWER,
++        aim.x, aim.y, aim.z, (int)(u32)r.x0);
++    return (u32)r.x0 == 1;
++}
++
+ /* The attack record a natural A press builds when nothing is interactable:
+    +0 controller 0xFFFFFFFF, +4/+8 the attack power, +0xC 0, +0x10 -1, +0x14 a
+    type-2 position path built by 0x866D580(path, world_pos). */
+@@ -2122,6 +2159,7 @@ static void world_tick(CPU* cpu) {
+         int pixel[2];
+         float occlusion;
+         WorldPos ground;
++        int stand_still = (p.fallback & 1u) != 0;
+         g_goal.active = 0;
+         if (!pointer_ray(cpu, &p, &ray, pixel)) return;
+         memset(&g_goal, 0, sizeof g_goal);
+@@ -2136,8 +2174,14 @@ static void world_tick(CPU* cpu) {
+             picked = assist_target(cpu, table, player_object, &ray, pixel, occlusion, &pos, &g_goal, 0);
+         if (picked < 0) return;
+         if (picked > 0) {
++            if (stand_still && !g_goal.attack) {
++                LOG("native: stand still ignores interactable %08x\n", g_goal.handle);
++                return;
++            }
+             g_goal.active = 1;
+             g_goal.entity_goal = 1;
++            g_goal.stand_still = stand_still;
++            __atomic_store_n(&g_hold_kind, g_goal.attack ? 2 : 3, __ATOMIC_RELEASE);
+             g_goal.actor = actor;
+             g_goal.serial = p.serial;
+             g_goal.previous = pos;
+@@ -2156,6 +2200,11 @@ static void world_tick(CPU* cpu) {
+         } else if (door_candidate_near(cpu, table, &pos, &ray, occlusion, ground_ok,
+                                        pixel, &door, &door_handle,
+                                        &door_controller, &door_power, &door_sno_value)) {
++            if (stand_still) {
++                LOG("native: stand still ignores door %08x sno %u\n", door_handle, door_sno_value);
++                return;
++            }
++            __atomic_store_n(&g_hold_kind, 3, __ATOMIC_RELEASE);
+             g_goal.handle = door_handle;
+             g_goal.controller = door_controller;
+             g_goal.power = door_power;
+@@ -2177,6 +2226,11 @@ static void world_tick(CPU* cpu) {
+                 hypotf(door.x - pos.x, door.y - pos.y));
+         } else {
+             if (!ground_ok) return;
++            if (stand_still) {
++                submit_ground_attack(cpu, player_object, &pos, &ground);
++                __atomic_store_n(&g_hold_kind, 2, __ATOMIC_RELEASE);
++                return;
++            }
+             g_goal.target = ground;
+             g_goal.active = 1; g_goal.actor = actor; g_goal.serial = p.serial;
+             g_goal.ticks = g_goal.stuck = 0; g_goal.previous = pos;
+@@ -2203,6 +2257,7 @@ static void world_tick(CPU* cpu) {
+                 LOG("native: assist pending %u handle %08x (%.1f,%.1f) distance %.2f\n",
+                     p.serial, g_goal.assist_handle, candidate.x, candidate.y, candidate_distance);
+             }
++            __atomic_store_n(&g_hold_kind, g_goal.assist_pending ? 3 : 1, __ATOMIC_RELEASE);
+             LOG("native: world goal %u actor %08x (%.3f,%.3f,%.3f) -> (%.3f,%.3f,%.3f)\n",
+                 p.serial, actor, pos.x, pos.y, pos.z, g_goal.target.x, g_goal.target.y, g_goal.target.z);
+         }
+@@ -2274,6 +2329,14 @@ static void world_tick(CPU* cpu) {
+             g_goal.active = 0; return;
+         }
+         memcpy(&g_goal.entity, GP(current + 0x60), 12);
++        if (g_goal.stand_still) {
++            int ok = submit_attack(cpu, player_object, &g_goal, current);
++            LOG("native: entity goal %u stand-still attack %08x at %.2f -> %s\n", g_goal.serial,
++                g_goal.handle, hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y),
++                ok ? "accepted" : "rejected");
++            g_goal.active = 0;
++            return;
++        }
+         float dx = pos.x - g_goal.entity.x, dy = pos.y - g_goal.entity.y;
+         float d = hypotf(dx, dy);
+         if (!isfinite(d)) { g_goal.active = 0; return; }
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+index ddcd415..8d7b1eb 100644
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -11,4 +11,8 @@ void native_world_cancel(void);
+ /* Latest pointer position, same normalised coordinates as native_world_click. */
+ void native_world_hover(float x, float y, u32 width, u32 height);
+ int native_world_ui_blocked(void);
++/* The last click's goal: 0 = none, 1 = walking, 2 = attacking an actor,
++   3 = operating/approaching an interactable.  The frontend repeats a held
++   click for 1 and 2 only. */
++int native_world_hold_kind(void);
+ #endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 4dc5b36..c6f5c20 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -50,6 +50,15 @@ static u64 g_menu_held_pad0; /* No1's physical pad, tracked separately so a repl
+ static u64 g_menu_held_extra[SNX_GAMEPADS - 1];
+ /* the mouse as player 1's controller (mouse_steer): its place drives the left stick, its buttons A/B/X/Y */
+ static u64 g_mouse_buttons;
++/* Click-and-hold: while the left button stays down on the world the frontend
++   repeats the click, so the walk follows the pointer and a held monster keeps
++   being attacked.  Shift makes a world click an attack in place. */
++static int g_lmb_world;
++static Uint64 g_hold_tick;
++static float g_hold_x = -1.0f, g_hold_y = -1.0f;
++/* The right button is the secondary skill in the world and B in a menu. */
++static u64 g_mouse_skill;
++static int g_shift_down;
+ static float g_mouse_x = -1.0f, g_mouse_y = -1.0f;
+ static int mouse_steer_on(void) { return g_settings.mouse_steer && !g_opt_headless; }
+ static u64 mouse_button_bit(u8 button) {
+@@ -393,6 +402,9 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
+                           "Without mouse steer, the mouse's buttons are the pad's actions (left A, right B, middle X,\n"
+                           "back Y, forward L). The touch screen takes fingers only: touch=2 no longer turns mouse buttons\n"
+                           "into touches. Alt opens the skill wheel at the pointer and casts the highlighted slot on release.\n\n"
++                          "In the world the left button walks, attacks or operates; holding it keeps walking towards the\n"
++                          "pointer and keeps attacking a held monster, and Shift makes a click an attack in place. The\n"
++                          "right button casts the secondary skill (slot r) instead of B; menus keep B on the right button.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+ 
+@@ -1162,12 +1174,35 @@ void video_poll(void) {
+                         int x, y, width, height;
+                         float density = SDL_GetWindowPixelDensity(g_win);
+                         backend_window_safe(&x, &y, &width, &height);
+-                        if (density > 0 && width > 0 && height > 0) native_world_click(
++                        g_mouse_x = e.button.x;
++                        g_mouse_y = e.button.y;
++                        if (density > 0 && width > 0 && height > 0) {
++                            native_world_click(
+                                 (e.button.x * density - x) / width, (e.button.y * density - y) / height,
+-                                (u32)width, (u32)height, 0);
++                                (u32)width, (u32)height, g_shift_down ? 1u : 0u);
++                            /* Shift never walks, so there is no walk to hold. */
++                            g_lmb_world = !g_shift_down;
++                            g_hold_tick = SDL_GetTicks();
++                            g_hold_x = e.button.x;
++                            g_hold_y = e.button.y;
++                        }
++                    } else {
++                        g_lmb_world = 0;
+                     }
+                     break; /* rejected/black-bar clicks must not become a global confirm */
+                 }
++                if (e.button.which != SDL_TOUCH_MOUSEID && e.button.button == SDL_BUTTON_RIGHT &&
++                    !native_world_ui_blocked()) {
++                    /* The PC's right button is the secondary skill.  A menu keeps
++                       the right button as B and falls through to the pad path. */
++                    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
++                        g_mouse_skill = 1ull << 7;
++                        LOG("input: right button -> skill slot r\n");
++                    } else {
++                        g_mouse_skill = 0;
++                    }
++                    break;
++                }
+                 /* the same layout as a native action: one pulse per press, and the release has no held state */
+                 if (mouse_native_pad(e.button.button)) {
+                     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) native_action_press(mouse_native_pad(e.button.button));
+@@ -1177,6 +1212,8 @@ void video_poll(void) {
+                 break;
+             case SDL_EVENT_MOUSE_MOTION:
+                 if (e.motion.which != SDL_TOUCH_MOUSEID) {
++                    g_mouse_x = e.motion.x;
++                    g_mouse_y = e.motion.y;
+                     /* Hover-selected UI (the stick-driven wheel pages): only while
+                        a game UI owns the screen, never in the world. */
+                     if (!mouse_steer_on() && native_world_ui_blocked()) {
+@@ -1216,6 +1253,10 @@ void video_poll(void) {
+                 wsafe_set();
+                 break;
+             case SDL_EVENT_KEY_DOWN:
++                if (e.key.scancode == SDL_SCANCODE_LSHIFT || e.key.scancode == SDL_SCANCODE_RSHIFT) {
++                    g_shift_down = 1;
++                    break;
++                }
+                 if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !e.key.repeat) {
+                     /* Alt opens the built-in skill wheel around the pointer; releasing it casts the slot the
+                        pointer points at. Alt+Enter still switches fullscreen and cancels the wheel. */
+@@ -1255,6 +1296,10 @@ void video_poll(void) {
+                 if (!e.key.repeat) keys_held |= keymap(e.key.scancode);
+                 break;
+             case SDL_EVENT_KEY_UP:
++                if (e.key.scancode == SDL_SCANCODE_LSHIFT || e.key.scancode == SDL_SCANCODE_RSHIFT) {
++                    g_shift_down = 0;
++                    break;
++                }
+                 if (e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) {
+                     static const u64 wheel_pad[6] = {1ull << 0, 1ull << 1, 1ull << 2,
+                                                      1ull << 3, 1ull << 6, 1ull << 7};
+@@ -1271,6 +1316,9 @@ void video_poll(void) {
+                 native_action_cancel();
+                 keys_held = 0;
+                 g_mouse_buttons = 0;
++                g_lmb_world = 0;
++                g_mouse_skill = 0;
++                g_shift_down = 0;
+                 ui_lock();
+                 overlay_pointer_feed(0, 0, 0, 0, 0);
+                 overlay_wheel_cancel();
+@@ -1286,10 +1334,36 @@ void video_poll(void) {
+             case SDL_EVENT_GAMEPAD_REMOVED: gamepad_close(e.gdevice.which); break;
+         }
+     }
++    /* Click-and-hold: repeat a held world click only for a walk (the pointer
++       moved) or an attack (a fixed cadence).  Operate goals never repeat, so
++       holding over an NPC cannot reopen its dialog. */
++    if (native_world_ui_blocked()) {
++        g_lmb_world = 0;
++        g_mouse_skill = 0;
++    } else if (g_lmb_world) {
++        int kind = native_world_hold_kind();
++        Uint64 now = SDL_GetTicks();
++        float moved = fabsf(g_mouse_x - g_hold_x) + fabsf(g_mouse_y - g_hold_y);
++        if ((kind == 2 && now - g_hold_tick >= 350) ||
++            (kind == 1 && moved >= 8.0f && now - g_hold_tick >= 90)) {
++            int x, y, width, height;
++            float density = SDL_GetWindowPixelDensity(g_win);
++            backend_window_safe(&x, &y, &width, &height);
++            if (density > 0 && width > 0 && height > 0 &&
++                native_world_click((g_mouse_x * density - x) / width,
++                                   (g_mouse_y * density - y) / height,
++                                   (u32)width, (u32)height, 0)) {
++                g_hold_tick = now;
++                g_hold_x = g_mouse_x;
++                g_hold_y = g_mouse_y;
++            }
++        }
++    }
+     /* the scripted presses act like keys, stick keys included. Bits 16..23 (the stick directions as buttons) can be
+        scripted too, but the stick keys (40..47) are no npad buttons */
+     u64 s = unattended_buttons(), k = keys_held | s;
+     u64 nonpad = (k & 0xFFFFull) | (s & 0xFF0000ull), b;
++    nonpad |= g_mouse_skill;
+     i32 st[4], pad[4], pad0[4];
+     u64 pb;
+     input_key_sticks(k, st);

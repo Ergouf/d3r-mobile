@@ -1,0 +1,252 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -111,6 +111,10 @@
+ static int g_close_scope;
+ /* Last click's goal kind, read by the frontend for click-and-hold repeats. */
+ static int g_hold_kind;
++/* The frontend owns the held modifier; the game thread owns its UI instance. */
++static int g_compare_requested;
++static u64 g_compare_owner;
++static u32 g_compare_restore;
+ static unsigned g_world_command;
+ static u32 g_command_frame;
+ static u64 g_footer_object;
+@@ -241,6 +245,10 @@
+     }
+     pm_unlock(&g_pointer_lock);
+     return consume;
++}
++
++void native_ui_compare_set(int held) {
++    __atomic_store_n(&g_compare_requested, held != 0, __ATOMIC_RELEASE);
+ }
+ 
+ int native_ui_char_page(void) {
+@@ -1928,6 +1936,8 @@
+ 
+ /* Motion selects only the hovered wheel icon. Lists, buttons and page tabs keep
+    their click semantics. No full-registry child index is needed for a wheel. */
++static int ui_item_hover(UiPick* p);
++
+ static void ui_hover(const CPU* cpu, const HoverPoint* hover) {
+     UiPick p = {.cpu = cpu, .hover = 1};
+     PointerPress press = {hover->x, hover->y, hover->width, hover->height, 0, 0, hover->frame};
+@@ -1943,6 +1953,7 @@
+     if (!guest_call(cpu, 0x8350BF0, args, 2, NULL, 0, NULL)) return;
+     memcpy(p.point, GP(scratch + 0x20), sizeof p.point);
+     if (!isfinite(p.point[0]) || !isfinite(p.point[1])) return;
++    if (ui_item_hover(&p)) return;
+     if (ui_equipment_icon(&p, 0)) return;
+     ui_skill_icon(&p, 0);
+ }
+@@ -2281,7 +2292,7 @@
+     u32 actor, category;
+     int stash;
+ } UiItemContext;
+-typedef struct { u32 handle, location[4]; u64 entity; int side; } UiItem;
++typedef struct { u32 handle, location[4]; u64 entity, control; u32 index; int side; } UiItem;
+ static struct {
+     UiItem item;
+     u64 owner;
+@@ -2349,7 +2360,7 @@
+     GuestResult r;
+     for (int side = 0; side < 2; side++) {
+         u64 selection = c->side[side], container = ui_item_container(p, selection);
+-        u64 vt, model, method, array, data, count;
++        u64 vt, model, method, array, data, count, control = 0;
+         u32 model_mode, index = UINT32_MAX;
+         if (!container || !ui_inside(p, container) || !read64(selection, &vt)) continue;
+         if (vt != 0x90A4468 && vt != 0x90A3F08) continue;
+@@ -2368,7 +2379,7 @@
+             UiPick hit = *p;
+             hit.owner = container; hit.focused = 0; hit.root_mode = 1; hit.visited = 0;
+             if (ui_visit(&hit, obj, 0) && hit.kind == 2 && hit.index < count &&
+-                ui_visible(p->map, hit.row)) { index = hit.index; break; }
++                ui_visible(p->map, hit.row)) { index = hit.index; control = hit.control; break; }
+         }
+         if (index >= count || !read32(data + index * 4ull, &item->handle) ||
+             !lookup(c->table, item->handle, ENTITY_STRIDE, &item->entity)) continue;
+@@ -2380,9 +2391,78 @@
+             item->location[1] != (side ? (c->stash ? 15u : item->location[1]) : 0u) ||
+             (!c->stash && side && (item->location[1] < 1 || item->location[1] > 13))) continue;
+         item->side = side;
++        item->control = control;
++        item->index = index;
+         return 1;
+     }
+     return 0;
++}
++
++/* The list's native selection setter calls its registered selection-change
++   callback. Never invoke the row's accept/equip callback for a hover. */
++static int ui_item_hover(UiPick* p) {
++    UiItemContext c = {0};
++    UiItem item = {0};
++    u64 binding;
++    u32 selected;
++    if (!ui_item_context(p, &c)) return 0;
++    ui_build_children(p->map);
++    if (!ui_item_pick(p, &c, &item) || !item.control ||
++        !read64(item.control + 0x48, &binding) || binding != c.side[item.side] ||
++        !read32(item.control + 0x1E0, &selected)) return 0;
++    if (selected == item.index) return 1;
++    const u64 args[] = {item.control, item.index};
++    int complete = guest_call(p->cpu, 0x838A6E0, args, 2, NULL, 0, NULL);
++    u32 handle;
++    int changed = complete && read32(item.control + 0x1E0, &selected) && selected == item.index &&
++                  read32(binding + 0x48, &handle) && handle == item.handle;
++    LOG("native: UI hover item %08x side=%d row=%u -> %s\n", item.handle, item.side,
++        item.index, changed ? "selected" : "incomplete");
++    return 1;
++}
++
++static void ui_compare_tick(const CPU* cpu, u64 map) {
++    int held = __atomic_load_n(&g_compare_requested, __ATOMIC_ACQUIRE);
++    if (!held && !g_compare_owner) return;
++    UiPick p = {.cpu = cpu, .map = map};
++    UiItemContext c = {0};
++    u32 mode, item;
++    if (!ui_item_context(&p, &c)) return; /* A covering modal owns the input. */
++    if (c.stash || (g_compare_owner && g_compare_owner != c.owner)) {
++        g_compare_owner = 0;
++        return;
++    }
++    if (!read32(c.owner + 0x154, &mode) || mode > 1) return;
++    if (!g_compare_owner) {
++        if (!held) return;
++        g_compare_owner = c.owner;
++        g_compare_restore = mode;
++    }
++    u32 desired = held ? 1 : g_compare_restore;
++    if (mode == desired) {
++        if (!held) g_compare_owner = 0;
++        return;
++    }
++    /* 9 = Compare, 10 = return from Compare. Other button3 contexts include
++       unrelated inventory actions and must not receive this modifier. */
++    GuestResult r;
++    if (held) {
++        if (!read32(c.side[0] + 0x48, &item) || item == UINT32_MAX ||
++            !guest_call(cpu, 0x8170BD0, NULL, 0, NULL, 0, &r) || !r.x0) return;
++        const u64 context_args[] = {r.x0, 5};
++        if (!guest_call(cpu, 0x81C0820, context_args, 2, NULL, 0, &r) ||
++            r.x0 != (mode ? 10u : 9u)) return;
++    }
++    /* Use the complete native Compare branch: it switches the item models,
++       preserves the selected item and refreshes their detail callbacks. */
++    /* Release uses the native model setter even when the pointer has moved to
++       an empty/non-equipment row whose button3 action is no longer Compare. */
++    const u64 args[] = {c.owner, held ? 0u : desired};
++    int complete = guest_call(cpu, held ? 0x8373750 : 0x81FC220, args, 2, NULL, 0, NULL);
++    int changed = complete && read32(c.owner + 0x154, &mode) && mode == desired;
++    LOG("native: UI Alt compare owner=%llx held=%d -> %s\n", (unsigned long long)c.owner,
++        held, changed ? "changed" : "incomplete");
++    if (!held && changed) g_compare_owner = 0;
+ }
+ 
+ static int ui_item_move(UiPick* p, const UiItemContext* c, const UiItem* item,
+@@ -3229,7 +3309,9 @@
+             ui_hover(cpu, &h);
+             __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
+         }
++        ui_compare_tick(cpu, legend_map);
+     } else {
++        g_compare_owner = 0;
+         pm_lock(&g_pointer_lock);
+         g_close_scope = 0;
+         g_close_target = g_close_pending = (UiCloseTarget){0};
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -26,6 +26,8 @@
+ /* Space requests a guarded native cancel/close for a service, conversation or
+    prompt. Return 1 also when its guard refuses, so it cannot become confirm. */
+ int native_ui_close_request(void);
++/* Hold native item comparison only in the inventory page that owns input. */
++void native_ui_compare_set(int held);
+ /* 1 while the local region/waypoint map owns the screen; used for M toggle. */
+ int native_world_map_open(void);
+ /* The last click's goal: 0 = none, 1 = walking, 2 = attacking an actor,
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1149,6 +1149,18 @@
+     return 1;
+ }
+ 
++static void pc_ui_hover_latest(void) {
++    int x, y, width, height;
++    float density = SDL_GetWindowPixelDensity(g_win);
++    float pointer_x = g_mouse_x, pointer_y = g_mouse_y;
++    if (!isfinite(pointer_x) || !isfinite(pointer_y) || pointer_x < 0 || pointer_y < 0)
++        SDL_GetMouseState(&pointer_x, &pointer_y);
++    backend_window_safe(&x, &y, &width, &height);
++    if (density > 0 && width > 0 && height > 0)
++        native_world_hover((pointer_x * density - x) / width, (pointer_y * density - y) / height,
++                           (u32)width, (u32)height);
++}
++
+ void video_poll(void) {
+     SDL_Event e;
+     char* left;
+@@ -1312,13 +1324,17 @@
+                     (native_ui_char_page() || native_world_map_open())) {
+                     /* PC Space closes the character windows; outside a character page it stays
+                        the A/skill key and the menu confirm key. */
+-                    if (!e.key.repeat) native_action_press(1ull << 1);
++                    if (!e.key.repeat) {
++                        native_ui_compare_set(0);
++                        native_action_press(1ull << 1);
++                    }
+                     break;
+                 }
+                 if (e.key.scancode == SDL_SCANCODE_SPACE &&
+                     !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+                     native_world_ui_blocked()) {
+-                    if (e.key.repeat || native_ui_close_request()) break;
++                    if (e.key.repeat) break;
++                    if (native_ui_close_request()) { native_ui_compare_set(0); break; }
+                 }
+                 if (pc_skill_digit(e.key.scancode, e.key.repeat, e.key.mod)) break;
+                 if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI))) {
+@@ -1351,11 +1367,12 @@
+                     break;
+                 }
+                 if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !e.key.repeat) {
+-                    /* PC item compare: inside a game UI Alt is the native button3 (对比)
+-                       action.  In the world it remains the skill wheel modifier. */
+-                    if (native_world_ui_blocked()) {
+-                        g_alt_compare = 1;
+-                        native_action_press(1ull << 2);
++                    /* Select the pointer's item before entering the native Compare
++                       branch, then restore its previous mode when Alt is released. */
++                    if (native_world_ui_blocked() || g_alt_compare) {
++                        g_alt_compare |= e.key.key == SDLK_LALT ? 1 : 2;
++                        if (native_world_ui_blocked()) pc_ui_hover_latest();
++                        native_ui_compare_set(1);
+                         break;
+                     }
+                     /* Alt opens the built-in skill wheel around the pointer; releasing it casts the slot the
+@@ -1407,7 +1424,11 @@
+                     break;
+                 }
+                 if (e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) {
+-                    if (g_alt_compare) { g_alt_compare = 0; break; }
++                    if (g_alt_compare) {
++                        g_alt_compare &= ~(e.key.key == SDLK_LALT ? 1 : 2);
++                        native_ui_compare_set(g_alt_compare != 0);
++                        break;
++                    }
+                     static const u64 wheel_pad[6] = {1ull << 0, 1ull << 1, 1ull << 2,
+                                                      1ull << 3, 1ull << 6, 1ull << 7};
+                     ui_lock();
+@@ -1420,6 +1441,8 @@
+                 keys_held &= ~keymap(e.key.scancode);
+                 break;
+             case SDL_EVENT_WINDOW_FOCUS_LOST:
++                g_alt_compare = 0;
++                native_ui_compare_set(0);
+                 native_action_cancel();
+                 keys_held = 0;
+                 g_mouse_buttons = 0;

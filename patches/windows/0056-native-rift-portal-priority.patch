@@ -1,0 +1,81 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index d124c92..f9debbe 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -316,6 +316,10 @@ static int ground_target(const CPU* cpu, const int pixel[2], const WorldPos* pos
+    usable trigger, so the generic radius+margin standoff leaves the player
+    outside and the operate is accepted without opening the map.  Walk onto
+    these instead. */
++/* The rift obelisk spawns its portal on the same spot, so the obelisk's wider
++   collision cylinder wins every ray and the portal can never be clicked. */
++#define RIFT_PORTAL_SNO 345935u
++
+ static int walk_into_sno(u32 sno) {
+     /* Only the town waypoint is verified with a real mouse click.  Do not add
+        generic portals/doors here until each one is tested: 175467 is shared by
+@@ -338,6 +342,11 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+     }
+     int found = 0;
+     u32 hit_cap = 0;
++    int portal_found = 0;
++    float portal_dist = 0, portal_radius = 0;
++    u64 portal_id = 0, portal_cid = 0, portal_entry = 0;
++    u32 portal_sno = 0;
++    WorldPos portal_pos = {0};
+     if (!read32(table + 0x100, &limit) || !read32(table + 0x168, &shift) || shift > 16 ||
+         limit > 65536 || !read64(table + 0x120, &buckets)) return -1;
+     memcpy(GP(scratch), ray, sizeof *ray);
+@@ -355,6 +364,19 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+         memcpy(p, GP(entry + 0x60), sizeof p);
+         memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
+         if (!read32(entry + 0x18, &sno)) sno = 0;
++        /* The rift portal sits on the obelisk's spot and exposes no clickable
++           cylinder, so the obelisk wins every ray and the portal can never be
++           clicked.  Remember it by position; a winning hit on the same spot is
++           retargeted to it after the loop. */
++        if (sno == RIFT_PORTAL_SNO) {
++            float pd = hypotf(p[0] - pos->x, p[1] - pos->y);
++            if (!portal_found || pd < portal_dist) {
++                portal_found = 1; portal_dist = pd; portal_id = id; portal_cid = cid;
++                portal_entry = entry; portal_sno = sno; portal_radius = cylinder[4];
++                portal_pos = (WorldPos){p[0], p[1], p[2], place};
++                LOG("native: rift portal %08x seen at %.2f radius %.2f\n", id, pd, cylinder[4]);
++            }
++        }
+         int finite = 1;
+         for (unsigned j = 0; j < 5; j++) if (!isfinite(cylinder[j])) finite = 0;
+         if (!finite || cylinder[3] <= 0 || cylinder[4] <= 0 ||
+@@ -397,12 +419,33 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+             goal->approach = cap ? fmaxf(INTERACT_APPROACH, fminf(cylinder[4] + 0.8f, 4.0f))
+                                  : fmaxf(ATTACK_APPROACH, cylinder[4] + player_radius + 0.2f);
+     }
++    if (portal_found && goal->sno != RIFT_PORTAL_SNO &&
++        hypotf(goal->entity.x - portal_pos.x, goal->entity.y - portal_pos.y) <= 1.5f) {
++        GuestResult r;
++        u64 args[1] = {portal_entry};
++        u32 cap = 0;
++        if (!guest_call(cpu, CAP_POWER_PC, args, 1, NULL, 0, &r)) return -1;
++        if ((i32)r.x0 > 0 && (u32)r.x0 != ASSIST_ACTION) cap = (u32)r.x0;
++        u32 loser = goal->sno;
++        goal->handle = portal_id;
++        goal->controller = portal_cid;
++        goal->entity = portal_pos;
++        goal->attack = cap == 0;
++        goal->power = cap ? cap : ATTACK_POWER;
++        goal->sno = portal_sno;
++        goal->approach = cap ? fmaxf(INTERACT_APPROACH, fminf(portal_radius + 0.8f, 4.0f))
++                             : fmaxf(ATTACK_APPROACH, portal_radius + player_radius + 0.2f);
++        found = 1; hit_cap = cap;
++        LOG("native: rift portal %08x retargeted over sno %u radius %.2f\n",
++            portal_id, loser, portal_radius);
++    }
+     if (found > 0) LOG("native: cylinder hit %08x sno %u depth %.3f terrain %.3f power %d%s\n",
+                       goal->handle, goal->sno, best, occlusion, (int)hit_cap,
+                       goal->attack ? " (attack)" : "");
+     return found;
+ }
+ 
++
+ /* The attack record a natural A press builds when nothing is interactable:
+    +0 controller 0xFFFFFFFF, +4/+8 the attack power, +0xC 0, +0x10 -1, +0x14 a
+    type-2 position path built by 0x866D580(path, world_pos). */

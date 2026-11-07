@@ -1,0 +1,20 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1119,6 +1119,7 @@
+     static const char affix_list[] = "\xE6\x9F\xA5\xE7\x9C\x8B\xE5\x8F\xAF\xE6\x9B\xBF\xE6\x8D\xA2\xE7\x9A\x84\xE5\xB1\x9E\xE6\x80\xA7";
+     static const char enchant[] = "\xE9\x99\x84\xE9\xAD\x94";
+     static const char accept[] = "\xE6\x8E\xA5\xE5\x8F\x97";
++    static const char cancel[] = "\xE5\x8F\x96\xE6\xB6\x88";
+     UiServiceState service = {0};
+     u64 global, world, manager, footer, vtable, method, thunk, expected_method, focus_key, focus;
+     const char* label;
+@@ -1165,7 +1166,7 @@
+     if (p->point[0] > rect[0] + 240.0f) return 0;
+     if (mystic_enchant) {
+         if (ui_text_contains(footer, affix_list) || ui_text_contains(footer, enchant) ||
+-            ui_text_contains(footer, accept)) {
++            ui_text_contains(footer, accept) || ui_text_contains(footer, cancel)) {
+             int queued = native_action_press(1);
+             LOG("native: UI mystic enchant footer %u -> %s\n", serial,
+                 queued ? "queued" : "rejected");

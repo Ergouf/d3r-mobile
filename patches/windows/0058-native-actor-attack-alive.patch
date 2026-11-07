@@ -1,0 +1,109 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 0793410..29d17f1 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -235,6 +235,14 @@ static int local_player(const CPU* cpu, u32* actor, u64* entity, u64* controller
+     return 1;
+ }
+ 
++/* Live descriptor 0x9923AD8 + 0x73*64 names this Hitpoints_Cur. */
++static int actor_alive(const CPU* cpu, u64 entity) {
++    const u64 args[] = {entity, 0xFFFFF073u};
++    GuestResult r;
++    return guest_call(cpu, 0x8474B30ull, args, 2, NULL, 0, &r) &&
++           isfinite(r.f0) && r.f0 > 0;
++}
++
+ /* Screen pixel -> engine camera ray, through the renderer's presentation rect. */
+ static int pointer_pixel(const CPU* cpu, const PointerPress* p, int pixel[2]) {
+     const u64 rect_address = g_stack_top - 0x20000;
+@@ -449,41 +457,45 @@ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occ
+ /* The attack record a natural A press builds when nothing is interactable:
+    +0 controller 0xFFFFFFFF, +4/+8 the attack power, +0xC 0, +0x10 -1, +0x14 a
+    type-2 position path built by 0x866D580(path, world_pos). */
+-static int submit_attack(const CPU* cpu, u64 player_object, const WalkGoal* goal) {
++static int submit_attack(const CPU* cpu, u64 player_object, const WalkGoal* goal, u64 target) {
+     const u64 record = g_stack_top - 0x1CB00, path = record + 0x14;
+     u32* words = (u32*)GP(record);
++    u32 actor_type;
++    if (!read32(target + 0x14C, &actor_type)) return 0;
+     memset(GP(record), 0, 0x80);
+-    words[0] = 0xFFFFFFFFu;
++    words[0] = actor_type == 1 ? goal->controller : 0xFFFFFFFFu;
+     words[1] = words[2] = ATTACK_POWER;
+     words[3] = 0;
+     words[4] = 0xFFFFFFFFu;
+-    /* Natural A sends the empty attack from the player's own position at the
+-       hero's attack height (observed z = 4.47) with a type-2 position path and
+-       no controller/actor; the type-1 actor path was rejected (ret 0). */
+-    const u64 pos = record + 0x60;
+-    float* at = (float*)GP(pos);
+-    at[0] = goal->previous.x;
+-    at[1] = goal->previous.y;
+-    at[2] = goal->previous.z + 4.37f;
+-    *(u32*)(GP(pos) + 12) = goal->previous.place;
+-    u64 build[2] = {path, pos};
+-    if (!guest_call(cpu, PATH_POS_PC, build, 2, NULL, 0, NULL)) {
+-        LOG("native: attack path build failed for %08x\n", goal->handle);
+-        return 0;
++    if (actor_type == 1) {
++        /* An alive hero attacking an actual monster naturally submits its
++           controller and a type-1 actor path, not an empty ground swing. */
++        if (!actor_alive(cpu, target)) return 0;
++        u64 build[] = {path, goal->handle, 0, 0};
++        if (!guest_call(cpu, PATH_ACTOR_PC, build, 4, NULL, 0, NULL)) return 0;
++    } else {
++        /* Aim a prop swing at the clicked object, with the real world place.
++           Using the hero position discards the mouse direction. */
++        const u64 point = record + 0x60;
++        WorldPos aim = goal->entity;
++        aim.z = goal->previous.z + 4.37f;
++        memcpy(GP(point), &aim, sizeof aim);
++        u64 build[] = {path, point};
++        if (!guest_call(cpu, PATH_POS_PC, build, 2, NULL, 0, NULL)) return 0;
+     }
+     u32 type, id;
+-    if (!read32(path, &type) || !read32(path + 4, &id) || type != 2 || id != 0xFFFFFFFFu) {
++    if (!read32(path, &type) || !read32(path + 4, &id) ||
++        type != (actor_type == 1 ? 1u : 2u) ||
++        id != (actor_type == 1 ? goal->handle : 0xFFFFFFFFu)) {
+         LOG("native: attack path mismatch type %u id %08x\n", type, id);
+         return 0;
+     }
+-    u64 submit[4] = {player_object, record, 1, 1};
++    u64 submit[] = {player_object, record, 1, 1};
+     GuestResult r;
+-    if (!guest_call(cpu, ACTION_PC, submit, 4, NULL, 0, &r)) {
+-        LOG("native: attack call incomplete for %08x\n", goal->handle);
+-        return 0;
+-    }
+-    LOG("native: attack %08x power %d at (%.2f,%.2f,%.2f) -> %d\n", goal->handle,
+-        (int)ATTACK_POWER, goal->entity.x, goal->entity.y, goal->entity.z, (int)(u32)r.x0);
++    if (!guest_call(cpu, ACTION_PC, submit, 4, NULL, 0, &r)) return 0;
++    LOG("native: attack %08x power %d path %u controller %08x at (%.2f,%.2f,%.2f) -> %d\n",
++        goal->handle, (int)ATTACK_POWER, type, words[0], goal->entity.x,
++        goal->entity.y, goal->entity.z, (int)(u32)r.x0);
+     return (u32)r.x0 == 1;
+ }
+ 
+@@ -2078,6 +2090,11 @@ static void world_tick(CPU* cpu) {
+         g_goal.active = 0;
+         return;
+     }
++    if (!actor_alive(cpu, entity)) {
++        if (pending) LOG("native: world pointer %u blocked (hero dead)\n", p.serial);
++        g_goal.active = 0;
++        return;
++    }
+     if (pending) {
+         WorldRay ray;
+         int pixel[2];
+@@ -2250,7 +2267,7 @@ static void world_tick(CPU* cpu) {
+                                            ? g_goal.approach + 0.2f
+                                            : fmaxf(OPERATE_RANGE, g_goal.approach + 0.8f));
+         if (reached <= reach) {
+-            int ok = g_goal.attack ? submit_attack(cpu, player_object, &g_goal)
++            int ok = g_goal.attack ? submit_attack(cpu, player_object, &g_goal, current)
+                                    : submit_interact(cpu, player_object, &g_goal);
+             LOG("native: entity goal %u %s %08x power %d at %.2f -> %s\n", g_goal.serial,
+                 g_goal.attack ? "attack" : "operate", g_goal.handle, (int)g_goal.power, reached,

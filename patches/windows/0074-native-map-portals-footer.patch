@@ -1,0 +1,268 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -103,6 +103,8 @@
+ static int g_hold_kind;
+ static unsigned g_world_command;
+ static u32 g_command_frame;
++static u64 g_footer_object;
++static char g_footer_original[512], g_footer_display[512];
+ 
+ void native_world_command(unsigned command) {
+     if (!__atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) ||
+@@ -412,12 +414,30 @@
+     }
+ }
+ 
++static int portal_sno(u32 sno) {
++    switch (sno) {
++        case 5648u:
++        case 175467u:
++        case 175482u:
++        case 176001u:
++        case 176002u:
++        case 176004u:
++        case 176005u:
++        case 191492u:
++        case 196657u:
++        case 329025u:
++        case 365112u:
++        case 366255u:
++        case 374925u:
++        case 376027u:
++            return 1;
++        default:
++            return 0;
++    }
++}
++
+ static int walk_into_sno(u32 sno) {
+-    /* Only the town waypoint is verified with a real mouse click.  Do not add
+-       generic portals/doors here until each one is tested: 175467 is shared by
+-       many portal instances, and a 0.9 approach can make a blocked doorway
+-       completely unresponsive. */
+-    return sno == 223757u; /* Waypoint_Town */
++    return sno == 223757u || portal_sno(sno);
+ }
+ 
+ static int pick_entity(const CPU* cpu, u64 table, const WorldRay* ray, float occlusion,
+@@ -1859,13 +1879,15 @@
+     return 0;
+ }
+ 
+-/* The console footer stores {icon:buttonN}. Show the PC control that actually
+-   sends that button. button4, l3, l1 and r1 have no PC key yet, so those glyphs stay. */
+-static void ui_footer_relabel(u64 map) {
++static void ui_footer_relabel(const CPU* cpu, u64 map) {
+     static const struct { const char* icon; const char* label; } map_label[] = {
+-        {"button1", "\xE5\xB7\xA6\xE9\x94\xAE"}, /* left mouse */
+-        {"button2", "Esc"},
+-        {"button3", "Alt"},
++        {"button1", "[\xE5\xB7\xA6\xE9\x94\xAE]"},
++        {"button2", "[Esc]"},
++        {"button3", "[Alt]"},
++        {"button4", "[\xE7\x82\xB9\xE5\x87\xBB]"},
++        {"l3", "[\xE7\x82\xB9\xE5\x87\xBB]"},
++        {"l2", "[1]"},
++        {"r2", "[3]"},
+     };
+     u64 footer, pointer;
+     u32 capacity;
+@@ -1879,23 +1901,24 @@
+         !pointer || capacity < 2 || capacity > 1024 || !readable(pointer, capacity)) return;
+     length = capacity < sizeof text - 1 ? capacity : (unsigned)sizeof text - 1;
+     memcpy(text, GP(pointer), length);
+-    text[length] = 0;
++    if (!memchr(text, 0, length)) return;
+     length = (unsigned)strlen(text);
+-    for (unsigned i = 0; i < length && o + 1 < sizeof out; ) {
+-        if (text[i] == 123 && !strncmp(text + i + 1, "icon:", 5)) {
++    for (unsigned i = 0; i < length; ) {
++        if (length - i >= 7 && !strncmp(text + i, "{icon:", 6)) {
+             unsigned j = i + 6, n = 0;
+             char name[12];
+             const char* label = NULL;
+-            while (text[j] && text[j] != ',' && text[j] != 125 && n + 1 < sizeof name)
++            while (text[j] && text[j] != ',' && text[j] != '}' && n + 1 < sizeof name)
+                 name[n++] = text[j++];
+             name[n] = 0;
+-            while (text[j] && text[j] != 125) j++;
+-            if (text[j] == 125) j++;
++            while (text[j] && text[j] != '}') j++;
++            if (text[j] != '}') return;
++            j++;
+             for (unsigned k = 0; n && k < sizeof map_label / sizeof map_label[0]; k++)
+                 if (!strcmp(name, map_label[k].icon)) label = map_label[k].label;
+             if (label) {
+                 size_t ln = strlen(label);
+-                if (o + ln >= sizeof out) break;
++                if (o + ln >= sizeof out) return;
+                 memcpy(out + o, label, ln);
+                 o += (unsigned)ln;
+                 changed = 1;
+@@ -1903,11 +1926,19 @@
+                 continue;
+             }
+         }
++        if (o + 1 >= sizeof out) return;
+         out[o++] = text[i++];
+     }
+     out[o] = 0;
+     if (!changed || o + 1 > capacity) return;
+-    memcpy(GP(pointer), out, o + 1);
++    const u64 replacement = g_stack_top - 0x19000;
++    memcpy(GP(replacement), out, o + 1);
++    const u64 args[] = {footer, replacement, 1};
++    if (guest_call(cpu, 0x83AD9D0, args, 3, NULL, 0, NULL)) {
++        g_footer_object = footer;
++        memcpy(g_footer_original, text, length + 1);
++        memcpy(g_footer_display, out, o + 1);
++    }
+ }
+ 
+ /* The footer legend names the pad button behind each hint.  Hints are laid
+@@ -1932,42 +1963,16 @@
+     unsigned length = capacity < sizeof text - 1 ? capacity : sizeof text - 1;
+     memcpy(text, GP(pointer), length);
+     text[length] = 0;
+-    const char* at = text;
+-    while (hints < 8 && *at) {
+-        const char* icon_at = NULL;
+-        for (const char* scan = at; *scan; scan++)
+-            if (scan[0] == 123 && !strncmp(scan + 1, "icon:", 5)) { icon_at = scan; break; }
+-        const char* label_at = NULL;
+-        const char* label_name = NULL;
+-        size_t label_len = 0;
+-        static const struct { const char* label; const char* name; } known[] = {
+-            {"\xE5\xB7\xA6\xE9\x94\xAE", "button1"},
+-            {"Esc", "button2"},
+-            {"Alt", "button3"},
+-        };
+-        for (unsigned k = 0; k < sizeof known / sizeof known[0]; k++) {
+-            const char* found = strstr(at, known[k].label);
+-            if (!found) continue;
+-            if (!label_at || found < label_at) {
+-                label_at = found;
+-                label_name = known[k].name;
+-                label_len = strlen(known[k].label);
+-            }
+-        }
+-        if (icon_at && (!label_at || icon_at <= label_at)) {
+-            unsigned n = 0;
+-            at = icon_at + 6;
+-            while (*at && *at != ',' && *at != 125 && n + 1 < sizeof names[0]) names[hints][n++] = *at++;
+-            names[hints][n] = 0;
+-            while (*at && *at != 125) at++;
+-            if (*at == 125) at++;
+-            if (!n || strstr(names[hints], "_label")) continue; /* sprite-only tag */
+-            hints++;
+-            continue;
+-        }
+-        if (!label_at) break;
+-        memcpy(names[hints], label_name, strlen(label_name) + 1);
+-        at = label_at + label_len;
++    if (footer == g_footer_object && !strcmp(text, g_footer_display))
++        memcpy(text, g_footer_original, strlen(g_footer_original) + 1);
++    for (const char* at = text; hints < 8 && (at = strstr(at, "{icon:"));) {
++        unsigned n = 0;
++        at += 6;
++        while (*at && *at != ',' && *at != '}' && n + 1 < sizeof names[0]) names[hints][n++] = *at++;
++        names[hints][n] = 0;
++        while (*at && *at != '}') at++;
++        if (*at == '}') at++;
++        if (!n || strstr(names[hints], "_label")) continue;
+         hints++;
+     }
+     if (!hints) return 0;
+@@ -1987,6 +1992,8 @@
+     else if (!strcmp(name, "button3")) pad = 1ull << 2;
+     else if (!strcmp(name, "button4")) pad = 1ull << 3;
+     else if (!strcmp(name, "l3")) pad = 1ull << 4;
++    else if (!strcmp(name, "l2")) pad = 1ull << 8;
++    else if (!strcmp(name, "r2")) pad = 1ull << 9;
+     if (!pad) return 0;
+     int queued = native_action_press(pad);
+     LOG("native: UI footer legend %u %s -> %s\n", serial, name,
+@@ -2048,6 +2055,38 @@
+     if (!read64(0x9154E30, &state) || !read64(state + 0x28, &data) ||
+         !read64(state + 0x30, &count) || !count || count > 256 ||
+         !read32(state + 0x20, &player) || player != 0) return 0;
++    const u64 world_tab = ui_object(p->map, ui_path_key(
++        "root.normallayer.waypointmap_main.layoutroot.navigation.map.worldtab"));
++    const u64 world_map = ui_object(p->map, ui_path_key(
++        "root.normallayer.waypointmap_main.layoutroot.overlaycontainer.worldmap"));
++    if (world_tab && world_map && ui_visible(p->map, world_tab) &&
++        ui_visible(p->map, world_map)) {
++        if (count != 5 || !ui_inside(p, world_map)) return 0;
++        unsigned chapters = 0;
++        int chapter_row = -1;
++        float nearest = 40.0f;
++        for (unsigned index = 0; index < count; index++) {
++            const u64 row = data + index * 24;
++            u32 chapter;
++            float point[2];
++            if (!readable(row, 24) || !read32(row + 8, &chapter) ||
++                chapter > 400 || chapter % 100) return 0;
++            const unsigned mask = 1u << (chapter / 100);
++            if (chapters & mask) return 0;
++            chapters |= mask;
++            memcpy(point, GP(row), sizeof point);
++            if (!isfinite(point[0]) || !isfinite(point[1])) return 0;
++            const float distance = hypotf(p->point[0] - point[0], p->point[1] - point[1]);
++            if (distance < nearest) { nearest = distance; chapter_row = (int)index; }
++        }
++        if (chapters != 31 || chapter_row < 0) return 0;
++        *(u32*)GP(state + 0x44) = (u32)chapter_row;
++        const u64 select[] = {0, player};
++        int complete = guest_call(p->cpu, 0x823EB50, select, 2, NULL, 0, NULL);
++        LOG("native: world map chapter %u row=%d -> %s\n", serial, chapter_row,
++            complete ? "returned" : "incomplete");
++        return 1;
++    }
+     int target = -1;
+     float best = 32.0f;
+     for (unsigned i = 0; i < count; i++) {
+@@ -2600,7 +2639,7 @@
+ static int door_sno(u32 sno) {
+     return sno == 178293u || /* inn door */
+            sno == 90419u ||  /* trOut_NewTristram_Gate_Town */
+-           sno == 175467u;   /* g_Portal_Rectangle_Blue */
++           portal_sno(sno);
+ }
+ 
+ static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+@@ -2631,13 +2670,14 @@
+         memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
+         LOG("native: door probe %08x sno %u dist %.2f cylinder %.2f\n", id, sno,
+             hypotf(p[0] - pos->x, p[1] - pos->y), cylinder[4]);
+-        if (!isfinite(cylinder[4]) || cylinder[4] < 0 || cylinder[4] > 64) {
++        if (!isfinite(cylinder[4]) || cylinder[4] < 0 || cylinder[4] > 64 ||
++            !isfinite(cylinder[3]) || cylinder[3] < 0 || cylinder[3] > 128) {
+             LOG("native: door skip %08x cylinder %.2f\n", id, cylinder[4]);
+             continue;
+         }
+         if (hypotf(p[0] - pos->x, p[1] - pos->y) > 120.0f) continue;
+         if (!project_point(cpu, place, p[0], p[1], p[2], base)) continue;
+-        float height = (cylinder[4] > 0 && cylinder[4] <= 64) ? fminf(cylinder[4], 3.0f) : 2.0f;
++        float height = cylinder[3] > 0 ? fminf(cylinder[3], 24.0f) : 2.0f;
+         if (!project_point(cpu, place, p[0], p[1], p[2] + height, top)) {
+             top[0] = base[0]; top[1] = base[1];
+         }
+@@ -2759,7 +2799,7 @@
+             g_goal.sno = door_sno_value;
+             g_goal.entity = door;
+             g_goal.entity_goal = 1;
+-            g_goal.approach = 3.6f;
++            g_goal.approach = portal_sno(door_sno_value) ? 0.9f : 3.6f;
+             float ddx = pos.x - door.x, ddy = pos.y - door.y;
+             float dd = hypotf(ddx, ddy);
+             if (dd > 0.001f)
+@@ -3016,7 +3056,7 @@
+         u64 legend_global, legend_world, legend_manager, legend_map;
+         if (read64(0x914F840, &legend_global) && read64(legend_global + 0x10, &legend_world) &&
+             read64(legend_world + 0xB80, &legend_manager) && read64(legend_manager, &legend_map))
+-            ui_footer_relabel(legend_map);
++            ui_footer_relabel(cpu, legend_map);
+         PointerPress p;
+         g_goal.active = 0;
+         __atomic_store_n(&g_cancel, 1, __ATOMIC_RELEASE);

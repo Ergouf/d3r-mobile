@@ -1,0 +1,43 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -54,7 +54,7 @@
+    repeats the click, so the walk follows the pointer and a held monster keeps
+    being attacked.  Shift makes a world click an attack in place. */
+ static int g_lmb_world;
+-static int g_lmb_ui, g_ctrl_down;
++static int g_lmb_ui, g_ctrl_down, g_alt_compare;
+ static Uint64 g_hold_tick;
+ /* The right button is the secondary skill in the world and B in a menu. */
+ static int g_rmb_world;
+@@ -408,7 +408,7 @@
+                           "right button casts the hero's secondary skill (loadout slot 1). Q uses the equipped potion;\n"
+                           "T channels town recall. C = inventory, S = skills, J = journal, P = paragon, M = map;\n"
+                           "these panel keys work from the world or character page (Ctrl aliases also work).\n"
+-                          "PC skill digits 1-4 select loadout slots 3-6; empty slots stay empty; Space closes a character page or map; M toggles the map.\n"
++                          "PC skill digits 1-4 select loadout slots 3-6; empty slots stay empty; Space closes a character page or map; M toggles the map; Alt compares items in a game UI.\n"
+                           "Esc opens pause in the world and closes dialogs when a game UI is open.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+@@ -1345,6 +1345,13 @@
+                     break;
+                 }
+                 if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !e.key.repeat) {
++                    /* PC item compare: inside a game UI Alt is the native button3 (对比)
++                       action.  In the world it remains the skill wheel modifier. */
++                    if (native_world_ui_blocked()) {
++                        g_alt_compare = 1;
++                        native_action_press(1ull << 2);
++                        break;
++                    }
+                     /* Alt opens the built-in skill wheel around the pointer; releasing it casts the slot the
+                        pointer points at. Alt+Enter still switches fullscreen and cancels the wheel. */
+                     if (!e.key.repeat) {
+@@ -1394,6 +1401,7 @@
+                     break;
+                 }
+                 if (e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) {
++                    if (g_alt_compare) { g_alt_compare = 0; break; }
+                     static const u64 wheel_pad[6] = {1ull << 0, 1ull << 1, 1ull << 2,
+                                                      1ull << 3, 1ull << 6, 1ull << 7};
+                     ui_lock();

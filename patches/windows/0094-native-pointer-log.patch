@@ -1,0 +1,12 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -114,6 +114,8 @@
+     if (x < 0 || y < 0 || x >= 1 || y >= 1) return 0;
+     pixel[0] = (int)lroundf(rect[0] + x * (rect[2] - rect[0]));
+     pixel[1] = (int)lroundf(rect[1] + y * (rect[3] - rect[1]));
++    LOG("native: pointer rect %d %d %d %d norm %.3f %.3f pixel %d %d\n",
++        rect[0], rect[1], rect[2], rect[3], (double)x, (double)y, pixel[0], pixel[1]);
+     return pixel[0] < rect[2] && pixel[1] < rect[3];
+ }
+ 

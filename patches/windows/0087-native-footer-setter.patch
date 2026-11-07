@@ -1,0 +1,136 @@
+diff --git a/src/nx/runtime/native_labels.c b/src/nx/runtime/native_labels.c
+--- a/src/nx/runtime/native_labels.c
++++ b/src/nx/runtime/native_labels.c
+@@ -5,12 +5,31 @@
+ u64 g_footer_object;
+ char g_footer_original[512], g_footer_display[512];
+ GuestFn g_label_original;
++
++static int footer_transform(const char* text, char* out, unsigned out_size);
+ 
+ static void world_label(CPU* cpu, u64 entry) {
+     u64 vt, setter;
+     u32 player, label_player, input_player, binding;
+     const int skill = cpu->x[30] == HUD_LABEL_RETURN;
+     const int potion = cpu->x[30] == HUD_POTION_LABEL_RETURN;
++    /* The legend refresh rebuilds the gamepad template every frame. Replace the
++       argument on every setter call, so the live footer always receives the
++       keyboard/mouse text instead of snapping back to icons. */
++    if (entry == LABEL_PC && cpu->x[1] &&
++        !__atomic_load_n(&g_guest_call_depth, __ATOMIC_ACQUIRE) &&
++        kbm_readable(cpu->x[1], 2)) {
++        const char* footer = (const char*)GP(cpu->x[1]);
++        char out[512];
++        if (footer[0] == '{' && footer_transform(footer, out, sizeof out)) {
++            size_t length = strlen(out) + 1;
++            const u64 replacement = g_stack_top - 0x1A000;
++            if (kbm_readable(replacement, length)) {
++                memcpy(GP(replacement), out, length);
++                cpu->x[1] = replacement;
++            }
++        }
++    }
+     /* The two HUD callers keep their player in different callee-saved
+        registers. Potion labels have no skill-binding cell at x22-0x28. */
+     const u64 hud_player = potion ? cpu->x[20] : cpu->x[19];
+@@ -54,7 +73,7 @@
+ 
+ 
+ 
+-void ui_footer_relabel(const CPU* cpu, u64 map) {
++static int footer_transform(const char* text, char* out, unsigned out_size) {
+     static const struct { const char* icon; const char* label; } map_label[] = {
+         {"button1", "[\xE5\xB7\xA6\xE9\x94\xAE]"},
+         {"button2", "[Esc]"},
+@@ -71,11 +90,49 @@
+         {"left", "[\xE5\xA4\x8D\xE4\xBD\x8D]"},
+         {"right", "[\xE9\x87\x8D\xE7\xBD\xAE]"},
+     };
++    const int map = text && strstr(text, "\xE7\xA7\xBB\xE5\x8A\xA8\xE5\x9C\xB0\xE5\x9B\xBE");
++    unsigned length = 0, o = 0;
++    int changed = 0;
++    if (!text || !out || out_size < 2) return 0;
++    while (text[length]) length++;
++    for (unsigned i = 0; i < length; ) {
++        if (length - i >= 6 && !strncmp(text + i, "{icon:", 6)) {
++            unsigned j = i + 6, n = 0;
++            char name[16];
++            const char* label = NULL;
++            while (text[j] && text[j] != ',' && text[j] != '}' && n + 1 < sizeof name)
++                name[n++] = text[j++];
++            name[n] = 0;
++            while (text[j] && text[j] != '}') j++;
++            if (text[j] != '}') return 0;
++            j++;
++            for (unsigned k = 0; n && k < sizeof map_label / sizeof map_label[0]; k++)
++                if (!strcmp(name, map_label[k].icon)) label = map_label[k].label;
++            if (!label && map)
++                for (unsigned k = 0; n && k < sizeof map_icon / sizeof map_icon[0]; k++)
++                    if (!strcmp(name, map_icon[k].icon)) label = map_icon[k].label;
++            if (label) {
++                size_t ln = strlen(label);
++                if (o + ln >= out_size) return 0;
++                memcpy(out + o, label, ln);
++                o += (unsigned)ln;
++                changed = 1;
++                i = j;
++                continue;
++            }
++        }
++        if (o + 1 >= out_size) return 0;
++        out[o++] = text[i++];
++    }
++    out[o] = 0;
++    return changed;
++}
++
++void ui_footer_relabel(const CPU* cpu, u64 map) {
+     u64 footer, pointer;
+     u32 capacity;
+     char text[512], out[512];
+-    unsigned length, o = 0;
+-    int changed = 0;
++    unsigned length;
+     footer = ui_object(map, ui_path_key(
+         "root.normallayer.consolebuttonlegend_main.layoutroot.buttonlegend"));
+     if (!footer || !ui_visible(map, footer) ||
+@@ -85,37 +142,8 @@
+     memcpy(text, GP(pointer), length);
+     if (!memchr(text, 0, length)) return;
+     length = (unsigned)strlen(text);
+-    for (unsigned i = 0; i < length; ) {
+-        if (length - i >= 7 && !strncmp(text + i, "{icon:", 6)) {
+-            unsigned j = i + 6, n = 0;
+-            char name[12];
+-            const char* label = NULL;
+-            while (text[j] && text[j] != ',' && text[j] != '}' && n + 1 < sizeof name)
+-                name[n++] = text[j++];
+-            name[n] = 0;
+-            while (text[j] && text[j] != '}') j++;
+-            if (text[j] != '}') return;
+-            j++;
+-            for (unsigned k = 0; n && k < sizeof map_label / sizeof map_label[0]; k++)
+-                if (!strcmp(name, map_label[k].icon)) label = map_label[k].label;
+-            if (!label && strstr(text, "\xE7\xA7\xBB\xE5\x8A\xA8\xE5\x9C\xB0\xE5\x9B\xBE"))
+-                for (unsigned k = 0; n && k < sizeof map_icon / sizeof map_icon[0]; k++)
+-                    if (!strcmp(name, map_icon[k].icon)) label = map_icon[k].label;
+-            if (label) {
+-                size_t ln = strlen(label);
+-                if (o + ln >= sizeof out) return;
+-                memcpy(out + o, label, ln);
+-                o += (unsigned)ln;
+-                changed = 1;
+-                i = j;
+-                continue;
+-            }
+-        }
+-        if (o + 1 >= sizeof out) return;
+-        out[o++] = text[i++];
+-    }
+-    out[o] = 0;
+-    if (!changed || o + 1 > capacity) return;
++    if (!footer_transform(text, out, sizeof out) || strlen(out) + 1 > capacity) return;
++    const unsigned o = (unsigned)strlen(out);
+     const u64 replacement = g_stack_top - 0x19000;
+     memcpy(GP(replacement), out, o + 1);
+     const u64 args[] = {footer, replacement, 1};

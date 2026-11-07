@@ -107,8 +107,12 @@ function pickScene(cpu, req) {
   const count=g32(table+0x100), shift=g32(table+0x168), buckets=g64(table+0x120);
   if(count>65536||shift>16)throw new Error('invalid entity table');
   const out={ok:true,ctx:hx(s.ctx),player:hx(s.player),actor:hx(s.actor),entity:hx(s.ent),
-    pos,screen:req.screen,rayCall:{ret:rayCall.ret,returned:rayCall.returned},
+    hp:{},pos,screen:req.screen,rayCall:{ret:rayCall.ret,returned:rayCall.returned},
     ray,dir,eye:ray.slice(0,3),terrainDepth,depthLimit,candidates:[],cylinderHits:[],assistCandidates:[]};
+  for (const [name,id] of [['cur',0xFFFFF073],['a',0xFFFFF072],['b',0xFFFFF074],['c',0xFFFFF075]]) {
+    const hr=callGuest(cpu,0x8474B30,[s.ent,id],null,null);
+    out.hp[name]=hr.returned?hr.f0:null;
+  }
   for(let i=0;i<count;i++) {
     const bucket=g64(buckets+(i>>shift)*8); if(!bucket)continue;
     const e=bucket+(i&((1<<shift)-1))*0x360, id=g32(e);
@@ -169,6 +173,23 @@ function pickScene(cpu, req) {
   out.assistCandidates.sort((a,b)=>a.screenDistance-b.screenDistance);
   return out;
 }
+function skillScene(cpu, req) {
+  const s=frameScene(cpu);
+  const out={player:hx(s.player), slots:[]};
+  for(let slot=0; slot<6; slot++){
+    const r=callGuest(cpu,0x8525ED0,[s.player,slot],null,null);
+    let power=null;
+    if(r.returned && r.ret) { try { power=gm.add(r.ret).readU32(); } catch(e) { power='err'; } }
+    out.slots.push({slot, returned:r.returned, ptr:r.ret, power});
+  }
+  return out;
+}
+function hpScene(cpu, req) {
+  const e=req.entity;
+  const hcur=callGuest(cpu,0x8474B30,[e,0xFFFFF073],null,null);
+  const hmax=callGuest(cpu,0x8474B30,[e,0xFFFFF074],null,null);
+  return {ok:true,entity:hx(e),hp:{cur:hcur.returned?hcur.f0:null,max:hmax.returned?hmax.f0:null}};
+}
 function interactScene(cpu, req) {
   const s=frameScene(cpu);
   const e=lookup(s.table,req.target,0x360);
@@ -188,6 +209,9 @@ function interactScene(cpu, req) {
     distance:Math.hypot(...pos.map((v,k)=>v-playerPos[k])),
     path:hexBytes(path,28),built:{ret:built.ret,returned:built.returned,pc:built.pc},
     record:hexBytes(rec,0x30),submit:null};
+  const hcur=callGuest(cpu,0x8474B30,[e,0xFFFFF073],null,null);
+  const hmax=callGuest(cpu,0x8474B30,[e,0xFFFFF074],null,null);
+  out.hp={cur:hcur.returned?hcur.f0:null,max:hmax.returned?hmax.f0:null};
   if(req.submit) {
     const r=callGuest(cpu,0x80cba30,[s.player,rec,1,1],null,null);
     out.submit={ret:r.ret|0,returned:r.returned,pc:r.pc,steps:r.steps};
@@ -205,6 +229,8 @@ def build_js(context: int) -> str:
                       "if (req.mode === 'scan') { result = scanScene(cpu, req); } "
                       "else if (req.mode === 'pick') { result = pickScene(cpu, req); } "
                       "else if (req.mode === 'interact') { result = interactScene(cpu, req); } "
+                      "else if (req.mode === 'hp') { result = hpScene(cpu, req); } "
+                      "else if (req.mode === 'skill') { result = skillScene(cpu, req); } "
                       "else if (req.mode === 'project') {")
 
 
@@ -215,6 +241,8 @@ def main() -> None:
     ap.add_argument("--radius", type=float, default=60)
     ap.add_argument("--top", type=float, default=1.8, help="head offset for the screen segment")
     ap.add_argument("--target", type=lambda s: int(s, 0))
+    ap.add_argument("--entity", type=lambda s: int(s, 0), help="raw entity pointer for a read-only HP read")
+    ap.add_argument("--skill", action="store_true", help="read the six hero skill loadout powers")
     ap.add_argument("--click", help="engine pixel x,y to resolve the entity under the cursor")
     ap.add_argument("--height", type=float, default=2.0, help="world height sampled for the screen test")
     ap.add_argument("--submit", action="store_true")
@@ -234,6 +262,10 @@ def main() -> None:
         if args.click:
             req = {"mode": "pick", "radius": args.radius, "height": args.height,
                    "screen": [int(v) for v in args.click.split(",")]}
+        elif args.skill:
+            req = {"mode": "skill"}
+        elif args.entity is not None:
+            req = {"mode": "hp", "entity": args.entity}
         elif args.target is None:
             req = {"mode": "scan", "radius": args.radius, "top": args.top}
         else:

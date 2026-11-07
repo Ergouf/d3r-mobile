@@ -1,0 +1,12 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -40,6 +40,8 @@
+ 
+ int native_world_click(float x, float y, u32 width, u32 height, u64 fallback_pad) {
+     PointerPress p;
++    LOG("native: world click in %.4f %.4f %u x %u pad %llx\n",
++        (double)x, (double)y, width, height, (unsigned long long)fallback_pad);
+     if (!__atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) || !isfinite(x) || !isfinite(y) ||
+         !width || !height || width > 65535 || height > 65535 ||
+         x < 0 || y < 0 || x >= 1 || y >= 1) return 0;

@@ -59,7 +59,7 @@ state file returns `state=null` and `note=NO_QUICK_RESUME_STATE` instead of thro
 - Page: `潮湿的地窖 / Damp Cellar`; label seen by CUA.
 - `place`: `1999503360` before entry, `1999699971` after entry (machine-readable scene transition).
 - Player: `(52.27,126.20,0.10)` (latest snapshot; earlier entry was `(49,132)`).
-- Post-resume visual evidence: `out/windows/kbm/session/damp-cellar-resume.png`.
+- Post-resume visual evidence: 截图 `damp-cellar-resume.png` 已在 2026-11-05 清理中移除；机器证据保留 `damp-cellar-skill-ui.json` 与 `quick-resume.json`。
 - Active skill: `惩罚 / Punish`, A slot; key `Space` (`keybinds.ini` a=Space).
 - Skill-page machine evidence: `out/windows/kbm/session/damp-cellar-skill-ui.json`
   contains visible text `惩罚`; screenshot `damp-cellar-skill.png`.

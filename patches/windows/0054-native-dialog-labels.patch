@@ -1,0 +1,70 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 29fc797..d17937e 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1493,6 +1493,25 @@ static void ui_hover(const CPU* cpu, const HoverPoint* hover) {
+     ui_skill_icon(&p, 0);
+ }
+ 
++/* A prompt button carries its own label; 取消 is not always the right-hand
++   button, so the pad bit follows the text when it is readable. */
++static int ui_button_bit(u64 obj) {
++    static const char accept_lbl[] = "\xE6\x8E\xA5\xE5\x8F\x97"; /* 接受 */
++    static const char cancel_lbl[] = "\xE5\x8F\x96\xE6\xB6\x88"; /* 取消 */
++    u64 ptr;
++    u32 cap;
++    char txt[128];
++    unsigned len;
++    if (!read64(obj + 0x398, &ptr) || !read32(obj + 0x3A0, &cap) || !ptr || !cap || cap > 256 ||
++        !readable(ptr, cap)) return -1;
++    len = cap < sizeof txt - 1 ? cap : sizeof txt - 1;
++    memcpy(txt, GP(ptr), len);
++    txt[len] = 0;
++    if (strstr(txt, accept_lbl)) return 0;
++    if (strstr(txt, cancel_lbl)) return 1;
++    return -1;
++}
++
+ /* The console prompt's two buttons are text widgets without a +0x118
+    callback; the game handles the prompt through A/B. A pointer click on the
+    observed fixed-shape button bar forwards to the game's own B/A action. */
+@@ -1512,6 +1531,17 @@ static int ui_dialog_buttons(UiPick* p, u32 serial) {
+         memcpy(rr, GP(root + 0x88), sizeof rr);
+         if (!(rr[2] - rr[0] >= 540 && rr[2] - rr[0] <= 580 &&
+               rr[3] - rr[1] >= 110 && rr[3] - rr[1] <= 145)) continue;
++        /* Only the prompt that owns the input focus may answer the click.  A
++           stale prompt keeps its widgets on screen; forwarding A/B there would
++           reply to a question the player is no longer being asked. */
++        {
++            u64 focus_key, focus;
++            GuestResult fr;
++            if (guest_call(p->cpu, 0x832D180, NULL, 0, NULL, 0, &fr) &&
++                read64(fr.x0, &focus_key) && focus_key != UINT64_MAX &&
++                (focus = ui_object(p->map, focus_key)) && !ui_within(p->map, focus, root))
++                continue;
++        }
+         u64 button[2] = {0, 0};
+         int seen = 0;
+         for (u32 j = 0; j < 2; j++) {
+@@ -1531,11 +1561,17 @@ static int ui_dialog_buttons(UiPick* p, u32 serial) {
+         int left_inside = ui_inside(p, left);
+         int right_inside = ui_inside(p, right);
+         if (!left_inside && !right_inside) continue;
+-        u64 pad = right_inside ? (1ull << 0) : (1ull << 1);
++        int left_bit = ui_button_bit(left), right_bit = ui_button_bit(right);
++        u64 pad;
++        const char* how;
++        if (left_bit >= 0 && right_bit >= 0 && left_bit != right_bit)
++            pad = 1ull << (right_inside ? right_bit : left_bit), how = "label";
++        else
++            pad = right_inside ? (1ull << 0) : (1ull << 1), how = "side";
+         int queued = native_action_press(pad);
+-        LOG("native: UI dialog button %u %s bar=%llx root=%llx -> %s\n",
+-            serial, right_inside ? "confirm(A)" : "cancel(B)",
+-            (unsigned long long)bar, (unsigned long long)root,
++        LOG("native: UI dialog button %u %s bar=%llx root=%llx via %s -> %s\n",
++            serial, (pad & 1) ? "confirm(A)" : "cancel(B)",
++            (unsigned long long)bar, (unsigned long long)root, how,
+             queued ? "queued" : "rejected");
+         return 1;
+     }

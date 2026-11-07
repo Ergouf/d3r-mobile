@@ -1,11 +1,13 @@
 param([Parameter(Mandatory)][int]$ProcessId,[Parameter(Mandatory)][string]$OutPath)
 Add-Type -AssemblyName System.Drawing
 Add-Type -Namespace PW -Name N -MemberDefinition @"
+[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr h, System.IntPtr dc, uint flags);
 [DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
 [DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);
 public struct RECT { public int L,T,R,B; }
 "@
+[void][PW.N]::SetProcessDPIAware()
 $p=Get-Process -Id $ProcessId -ErrorAction Stop
 $h=$p.MainWindowHandle
 $r=New-Object PW.N+RECT

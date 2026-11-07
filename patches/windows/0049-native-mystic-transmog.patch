@@ -1,0 +1,47 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1120,12 +1120,13 @@
+     static const char enchant[] = "\xE9\x99\x84\xE9\xAD\x94";
+     static const char accept[] = "\xE6\x8E\xA5\xE5\x8F\x97";
+     static const char cancel[] = "\xE5\x8F\x96\xE6\xB6\x88";
++    static const char transmog[] = "\xE5\xB9\xBB\xE5\x8C\x96";
+     UiServiceState service = {0};
+     u64 global, world, manager, footer, vtable, method, thunk, expected_method, focus_key, focus;
+     const char* label;
+     const char* name;
+     u32 player, action, group;
+-    int pick_label = 0, mystic_enchant = 0;
++    int pick_label = 0, mystic_enchant = 0, mystic_transmog = 0;
+     float rect[4];
+     GuestResult r;
+     if (!ui_service_state(p->map, &service) || !read64(service.controller, &vtable) ||
+@@ -1153,6 +1154,11 @@
+            final prompt only expose native A. */
+         thunk = 0x81DF930; expected_method = 0x81DCA90; name = "mystic";
+         label = select; action = 0; mystic_enchant = 1;
++    } else if (group == 7 && service.current == 1) {
++        /* The transmog page exposes its item/appearance selection and the
++           final confirm only through native A (keyboard Down moves the list). */
++        thunk = 0x81DF930; expected_method = 0x81DCA90; name = "mystic";
++        label = select; action = 0; mystic_transmog = 1;
+     } else if (group == 7 && service.current == 3) {
+         thunk = 0x81DF930; expected_method = 0x81DCA90; name = "mystic";
+         label = train; action = 0;
+@@ -1173,6 +1179,16 @@
+             return queued ? 1 : 0;
+         }
+         if (!ui_text_contains(footer, select)) return 0;
++    }
++    if (mystic_transmog) {
++        if (ui_text_contains(footer, select) || ui_text_contains(footer, transmog) ||
++            ui_text_contains(footer, accept) || ui_text_contains(footer, cancel)) {
++            int queued = native_action_press(1);
++            LOG("native: UI mystic transmog footer %u -> %s\n", serial,
++                queued ? "queued" : "rejected");
++            return queued ? 1 : 0;
++        }
++        return 0;
+     }
+     if (pick_label) {
+         /* Each jeweller page exposes only its own first-action labels. */

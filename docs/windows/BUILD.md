@@ -29,7 +29,7 @@ Windows 使用本地修改的 ScarletNX 源码，位置为 `reference/ScarletNX-
 
 构建入口通过真正的 CLANG64 登录 shell 调用上游 `default` preset。CPM 下载固定依赖，配置和缓存由上游 CMake 管理。首次构建或清理生成目录后，按上游 [Windows 构建说明](../../reference/ScarletNX-src/docs/BUILD.md) 重新配置。
 
-构建和测试产物统一集中在 `out/windows/`，主程序为 `out/windows/build-kbm/scarletnx.exe`；`dependencies/` 放依赖验收输出、`packages/` 放打包过程文件、`releases/` 放发行输出。不要把 guest 资源、密钥或唯一存档放在这些可清理目录。
+构建和测试产物统一集中在 `out/windows/`，主程序为 `out/windows/build/scarletnx.exe`；`dependencies/` 放依赖验收输出、`packages/` 放打包过程文件、`releases/` 放发行输出。不要把 guest 资源、密钥或唯一存档放在这些可清理目录。
 
 依赖验收编译并链接 Vulkan C 程序，编译 GLSL、执行 `spirv-val`，显式启用 Khronos 验证层并创建 Intel Arc 逻辑设备及着色器模块。它不执行计算着色器，也不测游戏帧率。
 

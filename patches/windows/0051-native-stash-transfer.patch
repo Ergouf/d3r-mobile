@@ -1,0 +1,41 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 279015e..e080afa 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1110,6 +1110,28 @@ static int ui_vendor_tab_click_fallback(UiPick* p, u32 serial) {
+     return 1;
+ }
+ 
++/* The stash moves an item between the bag and the shared chest with the A
++   action, which the console UI only exposes as a footer legend.  Accept a
++   click on the leftmost legend region when that exact legend is on screen. */
++static int ui_stash_action_click(UiPick* p, u32 serial) {
++    static const char deposit[] =
++        "\xE5\xB0\x86\xE7\x89\xA9\xE5\x93\x81\xE7\xA7\xBB\xE8\x87\xB3\xE5\x82\xA8\xE8\x97\x8F\xE7\xAE\xB1";
++    static const char withdraw[] =
++        "\xE5\xB0\x86\xE7\x89\xA9\xE5\x93\x81\xE7\xA7\xBB\xE8\x87\xB3\xE7\x89\xA9\xE5\x93\x81\xE6\xA0\x8F";
++    u64 footer;
++    float rect[4];
++    footer = ui_object(p->map, ui_path_key(
++        "root.normallayer.consolebuttonlegend_main.layoutroot.buttonlegend"));
++    if (!footer || !ui_visible(p->map, footer) || !ui_inside(p, footer) ||
++        !readable(footer + 0x88, sizeof rect)) return 0;
++    memcpy(rect, GP(footer + 0x88), sizeof rect);
++    if (p->point[0] > rect[0] + 240.0f) return 0;
++    if (!ui_text_contains(footer, deposit) && !ui_text_contains(footer, withdraw)) return 0;
++    int queued = native_action_press(1);
++    LOG("native: UI stash transfer footer %u -> %s\n", serial, queued ? "queued" : "rejected");
++    return queued ? 1 : 0;
++}
++
+ static int ui_service_action_click(UiPick* p, u32 serial) {
+     static const char craft[] = "\xE6\x89\x93\xE9\x80\xA0";
+     static const char salvage[] = "\xE5\x88\x86\xE8\xA7\xA3";
+@@ -1524,6 +1546,7 @@ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     if (ui_settings_tab_click(&p, press->serial)) return;
+     if (ui_equipment_icon(&p, press->serial)) return;
+     if (ui_service_action_click(&p, press->serial)) return;
++    if (ui_stash_action_click(&p, press->serial)) return;
+     if (ui_kadala_action_click(&p, press->serial)) return;
+     if (ui_skill_icon(&p, press->serial)) return;
+     if (ui_dialog_buttons(&p, press->serial)) return;

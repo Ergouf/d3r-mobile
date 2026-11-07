@@ -1,0 +1,50 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -361,7 +361,31 @@
+     return pc >= g_code_lo && pc < g_code_hi && !(pc & 3);
+ }
+ 
++/* The bucket hash in 0x8335350 only covers the low 4 bytes of the key; a few
++   UI nodes whose key collides are not reachable from its bucket. Scan the whole
++   registry when the direct lookup misses. */
++static u64 ui_find_key(u64 map, u64 key) {
++    u32 mask, total;
++    u64 buckets;
++    if (key == UINT64_MAX || !kbm_read32(map, &mask) || mask > 262143 ||
++        !kbm_read64(map + 0x10, &buckets) || !kbm_read32(map + 4, &total) ||
++        total > 262143) return 0;
++    for (u32 i = 0; i <= mask; i++) {
++        u64 node;
++        if (!kbm_read64(buckets + (u64)i * 8, &node)) continue;
++        for (unsigned g = 0; node && g < 1024; g++) {
++            u64 actual, obj, next;
++            if (!kbm_read64(node, &next)) break;
++            if (kbm_read64(node + 8, &actual) && actual == key &&
++                kbm_read64(node + 0x10, &obj)) return obj;
++            node = next;
++        }
++    }
++    return 0;
++}
++
+ u64 ui_object(u64 map, u64 key) {
++
+     u32 mask, h = 0x811C9DC5u;
+     u64 buckets, node;
+     if (key == UINT64_MAX || !kbm_read32(map, &mask) || mask > 262143 ||
+@@ -1210,8 +1234,12 @@
+     /* The skill page's navigation record can lag behind the visible page
+        (tab reads 0 while consoleskillselection_main is shown). Trust the
+        loadout ring's own visibility instead. */
+-    ring = ui_object(p->map, ui_path_key(
+-        "root.normallayer.consoleskillselection_main.layoutroot.skillloadout"));
++    {
++        const u64 ring_key_want = ui_path_key(
++            "root.normallayer.consoleskillselection_main.layoutroot.skillloadout");
++        ring = ui_object(p->map, ring_key_want);
++        if (!ring) ring = ui_find_key(p->map, ring_key_want);
++    }
+     if (!ring || !ui_visible(p->map, ring) ||
+         !kbm_read64(ring, &vt) || vt != 0x90AF208 ||
+         !kbm_read64(ring + 0x30, &ring_key) ||

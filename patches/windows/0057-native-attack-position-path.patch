@@ -1,0 +1,37 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index f9debbe..0793410 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -453,19 +453,26 @@ static int submit_attack(const CPU* cpu, u64 player_object, const WalkGoal* goal
+     const u64 record = g_stack_top - 0x1CB00, path = record + 0x14;
+     u32* words = (u32*)GP(record);
+     memset(GP(record), 0, 0x80);
+-    words[0] = goal->controller;
++    words[0] = 0xFFFFFFFFu;
+     words[1] = words[2] = ATTACK_POWER;
+     words[3] = 0;
+     words[4] = 0xFFFFFFFFu;
+-    /* Natural A against the observed monster used a type-1 actor path and
+-       its controller.  The type-2 record is only the empty-ground attack. */
+-    u64 build[4] = {path, goal->handle, 0, 0};
+-    if (!guest_call(cpu, PATH_ACTOR_PC, build, 4, NULL, 0, NULL)) {
++    /* Natural A sends the empty attack from the player's own position at the
++       hero's attack height (observed z = 4.47) with a type-2 position path and
++       no controller/actor; the type-1 actor path was rejected (ret 0). */
++    const u64 pos = record + 0x60;
++    float* at = (float*)GP(pos);
++    at[0] = goal->previous.x;
++    at[1] = goal->previous.y;
++    at[2] = goal->previous.z + 4.37f;
++    *(u32*)(GP(pos) + 12) = goal->previous.place;
++    u64 build[2] = {path, pos};
++    if (!guest_call(cpu, PATH_POS_PC, build, 2, NULL, 0, NULL)) {
+         LOG("native: attack path build failed for %08x\n", goal->handle);
+         return 0;
+     }
+     u32 type, id;
+-    if (!read32(path, &type) || !read32(path + 4, &id) || type != 1 || id != goal->handle) {
++    if (!read32(path, &type) || !read32(path + 4, &id) || type != 2 || id != 0xFFFFFFFFu) {
+         LOG("native: attack path mismatch type %u id %08x\n", type, id);
+         return 0;
+     }

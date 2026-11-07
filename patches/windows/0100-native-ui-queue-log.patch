@@ -1,0 +1,11 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -50,6 +50,7 @@
+         (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED)};
+     if (fallback_pad & NATIVE_POINTER_UI_EVENTS) {
+         int queued = native_ui_queue_locked(&p);
++        LOG("native: world click queued %d count %u\n", queued, g_ui_count);
+         pm_unlock(&g_pointer_lock);
+         return queued;
+     } else if (fallback_pad & NATIVE_POINTER_SKILL) {

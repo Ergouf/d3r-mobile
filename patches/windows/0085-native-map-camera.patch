@@ -1,0 +1,227 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -34,6 +34,60 @@
+ 
+ void native_ui_compare_set(int held) {
+     __atomic_store_n(&g_compare_requested, held != 0, __ATOMIC_RELEASE);
++}
++
++static int g_map_zoom_steps, g_map_pan_x, g_map_pan_y, g_map_recenter, g_map_reset_zoom;
++
++void native_map_zoom(int notches) {
++    if (notches) __atomic_fetch_add(&g_map_zoom_steps, notches, __ATOMIC_RELAXED);
++}
++void native_map_pan(int dx, int dy) {
++    if (dx) __atomic_fetch_add(&g_map_pan_x, dx, __ATOMIC_RELAXED);
++    if (dy) __atomic_fetch_add(&g_map_pan_y, dy, __ATOMIC_RELAXED);
++}
++void native_map_recenter(void) { __atomic_store_n(&g_map_recenter, 1, __ATOMIC_RELAXED); }
++void native_map_reset_zoom(void) { __atomic_store_n(&g_map_reset_zoom, 1, __ATOMIC_RELAXED); }
++
++static void map_camera_adjust(u64 map, u64 local, int zoom, int pan_x, int pan_y,
++                              int recenter, int reset) {
++    u64 vt;
++    float z, pan[2];
++    if (!local || !ui_visible(map, local) || !kbm_read64(local, &vt) || vt != 0x90AF870ull ||
++        !kbm_readable(local + 0x1F8, 8) || !kbm_readable(local + 0x214, 4)) return;
++    z = *(float*)GP(local + 0x214);
++    if (z != z || z < 0.25f || z > 4.0f) return;
++    if (reset) z = 1.0f;
++    if (zoom) z -= 0.05f * (float)zoom;
++    if (z < 0.5f) z = 0.5f;
++    if (z > 1.5f) z = 1.5f;
++    if (reset || zoom) *(float*)GP(local + 0x214) = z;
++    if (recenter) {
++        pan[0] = pan[1] = 0;
++        memcpy(GP(local + 0x1F8), pan, sizeof pan);
++        return;
++    }
++    if (!pan_x && !pan_y) return;
++    memcpy(pan, GP(local + 0x1F8), sizeof pan);
++    if (pan[0] != pan[0] || pan[1] != pan[1]) return;
++    pan[0] += (float)pan_x;
++    pan[1] += (float)pan_y;
++    memcpy(GP(local + 0x1F8), pan, sizeof pan);
++}
++
++void native_map_apply(u64 map) {
++    static const char* const paths[] = {
++        "root.normallayer.map_dialog_mainpage.localmap",
++        "root.normallayer.waypointmap_main.layoutroot.overlaycontainer.worldmap",
++    };
++    int zoom = __atomic_exchange_n(&g_map_zoom_steps, 0, __ATOMIC_RELAXED);
++    int pan_x = __atomic_exchange_n(&g_map_pan_x, 0, __ATOMIC_RELAXED);
++    int pan_y = __atomic_exchange_n(&g_map_pan_y, 0, __ATOMIC_RELAXED);
++    int recenter = __atomic_exchange_n(&g_map_recenter, 0, __ATOMIC_RELAXED);
++    int reset = __atomic_exchange_n(&g_map_reset_zoom, 0, __ATOMIC_RELAXED);
++    if (!map || (!zoom && !pan_x && !pan_y && !recenter && !reset)) return;
++    for (unsigned i = 0; i < sizeof paths / sizeof paths[0]; i++)
++        map_camera_adjust(map, ui_object(map, ui_path_key(paths[i])),
++                          zoom, pan_x, pan_y, recenter, reset);
+ }
+ 
+ int native_ui_char_page(void) {
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1188,6 +1188,7 @@
+         if (kbm_read64(0x914F840, &legend_global) && kbm_read64(legend_global + 0x10, &legend_world) &&
+             kbm_read64(legend_world + 0xB80, &legend_manager) && kbm_read64(legend_manager, &legend_map))
+             ui_footer_relabel(cpu, legend_map);
++            native_map_apply(legend_map);
+         if (ui_close_tick(cpu, legend_map, legend_manager)) return;
+         pm_lock(&g_pointer_lock);
+         g_skill_read = g_skill_count = 0;
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -30,6 +30,12 @@
+ void native_ui_compare_set(int held);
+ /* 1 while the local region/waypoint map owns the screen; used for M toggle. */
+ int native_world_map_open(void);
++/* SDL thread queues these; the game thread applies them to the local map camera.
++   A positive zoom notch is console ZoomIn: the native scale moves toward 0.5. */
++void native_map_zoom(int notches);
++void native_map_pan(int dx, int dy);
++void native_map_recenter(void);
++void native_map_reset_zoom(void);
+ /* The last click's goal: 0 = none, 1 = walking, 2 = attacking an actor,
+    3 = operating/approaching an interactable.  The frontend repeats a held
+    click for 1 and 2 only. */
+diff --git a/src/nx/runtime/native_kbm.h b/src/nx/runtime/native_kbm.h
+--- a/src/nx/runtime/native_kbm.h
++++ b/src/nx/runtime/native_kbm.h
+@@ -140,6 +140,7 @@
+ void native_ui_hover_clear(void);
+ void native_labels_install(void);
+ int native_world_map_open(void);
++void native_map_apply(u64 map);
+ int pointer_pixel(const CPU* cpu, const PointerPress* p, int pixel[2]);
+ 
+ #endif
+diff --git a/src/nx/runtime/native_labels.c b/src/nx/runtime/native_labels.c
+--- a/src/nx/runtime/native_labels.c
++++ b/src/nx/runtime/native_labels.c
+@@ -64,6 +64,13 @@
+         {"l2", "[1]"},
+         {"r2", "[3]"},
+     };
++    static const struct { const char* icon; const char* label; } map_icon[] = {
++        {"l_stick", "[\xE6\x8B\x96\xE6\x8B\xBD]"},
++        {"up", "[\xE6\xBB\x9A\xE8\xBD\xAE]"},
++        {"down", "[\xE6\xBB\x9A\xE8\xBD\xAE]"},
++        {"left", "[\xE5\xA4\x8D\xE4\xBD\x8D]"},
++        {"right", "[\xE9\x87\x8D\xE7\xBD\xAE]"},
++    };
+     u64 footer, pointer;
+     u32 capacity;
+     char text[512], out[512];
+@@ -91,6 +98,9 @@
+             j++;
+             for (unsigned k = 0; n && k < sizeof map_label / sizeof map_label[0]; k++)
+                 if (!strcmp(name, map_label[k].icon)) label = map_label[k].label;
++            if (!label && strstr(text, "\xE7\xA7\xBB\xE5\x8A\xA8\xE5\x9C\xB0\xE5\x9B\xBE"))
++                for (unsigned k = 0; n && k < sizeof map_icon / sizeof map_icon[0]; k++)
++                    if (!strcmp(name, map_icon[k].icon)) label = map_icon[k].label;
+             if (label) {
+                 size_t ln = strlen(label);
+                 if (o + ln >= sizeof out) return;
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -55,6 +55,8 @@
+    being attacked.  Shift makes a world click an attack in place. */
+ static int g_lmb_world;
+ static int g_lmb_ui, g_ctrl_down, g_alt_compare;
++static int g_map_press, g_map_dragged;
++static float g_map_press_x, g_map_press_y, g_map_last_x, g_map_last_y;
+ static Uint64 g_hold_tick;
+ /* The right button is the secondary skill in the world and B in a menu. */
+ static int g_rmb_world;
+@@ -1224,16 +1226,30 @@
+                         g_mouse_y = e.button.y;
+                         if (density > 0 && width > 0 && height > 0) {
+                             g_lmb_ui = native_world_ui_blocked();
+-                            native_world_click(
+-                                (e.button.x * density - x) / width, (e.button.y * density - y) / height,
+-                                (u32)width, (u32)height, g_lmb_ui ?
+-                                    NATIVE_POINTER_UI_DOWN | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0) :
+-                                    (g_shift_down ? NATIVE_POINTER_STAND_STILL : 0));
+-                            g_lmb_world = !g_lmb_ui;
++                            /* A map press becomes a pan if the pointer moves, otherwise the
++                               original click is delivered on release. */
++                            if (g_lmb_ui && native_world_map_open()) {
++                                g_map_press = 1;
++                                g_map_dragged = 0;
++                                g_map_press_x = g_map_last_x = e.button.x;
++                                g_map_press_y = g_map_last_y = e.button.y;
++                                g_lmb_world = 0;
++                            } else {
++                                native_world_click(
++                                    (e.button.x * density - x) / width, (e.button.y * density - y) / height,
++                                    (u32)width, (u32)height, g_lmb_ui ?
++                                        NATIVE_POINTER_UI_DOWN | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0) :
++                                        (g_shift_down ? NATIVE_POINTER_STAND_STILL : 0));
++                                g_lmb_world = !g_lmb_ui;
++                            }
+                             g_hold_tick = SDL_GetTicks();
+                         }
+                     } else {
+                         g_lmb_world = 0;
++                        if (g_map_press && !g_map_dragged)
++                            pc_world_pointer(g_map_press_x, g_map_press_y,
++                                NATIVE_POINTER_UI_DOWN | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0));
++                        g_map_press = g_map_dragged = 0;
+                         if (g_lmb_ui) pc_world_pointer(e.button.x, e.button.y,
+                             NATIVE_POINTER_UI_UP | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0));
+                         g_lmb_ui = 0;
+@@ -1266,6 +1282,15 @@
+                 touch_mouse(&e);
+                 break;
+             case SDL_EVENT_MOUSE_MOTION:
++                if (g_map_press && (e.motion.state & SDL_BUTTON_LMASK)) {
++                    float dx = e.motion.x - g_map_press_x, dy = e.motion.y - g_map_press_y;
++                    float step_x = e.motion.x - g_map_last_x, step_y = e.motion.y - g_map_last_y;
++                    g_map_last_x = e.motion.x;
++                    g_map_last_y = e.motion.y;
++                    if (!g_map_dragged && dx * dx + dy * dy >= 36.0f) g_map_dragged = 1;
++                    if (g_map_dragged && (step_x || step_y))
++                        native_map_pan((int)step_x, (int)step_y);
++                }
+                 if (e.motion.which != SDL_TOUCH_MOUSEID) {
+                     g_mouse_x = e.motion.x;
+                     g_mouse_y = e.motion.y;
+@@ -1298,6 +1323,10 @@
+                 break;
+             case SDL_EVENT_MOUSE_WHEEL:
+                 hid_mouse_feed(&e);
++                if (native_world_map_open()) {
++                    int notches = e.wheel.integer_y ? e.wheel.integer_y : (e.wheel.y > 0 ? 1 : e.wheel.y < 0 ? -1 : 0);
++                    if (notches) native_map_zoom(notches > 0 ? 1 : -1);
++                }
+                 break;
+             case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                 g_fullscreen = 1;
+@@ -1409,6 +1438,13 @@
+                 /* Pad buttons are native actions: one pulse per press, straight into the engine's input
+                    consumer. They must not also reach keymap, or the same press would also become an Npad
+                    input. A repeat neither presses again nor falls through to keymap. */
++                if (native_world_map_open() &&
++                    !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) {
++                    if (e.key.scancode == SDL_SCANCODE_UP) { native_map_zoom(1); break; }
++                    if (e.key.scancode == SDL_SCANCODE_DOWN) { native_map_zoom(-1); break; }
++                    if (!e.key.repeat && e.key.scancode == SDL_SCANCODE_LEFT) { native_map_recenter(); break; }
++                    if (!e.key.repeat && e.key.scancode == SDL_SCANCODE_RIGHT) { native_map_reset_zoom(); break; }
++                }
+                 if (keymap_native(e.key.scancode)) {
+                     if (!e.key.repeat) native_action_press(keymap_native(e.key.scancode));
+                     break;
+@@ -1453,6 +1489,7 @@
+                 g_mouse_buttons = 0;
+                 g_lmb_world = 0;
+                 g_lmb_ui = g_ctrl_down = 0;
++                g_map_press = g_map_dragged = 0;
+                 g_rmb_world = 0;
+                 g_shift_down = 0;
+                 ui_lock();

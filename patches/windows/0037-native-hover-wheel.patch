@@ -1,0 +1,226 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index c627da0..89eb790 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -70,6 +70,14 @@ typedef struct {
+ 
+ static PMutex g_pointer_lock = PMUTEX_INIT;
+ static PointerPress g_pointer;
++/* Latest pointer position for hover-selected UI (stick-style wheels).  It is a
++   separate queue so a motion never turns into a click. */
++typedef struct {
++    float x, y;
++    u32 width, height, frame;
++} HoverPoint;
++static HoverPoint g_hover;
++static int g_have_hover;
+ static int g_have_pointer, g_cancel, g_enabled, g_ui_blocked = 1, g_busy;
+ static u32 g_serial;
+ static u64 g_stack_top;
+@@ -111,14 +119,41 @@ int native_world_click(float x, float y, u32 width, u32 height, u64 fallback_pad
+         (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED)};
+     g_pointer = p;
+     g_have_pointer = 1;
++    g_have_hover = 0;
+     pm_unlock(&g_pointer_lock);
+     LOG("native: world pointer queued %u (%.4f, %.4f)\n", p.serial, x, y);
+     return 1;
+ }
++void native_world_hover(float x, float y, u32 width, u32 height) {
++    if (!__atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) ||
++        !__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) || !isfinite(x) || !isfinite(y) ||
++        !width || !height || width > 65535 || height > 65535 ||
++        x < 0 || y < 0 || x >= 1 || y >= 1) {
++        pm_lock(&g_pointer_lock);
++        g_have_hover = 0;
++        pm_unlock(&g_pointer_lock);
++        return;
++    }
++    pm_lock(&g_pointer_lock);
++    /* A queued click is processed first; motion only replaces older motion. */
++    g_hover = (HoverPoint){x, y, width, height,
++        (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED)};
++    g_have_hover = 1;
++    pm_unlock(&g_pointer_lock);
++}
++static int take_hover(HoverPoint* h) {
++    int have;
++    pm_lock(&g_pointer_lock);
++    have = g_have_hover;
++    if (have) { *h = g_hover; g_have_hover = 0; }
++    pm_unlock(&g_pointer_lock);
++    return have;
++}
+ void native_world_cancel(void) {
+     __atomic_store_n(&g_cancel, 1, __ATOMIC_RELEASE);
+     pm_lock(&g_pointer_lock);
+     g_have_pointer = 0;
++    g_have_hover = 0;
+     pm_unlock(&g_pointer_lock);
+ }
+ 
+@@ -442,6 +477,7 @@ typedef struct {
+     u32 index;
+     int kind; /* 1 = button, 2 = list row, 3 = disabled/blocked */
+     int root_mode; /* no input focus: the click chose an active subscriber root */
++    int hover; /* select wheel categories only; never activate a control */
+ } UiPick;
+ 
+ /* Registry children by parent key.  The registry is the only tree the live UI
+@@ -943,14 +979,14 @@ static int ui_equipment_icon(UiPick* p, u32 serial) {
+             return 0;
+         }
+         if (selected == slots[i].slot) {
+-            LOG("native: UI equipment icon %u unchanged (%s)\n", serial, slots[i].name);
++            if (!p->hover) LOG("native: UI equipment icon %u unchanged (%s)\n", serial, slots[i].name);
+             return 1;
+         }
+         u64 args[2] = {controller, slots[i].slot};
+         int complete = guest_call(p->cpu, 0x81FCFD0, args, 2, NULL, 0, NULL);
+         int changed = complete && read32(controller + 0x150, &selected) &&
+             selected == slots[i].slot;
+-        LOG("native: UI equipment icon %u %s slot=%u -> %s\n", serial,
++        LOG("native: UI %sequipment icon %u %s slot=%u -> %s\n", p->hover ? "hover " : "", serial,
+             slots[i].name, slots[i].slot, changed ? "selected" : "incomplete");
+         return 1;
+     }
+@@ -999,14 +1035,14 @@ static int ui_skill_icon(UiPick* p, u32 serial) {
+             if (!read64(entries + (u64)j * 16 + 8, &entry_key) ||
+                 entry_key != key) continue;
+             if (selected == j) {
+-                LOG("native: UI skill icon %u unchanged slot=%u\n", serial, j);
++                if (!p->hover) LOG("native: UI skill icon %u unchanged slot=%u\n", serial, j);
+                 return 1;
+             }
+             u64 args[3] = {selector, child + 0x30, 0};
+             int complete = guest_call(p->cpu, 0x838F4D0, args, 3, NULL, 0, NULL);
+             int changed = complete && read32(selector + 0x28, &selected) &&
+                 selected == j;
+-            LOG("native: UI skill icon %u slot=%u -> %s\n", serial, j,
++            LOG("native: UI %sskill icon %u slot=%u -> %s\n", p->hover ? "hover " : "", serial, j,
+                 changed ? "selected" : "incomplete");
+             return 1;
+         }
+@@ -1016,12 +1052,60 @@ static int ui_skill_icon(UiPick* p, u32 serial) {
+     return 0;
+ }
+ 
++/* A wheel can stay visible behind a modal. Require its own subscribed callback
++   owner and reject other input layers/owners before checking the selector. */
++static int ui_hover_allowed(UiPick* p, u64 manager) {
++    UiTabState state = {0};
++    u64 subs, entries, normal, owner;
++    u32 count;
++    if (!ui_tab_state(p->map, &state) || (state.current != 0 && state.current != 1) ||
++        !read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
++        !read32(subs + 8, &count) || !count || count > 1024) return 0;
++    normal = ui_object(p->map, 1);
++    owner = ui_object(p->map, ui_path_key(state.current == 0 ?
++        "root.normallayer.consoleinventoryring_main.layoutroot" :
++        "root.normallayer.consoleskillselection_main.layoutroot"));
++    if (!normal || !owner || !ui_visible(p->map, normal)) return 0;
++    int subscribed = 0;
++    for (u32 i = 0; i < count; i++) {
++        u64 obj, vt, method, table, callback;
++        if (!read64(entries + i * 8ull, &obj)) return 0;
++        if (!obj || !ui_visible(p->map, obj)) continue;
++        if (!ui_within(p->map, obj, normal)) return 0;
++        if (!read64(obj, &vt) || !read64(vt + 0xB0, &method) || method != 0x83B81F0 ||
++            !read64(obj + 0x118, &table) || !table || !read64(table + 0x20, &callback) ||
++            !ui_code(callback)) continue;
++        if (!ui_within(p->map, obj, state.page)) return 0;
++        if (obj == owner && callback == (state.current == 0 ? 0x81FB910ull : 0x8387180ull))
++            subscribed = 1;
++    }
++    return subscribed;
++}
++
++/* Motion selects only the hovered wheel icon. Lists, buttons and page tabs keep
++   their click semantics. No full-registry child index is needed for a wheel. */
++static void ui_hover(const CPU* cpu, const HoverPoint* hover) {
++    UiPick p = {.cpu = cpu, .hover = 1};
++    PointerPress press = {hover->x, hover->y, hover->width, hover->height, 0, 0, hover->frame};
++    const u64 scratch = g_stack_top - 0x1A000;
++    u64 global, world, manager;
++    int pixel[2];
++    if ((u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - hover->frame) > 4 ||
++        !pointer_pixel(cpu, &press, pixel) || !read64(0x914F840, &global) ||
++        !read64(global + 0x10, &world) || !read64(world + 0xB80, &manager) ||
++        !read64(manager, &p.map) || !ui_hover_allowed(&p, manager)) return;
++    memcpy(GP(scratch), pixel, sizeof pixel);
++    u64 args[3] = {scratch, scratch + 0x20};
++    if (!guest_call(cpu, 0x8350BF0, args, 2, NULL, 0, NULL)) return;
++    memcpy(p.point, GP(scratch + 0x20), sizeof p.point);
++    if (!isfinite(p.point[0]) || !isfinite(p.point[1])) return;
++    if (ui_equipment_icon(&p, 0)) return;
++    ui_skill_icon(&p, 0);
++}
++
+ /* The console prompt's two buttons are text widgets without a +0x118
+-   callback; the game handles the prompt through A/B.  A pointer click on the
+-   button bar therefore had no callback owner and was logged as missed.  Map a
+-   real click on the left/right button to the game's own B/A action.  Only the
+-   observed prompt shape is accepted: a 0x90AE3D8 bar (about 132x66) with two
+-   visible 0x90ABB48 children, under a 0x90AF208 dialog root (about 558x127). */
++   callback; the game handles the prompt through A/B. A pointer click on the
++   observed fixed-shape button bar forwards to the game's own B/A action. */
+ static int ui_dialog_buttons(UiPick* p, u32 serial) {
+     for (size_t i = 0; i < g_ui_child_count; i++) {
+         u64 bar = g_ui_children[i].obj, vt, data, parent_key, root, rvt;
+@@ -1700,10 +1784,21 @@ static void world_ui(CPU* cpu, u64 entry) {
+         PointerPress p;
+         g_goal.active = 0;
+         __atomic_store_n(&g_cancel, 1, __ATOMIC_RELEASE);
+-        if (take_pointer(&p) && !__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) {
+-            ui_click(cpu, &p);
++        HoverPoint h;
++        if (take_pointer(&p)) {
++            if (!__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) {
++                ui_click(cpu, &p);
++                __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
++            }
++            /* A click may change pages. Never apply old motion to the new page. */
++            take_hover(&h);
++        } else if (take_hover(&h) && !__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) {
++            ui_hover(cpu, &h);
+             __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
+         }
++    } else {
++        HoverPoint h;
++        take_hover(&h);
+     }
+ }
+ static void world_game(CPU* cpu, u64 entry) {
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+index a1523ff..ddcd415 100644
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -8,5 +8,7 @@ void native_world_install(void);
+ /* Safe-area coordinates and pixel dimensions, before removing presentation bars. */
+ int native_world_click(float x, float y, u32 width, u32 height, u64 fallback_pad);
+ void native_world_cancel(void);
++/* Latest pointer position, same normalised coordinates as native_world_click. */
++void native_world_hover(float x, float y, u32 width, u32 height);
+ int native_world_ui_blocked(void);
+ #endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 2ead17c..4dc5b36 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1177,6 +1177,16 @@ void video_poll(void) {
+                 break;
+             case SDL_EVENT_MOUSE_MOTION:
+                 if (e.motion.which != SDL_TOUCH_MOUSEID) {
++                    /* Hover-selected UI (the stick-driven wheel pages): only while
++                       a game UI owns the screen, never in the world. */
++                    if (!mouse_steer_on() && native_world_ui_blocked()) {
++                        int hx, hy, hw, hh;
++                        float hd = SDL_GetWindowPixelDensity(g_win);
++                        backend_window_safe(&hx, &hy, &hw, &hh);
++                        if (hd > 0 && hw > 0 && hh > 0) native_world_hover(
++                            (e.motion.x * hd - hx) / hw, (e.motion.y * hd - hy) / hh,
++                            (u32)hw, (u32)hh);
++                    }
+                     int ww, wh;
+                     if (g_win && SDL_GetWindowSize(g_win, &ww, &wh) && ww > 0 && wh > 0) {
+                         float density = SDL_GetWindowPixelDensity(g_win);

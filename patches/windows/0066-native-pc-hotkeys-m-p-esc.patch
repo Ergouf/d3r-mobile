@@ -1,0 +1,46 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -406,8 +406,9 @@
+                           "In the world the left button walks, attacks or operates; holding it keeps walking towards the\n"
+                           "pointer and keeps attacking a held monster, and Shift makes a click an attack in place. The\n"
+                           "right button casts the hero's secondary skill (loadout slot 1). Q uses the equipped potion;\n"
+-                          "T channels town recall. C = inventory, S = skills, J = journal from the world or character\n"
+-                          "page (Ctrl aliases also work). Other dialogs keep their own action keys.\n\n"
++                          "T channels town recall. C = inventory, S = skills, J = journal, P = paragon, M = map;\n"
++                          "these panel keys work from the world or character page (Ctrl aliases also work).\n"
++                          "Esc opens pause in the world and closes dialogs when a game UI is open.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+ 
+@@ -497,7 +498,8 @@
+         case SDL_SCANCODE_3: return 1ull << 9;     /* ZR */
+         case SDL_SCANCODE_RETURN: return 1ull << 10;
+         case SDL_SCANCODE_BACKSPACE: return 1ull << 11;
+-        case SDL_SCANCODE_TAB: return native_world_ui_blocked() ? 0 : 1ull << 15; /* map-only D-pad Down; not a menu move */
++        case SDL_SCANCODE_TAB:
++        case SDL_SCANCODE_M: return native_world_ui_blocked() ? 0 : 1ull << 15; /* map-only D-pad Down; not a menu move */
+         case SDL_SCANCODE_LEFT: return 1ull << 12;
+         case SDL_SCANCODE_UP: return 1ull << 13;
+         case SDL_SCANCODE_RIGHT: return 1ull << 14;
+@@ -1296,6 +1298,7 @@
+                         case SDL_SCANCODE_C: tab = 0; break;
+                         case SDL_SCANCODE_S: tab = 1; break;
+                         case SDL_SCANCODE_J: tab = 4; break;
++                        case SDL_SCANCODE_P: tab = 2; break;
+                         default: break;
+                     }
+                     if (tab >= 0) {
+@@ -1325,9 +1328,9 @@
+                     break;
+                 }
+                 if (e.key.key == SDLK_ESCAPE) {
+-                    /* Esc is the game's own back button: it closes dialogs, the inventory and the pause
+-                       screen. Quitting the program stays on the runtime menu (F2 -> Exit). */
+-                    if (!e.key.repeat) native_action_press(1ull << 1);
++                    /* PC habit: Esc opens the pause menu in the world; with a game UI open it
++                       remains the native back button that closes dialogs and pages. */
++                    if (!e.key.repeat) native_action_press(native_world_ui_blocked() ? (1ull << 1) : (1ull << 11));
+                     break;
+                 }
+                 if (e.key.key == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT)) {

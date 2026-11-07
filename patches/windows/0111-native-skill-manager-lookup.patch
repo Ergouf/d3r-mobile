@@ -1,0 +1,20 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1237,8 +1237,16 @@
+     {
+         const u64 ring_key_want = ui_path_key(
+             "root.normallayer.consoleskillselection_main.layoutroot.skillloadout");
++        u64 global, world, manager = 0;
+         ring = ui_object(p->map, ring_key_want);
+         if (!ring) ring = ui_find_key(p->map, ring_key_want);
++        /* p.map is *manager, while the registry that probe_ui_tree walks is
++           the manager pointer itself; try both before giving up. */
++        if (!ring && kbm_read64(0x914F840, &global) && kbm_read64(global + 0x10, &world) &&
++            kbm_read64(world + 0xB80, &manager) && manager) {
++            ring = ui_object(manager, ring_key_want);
++            if (!ring) ring = ui_find_key(manager, ring_key_want);
++        }
+     }
+     if (!ring || !ui_visible(p->map, ring) ||
+         !kbm_read64(ring, &vt) || vt != 0x90AF208 ||

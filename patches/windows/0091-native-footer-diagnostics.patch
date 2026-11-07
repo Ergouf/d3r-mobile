@@ -1,0 +1,47 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1384,7 +1384,11 @@
+     if (!footer || !ui_visible(p->map, footer) || !ui_inside(p, footer) ||
+         !kbm_readable(footer + 0x88, sizeof rect) ||
+         !kbm_read64(footer + 0x398, &pointer) || !kbm_read32(footer + 0x3A0, &capacity) ||
+-        !pointer || !capacity || capacity > 1024 || !kbm_readable(pointer, capacity)) return 0;
++        !pointer || !capacity || capacity > 1024 || !kbm_readable(pointer, capacity)) {
++        LOG("native: UI footer %u miss (obj %llx vis %d)\n", serial,
++            (unsigned long long)footer, footer ? ui_visible(p->map, footer) : 0);
++        return 0;
++    }
+     memcpy(rect, GP(footer + 0x88), sizeof rect);
+     unsigned length = capacity < sizeof text - 1 ? capacity : sizeof text - 1;
+     memcpy(text, GP(pointer), length);
+@@ -1401,9 +1405,16 @@
+         if (!n || strstr(names[hints], "_label")) continue;
+         hints++;
+     }
+-    if (!hints) return 0;
++    if (!hints) {
++        LOG("native: UI footer %u no icon hints (%.24s)\n", serial, text);
++        return 0;
++    }
+     int cell = (int)((p->point[0] - rect[0]) / 240.0f);
+-    if (cell < 0) return 0;
++    if (cell < 0) {
++        LOG("native: UI footer %u cell %d rect %.1f..%.1f point %.1f\n",
++            serial, cell, rect[0], rect[2], p->point[0]);
++        return 0;
++    }
+     if ((float)hints * 240.0f > (rect[2] - rect[0]) + 8.0f) {
+         /* Geometry not understood: keep the original leftmost-hint behaviour. */
+         if (cell) return 0;
+@@ -1420,7 +1431,10 @@
+     else if (!strcmp(name, "l3")) pad = 1ull << 4;
+     else if (!strcmp(name, "l2")) pad = 1ull << 8;
+     else if (!strcmp(name, "r2")) pad = 1ull << 9;
+-    if (!pad) return 0;
++    if (!pad) {
++        LOG("native: UI footer %u cell %d name %s has no pad\n", serial, cell, name);
++        return 0;
++    }
+     int queued = native_action_press(pad);
+     LOG("native: UI footer legend %u %s -> %s\n", serial, name,
+         queued ? "queued" : "rejected");

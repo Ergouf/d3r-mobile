@@ -1,0 +1,52 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index fe347db..4095131 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -41,7 +41,7 @@
+    walked up to first, then submitted once. */
+ #define INTERACT_RANGE 2.8f
+ /* Farthest distance a natural operate was observed to be accepted from. */
+-#define OPERATE_RANGE 6.2f
++#define OPERATE_RANGE 4.8f
+ #define INTERACT_APPROACH 1.6f
+ #define ENTITY_STRIDE 0x360u
+ #define CONTROLLER_STRIDE 0x410u
+@@ -328,6 +328,28 @@ static int ground_target(const CPU* cpu, const int pixel[2], const WorldPos* pos
+    collision cylinder wins every ray and the portal can never be clicked. */
+ #define RIFT_PORTAL_SNO 345935u
+ 
++/* Standard treasure chests have a collision radius near five, so the closest
++   reachable point is outside the normal natural-operate range.  Only these
++   verified chest SNOs get the wider submission gate; portals retain the strict
++   range so the game performs their walk-in transition. */
++static int long_interact_sno(u32 sno) {
++    switch (sno) {
++        case 3142u: case 3143u:       /* adventure treasure chests */
++        case 62859u: case 62860u:     /* Act 1 Fields */
++        case 62865u: case 62866u:     /* Act 1 Highlands */
++        case 64271u:                  /* Act 1 stump chest */
++        case 78790u: case 78957u:     /* Act 1 wilderness */
++        case 94708u: case 95011u:     /* Leoric manor */
++        case 96522u: case 96993u:     /* Cathedral */
++        case 289247u: case 289248u:   /* Act 5 Westmarch */
++        case 289757u: case 289758u:   /* Act 5 Abattoir */
++        case 289786u: case 289787u:   /* Act 5 graveyard */
++            return 1;
++        default:
++            return 0;
++    }
++}
++
+ static int walk_into_sno(u32 sno) {
+     /* Only the town waypoint is verified with a real mouse click.  Do not add
+        generic portals/doors here until each one is tested: 175467 is shared by
+@@ -2265,7 +2287,8 @@ static void world_tick(CPU* cpu) {
+         float reach = g_goal.attack ? g_goal.approach + 0.5f
+                                     : (walk_into_sno(g_goal.sno)
+                                            ? g_goal.approach + 0.2f
+-                                           : fmaxf(OPERATE_RANGE, g_goal.approach + 0.8f));
++                                           : fmaxf(long_interact_sno(g_goal.sno) ? 6.2f : OPERATE_RANGE,
++                                                    g_goal.approach + 0.8f));
+         if (reached <= reach) {
+             int ok = g_goal.attack ? submit_attack(cpu, player_object, &g_goal, current)
+                                    : submit_interact(cpu, player_object, &g_goal);

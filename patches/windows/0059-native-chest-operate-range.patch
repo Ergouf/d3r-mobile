@@ -1,0 +1,13 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 29d17f1..fe347db 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -41,7 +41,7 @@
+    walked up to first, then submitted once. */
+ #define INTERACT_RANGE 2.8f
+ /* Farthest distance a natural operate was observed to be accepted from. */
+-#define OPERATE_RANGE 4.8f
++#define OPERATE_RANGE 6.2f
+ #define INTERACT_APPROACH 1.6f
+ #define ENTITY_STRIDE 0x360u
+ #define CONTROLLER_STRIDE 0x410u

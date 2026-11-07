@@ -1,0 +1,192 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index dcee93b..a88dbf0 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -89,6 +89,11 @@ static u32 g_serial;
+ static u64 g_stack_top;
+ static GuestFn g_ui_original, g_game_original;
+ static WalkGoal g_goal;
++/* Pending character-page tab request from a panel hotkey.  Runs on the game
++   thread from world_ui once the page owns the input. */
++static int g_hotkey_tab = -1, g_hotkey_frames;
++/* 1 while a character page owns the input, for the frontend's hotkey gate. */
++static int g_char_page;
+ /* Last click's goal kind, read by the frontend for click-and-hold repeats. */
+ static int g_hold_kind;
+ 
+@@ -169,6 +174,17 @@ int native_world_ui_blocked(void) {
+     return __atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) != 0;
+ }
+ 
++int native_ui_char_page(void) {
++    return __atomic_load_n(&g_char_page, __ATOMIC_ACQUIRE);
++}
++
++void native_ui_hotkey(int tab) {
++    if (tab < 0 || tab > 4) return;
++    __atomic_store_n(&g_hotkey_frames, 0, __ATOMIC_RELEASE);
++    __atomic_store_n(&g_hotkey_tab, tab, __ATOMIC_RELEASE);
++    LOG("native: UI hotkey tab %d queued\n", tab);
++}
++
+ int native_world_hold_kind(void) {
+     return __atomic_load_n(&g_hold_kind, __ATOMIC_ACQUIRE);
+ }
+@@ -715,6 +731,36 @@ static int ui_tab_state(u64 map, UiTabState* state) {
+     return visible == 1 && state->current >= 0;
+ }
+ 
++/* Select one verified character-page tab through the game's own page selector.
++   The caller already proved the page state with ui_tab_state. */
++static int ui_tab_select_slot(const CPU* cpu, u64 map, const UiTabState* state, int target) {
++    GuestResult result;
++    u64 focus_key, focus;
++    if (target < 0 || target > 4) return 0;
++    /* A modal with its own focus owns the input even if the page behind it
++       remains visible. Never redirect a hotkey into the character group. */
++    if (!guest_call(cpu, 0x832D180, NULL, 0, NULL, 0, &result) ||
++        !read64(result.x0, &focus_key)) return 0;
++    if (focus_key != UINT64_MAX && (!(focus = ui_object(map, focus_key)) ||
++        !ui_visible(map, focus) || !ui_within(map, focus, state->page))) return 0;
++    u32 slot = g_ui_tabs[target].slot;
++    if (!state->enabled[slot]) {
++        LOG("native: UI tab disabled current=%d target=%d slot=%u\n", state->current, target, slot);
++        return 1;
++    }
++    if (state->current == target) {
++        LOG("native: UI tab unchanged current=%d target=%d\n", state->current, target);
++        return 1;
++    }
++    /* Native page selector: group 0, the native slot, player 0, ordinary
++       transition. No pending shoulder/confirm input is created. */
++    u64 args[4] = {0, slot, 0, 0};
++    int complete = guest_call(cpu, 0x816F550, args, 4, NULL, 0, NULL);
++    LOG("native: UI tab select current=%d target=%d slot=%u -> %s\n",
++        state->current, target, slot, complete ? "returned" : "incomplete");
++    return 1;
++}
++
+ static int ui_tab_click(UiPick* p) {
+     UiTabState state = {0};
+     GuestResult result;
+@@ -748,22 +794,7 @@ static int ui_tab_click(UiPick* p) {
+         !read64(result.x0, &focus_key)) return 0;
+     if (focus_key != UINT64_MAX && (!(focus = ui_object(p->map, focus_key)) ||
+         !ui_visible(p->map, focus) || !ui_within(p->map, focus, state.page))) return 0;
+-    u32 slot = g_ui_tabs[target].slot;
+-    if (!state.enabled[slot]) {
+-        LOG("native: UI tab disabled current=%d target=%d slot=%u\n", state.current, target, slot);
+-        return 1;
+-    }
+-    if (state.current == target) {
+-        LOG("native: UI tab unchanged current=%d target=%d\n", state.current, target);
+-        return 1;
+-    }
+-    /* Native page selector: group 0, the clicked native slot, player 0,
+-       ordinary transition. No pending shoulder/confirm input is created. */
+-    u64 args[4] = {0, slot, 0, 0};
+-    int complete = guest_call(p->cpu, 0x816F550, args, 4, NULL, 0, NULL);
+-    LOG("native: UI tab select current=%d target=%d slot=%u -> %s\n",
+-        state.current, target, slot, complete ? "returned" : "incomplete");
+-    return 1;
++    return ui_tab_select_slot(p->cpu, p->map, &state, target);
+ }
+ 
+ /* The main-menu game settings page shows a four-entry tab strip with the
+@@ -2433,6 +2464,35 @@ static void world_ui(CPU* cpu, u64 entry) {
+     if (!primary || cpu->pc != lr) return;
+     int blocked = cpu->x[0] != 0;
+     __atomic_store_n(&g_ui_blocked, blocked, __ATOMIC_RELEASE);
++    if (blocked) {
++        UiTabState state = {0};
++        u64 global, world, manager, map;
++        int page = read64(0x914F840, &global) && read64(global + 0x10, &world) &&
++                   read64(world + 0xB80, &manager) && read64(manager, &map) &&
++                   ui_tab_state(map, &state);
++        __atomic_store_n(&g_char_page, page, __ATOMIC_RELEASE);
++        if (page && __atomic_load_n(&g_hotkey_tab, __ATOMIC_ACQUIRE) < 0) {
++            /* the page changed: a pending request for another page is stale */
++        }
++    } else {
++        __atomic_store_n(&g_char_page, 0, __ATOMIC_RELEASE);
++    }
++    if (blocked && __atomic_load_n(&g_hotkey_tab, __ATOMIC_ACQUIRE) >= 0) {
++        int tab = __atomic_load_n(&g_hotkey_tab, __ATOMIC_ACQUIRE);
++        int frames = __atomic_add_fetch(&g_hotkey_frames, 1, __ATOMIC_ACQ_REL);
++        UiTabState state = {0};
++        u64 global, world, manager, map;
++        int done = 0;
++        if (frames > 240) {
++            LOG("native: UI hotkey tab %d gave up (no character page)\n", tab);
++            done = 1;
++        } else if (read64(0x914F840, &global) && read64(global + 0x10, &world) &&
++                   read64(world + 0xB80, &manager) && read64(manager, &map) &&
++                   ui_tab_state(map, &state)) {
++            done = ui_tab_select_slot(cpu, map, &state, tab);
++        }
++        if (done) __atomic_store_n(&g_hotkey_tab, -1, __ATOMIC_RELEASE);
++    }
+     if (blocked) {
+         PointerPress p;
+         g_goal.active = 0;
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+index 8d7b1eb..ac36038 100644
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -15,4 +15,10 @@ int native_world_ui_blocked(void);
+    3 = operating/approaching an interactable.  The frontend repeats a held
+    click for 1 and 2 only. */
+ int native_world_hold_kind(void);
++/* PC panel hotkey: switch the character page to tab 0..4 (inventory, skills,
++   paragon, party, journal) as soon as that page owns the input. */
++void native_ui_hotkey(int tab);
++/* 1 while one of the character pages owns the input: the frontend only turns
++   C/S/J into panel keys then, so a skill key on the death screen still works. */
++int native_ui_char_page(void);
+ #endif
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index c6f5c20..d13dad2 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -404,7 +404,9 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
+                           "into touches. Alt opens the skill wheel at the pointer and casts the highlighted slot on release.\n\n"
+                           "In the world the left button walks, attacks or operates; holding it keeps walking towards the\n"
+                           "pointer and keeps attacking a held monster, and Shift makes a click an attack in place. The\n"
+-                          "right button casts the secondary skill (slot r) instead of B; menus keep B on the right button.\n\n"
++                          "right button casts the secondary skill (slot r) instead of B; menus keep B on the right button.\n"
++                          "Panel tabs: C = inventory, S = skills, J = journal. Plain letters work while a game UI is open;\n"
++                          "Ctrl+C/S/J opens the page from the world, where C/S/J stay skill and stick keys.\n\n"
+                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
+                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = back / close menus";
+ 
+@@ -1253,6 +1255,30 @@ void video_poll(void) {
+                 wsafe_set();
+                 break;
+             case SDL_EVENT_KEY_DOWN:
++                if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI))) {
++                    /* PC panel keys.  Plain C/S/J switch the character page tabs
++                       while that page owns the input; Ctrl+C/S/J does it from the
++                       world, where the plain letters stay skill/stick keys. */
++                    int tab = -1;
++                    switch (e.key.scancode) {
++                        case SDL_SCANCODE_C: tab = 0; break;
++                        case SDL_SCANCODE_S: tab = 1; break;
++                        case SDL_SCANCODE_J: tab = 4; break;
++                        default: break;
++                    }
++                    if (tab >= 0) {
++                        int menu = native_world_ui_blocked();
++                        int ctrl = (e.key.mod & SDL_KMOD_CTRL) != 0;
++                        /* Only steal the key while a character page owns the
++                           input (or with Ctrl from the world).  Elsewhere the
++                           key keeps its skill/revive meaning. */
++                        if (ctrl || (menu && native_ui_char_page())) {
++                            if (!menu) native_action_press(1ull << 10); /* open the page */
++                            native_ui_hotkey(tab);
++                            break;
++                        }
++                    }
++                }
+                 if (e.key.scancode == SDL_SCANCODE_LSHIFT || e.key.scancode == SDL_SCANCODE_RSHIFT) {
+                     g_shift_down = 1;
+                     break;

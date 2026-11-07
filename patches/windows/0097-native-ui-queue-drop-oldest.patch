@@ -1,0 +1,18 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1984,10 +1984,11 @@
+ /* The pointer queue is shared by the world and UI frames; the lock stays in the
+    world module so click routing and cancellation are one critical section. */
+ int native_ui_queue_locked(const PointerPress* p) {
++    /* Keep the newest press when the ring is full: dropping the whole queue
++       loses the click the player just made (the old code did that). */
+     if (g_ui_count == 16) {
+-        g_ui_read = g_ui_count = 0;
+-        __atomic_store_n(&g_item_drag_active, 0, __ATOMIC_RELEASE);
+-        return 0;
++        g_ui_read = (g_ui_read + 1) % 16;
++        g_ui_count--;
+     }
+     g_ui_pointers[(g_ui_read + g_ui_count++) % 16] = *p;
+     return 1;

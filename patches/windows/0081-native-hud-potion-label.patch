@@ -1,0 +1,84 @@
+diff --git a/src/nx/runtime/native_kbm.h b/src/nx/runtime/native_kbm.h
+--- a/src/nx/runtime/native_kbm.h
++++ b/src/nx/runtime/native_kbm.h
+@@ -25,6 +25,7 @@
+ #define GAME_PC 0x804F9C0ull
+ #define LABEL_PC 0x83AD9D0ull
+ #define HUD_LABEL_RETURN 0x841D050ull
++#define HUD_POTION_LABEL_RETURN 0x841D4C4ull
+ #define PLAYER_PC 0x8525360ull
+ #define RAY_PC 0x826C7B0ull
+ #define GROUND_PC 0x813E6A0ull
+diff --git a/src/nx/runtime/native_labels.c b/src/nx/runtime/native_labels.c
+--- a/src/nx/runtime/native_labels.c
++++ b/src/nx/runtime/native_labels.c
+@@ -9,32 +9,39 @@
+ static void world_label(CPU* cpu, u64 entry) {
+     u64 vt, setter;
+     u32 player, label_player, input_player, binding;
+-    if (entry == LABEL_PC && cpu->x[30] == HUD_LABEL_RETURN && cpu->x[2] == 0 &&
++    const int skill = cpu->x[30] == HUD_LABEL_RETURN;
++    const int potion = cpu->x[30] == HUD_POTION_LABEL_RETURN;
++    /* The two HUD callers keep their player in different callee-saved
++       registers. Potion labels have no skill-binding cell at x22-0x28. */
++    const u64 hud_player = potion ? cpu->x[20] : cpu->x[19];
++    if (entry == LABEL_PC && (skill || potion) && cpu->x[2] == 0 &&
+         __atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) &&
+         !__atomic_load_n(&g_guest_call_depth, __ATOMIC_ACQUIRE) &&
+-        cpu->x[22] >= 0x28 && g_stack_top >= 0x17000 &&
+-        kbm_read32(cpu->x[19], &player) && player == 0 &&
+-        kbm_read32(cpu->x[19] + 0xDB74, &input_player) &&
++        g_stack_top >= 0x17000 &&
++        kbm_read32(hud_player, &player) && player == 0 &&
++        kbm_read32(hud_player + 0xDB74, &input_player) &&
+         kbm_read32(cpu->x[0] + 0x3E0, &label_player) && label_player == input_player &&
+-        kbm_read64(cpu->x[0], &vt) && kbm_read64(vt + 0x110, &setter) && setter == LABEL_PC &&
+-        kbm_read32(cpu->x[22] - 0x28, &binding) && binding < 8) {
++        kbm_read64(cpu->x[0], &vt) && kbm_read64(vt + 0x110, &setter) && setter == LABEL_PC) {
++        const char* text = potion ? "Q" : NULL;
+         GuestResult r;
+-        const u64 args[] = {binding, cpu->x[19]};
+-        /* Use the game's inverse binding kbm_lookup, including a loaded control
+-           profile; the six visual HUD positions are not loadout order. */
+-        if (guest_call(cpu, 0x840C650, args, 2, NULL, 0, &r) && r.x0 < 6) {
+-            /* Icon slots use a 50-point body font. Plain keyboard text must
+-               set both the base and active point size before the real setter
+-               builds its layout (83AC450/83AC870/83AC9C0). These are integer
+-               font sizes, not the widget's floating-point rectangle/scale. */
++        if (skill && cpu->x[22] >= 0x28 &&
++            kbm_read32(cpu->x[22] - 0x28, &binding) && binding < 8) {
++            const u64 args[] = {binding, hud_player};
++            /* The game's inverse lookup honors the loaded control profile;
++               the six visual HUD positions are not loadout order. */
+             static const char* labels[] = {
+                 "\xE5\xB7\xA6\xE9\x94\xAE", "\xE5\x8F\xB3\xE9\x94\xAE", "1", "2", "3", "4"
+             };
+-            const char* text = labels[r.x0];
++            if (guest_call(cpu, 0x840C650, args, 2, NULL, 0, &r) && r.x0 < 6)
++                text = labels[r.x0];
++        }
++        if (text) {
+             u64 replacement = g_stack_top - 0x17000;
+             size_t length = strlen(text) + 1;
+             if (kbm_readable(replacement, length)) {
+                 memcpy(GP(replacement), text, length);
++                /* Plain text replaces a 50-point icon slot. These fields are
++                   integer point sizes used by the native layout builder. */
+                 *(u32*)GP(cpu->x[0] + 0x3AC) = 18;
+                 *(u32*)GP(cpu->x[0] + 0x3B0) = 18;
+                 cpu->x[1] = replacement;
+@@ -119,10 +126,12 @@
+    so a different game build leaves the original label path untouched. */
+ void native_labels_install(void) {
+     if (g_label_original || LABEL_PC < g_code_lo || LABEL_PC >= g_code_hi ||
+-        HUD_LABEL_RETURN >= g_code_hi || gr32(LABEL_PC) != 0xD10303FFu ||
++        HUD_POTION_LABEL_RETURN >= g_code_hi || gr32(LABEL_PC) != 0xD10303FFu ||
+         gr32(LABEL_PC + 4) != 0xA9066FFCu ||
+         gr32(HUD_LABEL_RETURN - 4) != 0xD63F0100u ||
+-        gr32(HUD_LABEL_RETURN - 8) != 0x2A1F03E2u) return;
++        gr32(HUD_LABEL_RETURN - 8) != 0x2A1F03E2u ||
++        gr32(HUD_POTION_LABEL_RETURN - 4) != 0xD63F0100u ||
++        gr32(HUD_POTION_LABEL_RETURN - 8) != 0x2A1F03E2u) return;
+     GuestFn* slot = &g_disp[(LABEL_PC - g_code_lo) / 4];
+     GuestFn f = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+     if (f && f != world_label) {

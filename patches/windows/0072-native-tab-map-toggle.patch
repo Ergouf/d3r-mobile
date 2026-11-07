@@ -1,0 +1,14 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -499,7 +499,9 @@
+         case SDL_SCANCODE_3: return 1ull << 9;     /* ZR */
+         case SDL_SCANCODE_RETURN: return 1ull << 10;
+         case SDL_SCANCODE_BACKSPACE: return 1ull << 11;
+-        case SDL_SCANCODE_TAB: return native_world_ui_blocked() ? 0 : 1ull << 15; /* map-only D-pad Down; not a menu move */
++        case SDL_SCANCODE_TAB:
++            if (!native_world_ui_blocked()) return 1ull << 15; /* map-only D-pad Down; not a menu move */
++            return native_world_map_open() ? (1ull << 1) : 0;
+         case SDL_SCANCODE_M:
+             if (!native_world_ui_blocked()) return 1ull << 15;
+             return native_world_map_open() ? (1ull << 1) : 0;

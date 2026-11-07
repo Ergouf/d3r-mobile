@@ -1,0 +1,21 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1855,6 +1855,9 @@
+     /* The legend bar spans the bottom of every console page. Claim its cells
+        before map/tab/service handlers can mistake the bar for a page control. */
+     if (ui_footer_legend_click(&p, press->serial)) return;
++    /* The skill loadout ring must claim its six icons before map/tab/service
++       handlers can mistake the skill page for their own page. */
++    if (ui_skill_icon(&p, press->serial)) return;
+     if (ui_map_click(&p, press->serial)) return;
+     if (ui_tab_click(&p)) return;
+     if (ui_settings_tab_click(&p, press->serial)) return;
+@@ -1863,7 +1866,6 @@
+     if (ui_stash_action_click(&p, press->serial)) return;
+     if (ui_options_toggle_click(&p, press->serial)) return;
+     if (ui_kadala_action_click(&p, press->serial)) return;
+-    if (ui_skill_icon(&p, press->serial)) return;
+     if (ui_dialog_buttons(&p, press->serial)) return;
+     if (!kbm_read64(manager + 0x10, &subs) || !kbm_read64(subs, &entries) ||
+         !kbm_read32(subs + 8, &sub_count) || sub_count > 1024) sub_count = 0;

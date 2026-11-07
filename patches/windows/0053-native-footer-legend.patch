@@ -1,0 +1,49 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index cbc9bcc..29fc797 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1542,6 +1542,36 @@ static int ui_dialog_buttons(UiPick* p, u32 serial) {
+     return 0;
+ }
+ 
++/* The footer legend names the pad button behind each hint.  A click on the
++   leftmost hint forwards that button, which is the console UI's stand-in for
++   the PC action the hint describes (close a dialogue, accept a prompt). */
++static int ui_footer_legend_click(UiPick* p, u32 serial) {
++    static const char tag[] = "{icon:button";
++    u64 footer, pointer;
++    u32 capacity;
++    char text[512];
++    float rect[4];
++    footer = ui_object(p->map, ui_path_key(
++        "root.normallayer.consolebuttonlegend_main.layoutroot.buttonlegend"));
++    if (!footer || !ui_visible(p->map, footer) || !ui_inside(p, footer) ||
++        !readable(footer + 0x88, sizeof rect) ||
++        !read64(footer + 0x398, &pointer) || !read32(footer + 0x3A0, &capacity) ||
++        !pointer || !capacity || capacity > 1024 || !readable(pointer, capacity)) return 0;
++    memcpy(rect, GP(footer + 0x88), sizeof rect);
++    if (p->point[0] > rect[0] + 240.0f) return 0;
++    unsigned length = capacity < sizeof text - 1 ? capacity : sizeof text - 1;
++    memcpy(text, GP(pointer), length);
++    text[length] = 0;
++    const char* at = strstr(text, tag);
++    if (!at) return 0;
++    char digit = at[sizeof tag - 1];
++    if (digit < '1' || digit > '4') return 0;
++    int queued = native_action_press(1ull << (digit - '1'));
++    LOG("native: UI footer legend %u button%c -> %s\n", serial, digit,
++        queued ? "queued" : "rejected");
++    return queued ? 1 : 0;
++}
++
+ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     UiPick p = {.cpu = cpu};
+     GuestResult r;
+@@ -1568,6 +1598,7 @@ static void ui_click(const CPU* cpu, const PointerPress* press) {
+     if (ui_kadala_action_click(&p, press->serial)) return;
+     if (ui_skill_icon(&p, press->serial)) return;
+     if (ui_dialog_buttons(&p, press->serial)) return;
++    if (ui_footer_legend_click(&p, press->serial)) return;
+     if (!read64(manager + 0x10, &subs) || !read64(subs, &entries) ||
+         !read32(subs + 8, &sub_count) || sub_count > 1024) sub_count = 0;
+     if (ui_service_tab_click(&p, press->serial, entries, sub_count)) return;

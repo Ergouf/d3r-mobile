@@ -1,0 +1,30 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1244,15 +1244,19 @@
+     float axes[2] = {0, 0};
+     if (primary && kbm_readable(event + 0x30, sizeof axes)) memcpy(axes, GP(event + 0x30), sizeof axes);
+     g_game_original(cpu, entry);
+-    if (!primary || cpu->pc != lr) return;
++    if (cpu->pc != lr) return;
++    /* A click on the legend bar does not always raise the 0x19 UI dispatch
++       event; drain queued UI presses on every game tick while UI is blocked,
++       before the primary-event gate, so footer cells still work. */
++    if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) &&
++        !__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) {
++        PointerPress press;
++        if (native_ui_take_pointer(&press)) ui_click(cpu, &press);
++        __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
++    }
++    if (!primary) return;
+     if (__atomic_exchange_n(&g_busy, 1, __ATOMIC_ACQ_REL)) return;
+     world_command_tick(cpu);
+-    /* A click on the legend bar does not always raise a UI dispatch event;
+-       drain any queued UI press here as well so footer cells still work. */
+-    if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE)) {
+-        PointerPress press;
+-        if (native_ui_take_pointer(&press)) ui_click(cpu, &press);
+-    }
+     if (fabsf(axes[0]) > 0.05f || fabsf(axes[1]) > 0.05f) native_world_cancel();
+     else world_tick(cpu);
+     __atomic_store_n(&g_busy, 0, __ATOMIC_RELEASE);
