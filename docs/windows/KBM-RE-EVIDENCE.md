@@ -428,3 +428,15 @@
 - 回城键在 `0140` 完成：在大教堂/苦难旷野附近有战斗目标时按 `T` 只记录 `recall bit=11 -> returned/1` 而不生成门户；清掉附近怪物并等待脱战后，在苦难旷野按 `T`，`place 1999634434→1999503360`，出生点为 `(410.90,520.34)`，半径 30 扫描到 SNO `191492` 回城门。证据 `recall-safe2.json`、`recall-safe2-scan.json`。
 - `0140` 回归：顶层 `test_*.py` 20/20、相关 CTest 7/7、补丁链重放 PASS、`git diff --check` PASS；汇总 `out/windows/kbm/session/0140-validation/test-suite-0140.json`、`ctest-final-7-0140.log`、`patch-chain-0140.log`。
 - 当前结论：PC 全键位已在 `0140` 完成。F2 22 行、六个面板、四向移动/菜单、确认取消、药水、回城、重启保留、默认恢复和全部测试均已闭环；技能 1/3/4 的详细方向/冷却矩阵仍按下一阶段单列。
+
+## 0141：可交互目标优先（诅咒宝箱）
+
+- 现场构建 `0140`，PID `74628`，启动 `2026-11-08T17:40:20+08:00`。`probe_click_interact --click 440,252` 在宝箱 SNO `365097` 的精确屏幕点得到候选 `screenDistance=0.70`，但同一射线先命中 Beast_A `3337` 的宽圆柱（depth `78.83`，宝箱 depth `94.38`，terrain `98.88`）。原生点击日志因此是 `attack 7941007c`，不是宝箱 `operate`。
+- `0141` 在 `pick_entity` 返回 actor 攻击后，若精确指针 3 px 内存在带原生 operate power 的候选，则改为该候选；`Shift` 站定攻击跳过此路径。候选仍要求与目标 place 一致、在射线地形深度内，并沿用 `INTERACT_APPROACH`/`walk_into_sno` 的接近逻辑。
+- 安装构建 `0141` SHA-256 `9CCDE3D87A1F93DA8E7C1CCC1A470AA5C4286D0B1486BF3E940EBEDD78E609D1`，上一安装 `0140` 备份在 `out/windows/kbm/candidates/0141/previous-0140.exe`；补丁 `0141-native-interact-priority.patch` 重放 PASS。该存档重开后宝箱实体已不存在，因此“打开诅咒宝箱”的实时正向验收尚未完成，不能把实现本身当作业务完成。
+
+## 0142：F2 自定义菜单
+
+- `0142` 在 `sdl3.c` 的 `menu_event` 中先保留键盘捕获，再调用 `overlay_menu_key`：自定义 Menu/Confirm/Cancel 映射到运行时菜单方向/确认/取消，原始方向键、Enter、Esc、Backspace 仍为 fallback；自定义 Pause/Back 映射为 Esc。
+- 实时进程 PID `182232`，安装构建 SHA-256 `B947D5C9FB4C2FBAD759C19B06E4A69B0146EA7D03CE1A35F5466A3431DD9CC1`：在 F2 中按自定义 `PageDown` 后 `focus 0→1`，按 `-` 后 `page=3`（Pads），按 `=` 后 `page=0` 且 `focus=1`。证据 `out/windows/kbm/session/0142-overlay-custom-menu/`。
+- `0142` 尚未重跑完整 22 行编辑、22 动作矩阵、顶层 20 套和 CTest 7 项；因此不把 `0140` 的 PC 全键位完成状态直接外推到当前安装构建。

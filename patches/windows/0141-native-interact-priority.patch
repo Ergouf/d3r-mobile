@@ -1,0 +1,110 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -608,6 +608,8 @@
+    pick of its own; an empty click still becomes a walk, not a guessed action. */
+ #define ASSIST_RADIUS 14.0f
+ #define ASSIST_GATE_DISTANCE 8.0f
++#define INTERACT_PRIORITY_SCREEN 3.0f
++#define INTERACT_PRIORITY_DISTANCE 40.0f
+ /* A click on a thin object farther than the gate still names that object: walk
+    to it and ask the game once more when close.  The cap only limits how far a
+    click may name an object; whether a click names one at all is decided by the
+@@ -623,10 +625,10 @@
+    `found`. */
+ static int assist_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+                                  const int pixel[2], float distance_limit, WorldPos* found,
+-                                 u32* found_id, u32 player_actor) {
++                                 u32* found_id, u32 player_actor, float screen_limit) {
+     u32 limit, shift;
+     u64 buckets;
+-    float best = ASSIST_RADIUS;
++    float best = screen_limit;
+     int hit = 0;
+     if (!kbm_read32(table + 0x100, &limit) || !kbm_read32(table + 0x168, &shift) || shift > 16 ||
+         limit > 65536 || !kbm_read64(table + 0x120, &buckets)) return 0;
+@@ -669,6 +671,52 @@
+         hit = 1;
+     }
+     return hit;
++}
++
++/* A distant chest or NPC can be exactly under the pointer while a nearer
++   monster's wide collision cylinder wins the ray and turns the click into an
++   attack.  If the pointer names an operate target within a few screen pixels,
++   prefer that target over the actor.  The strict screen radius keeps ordinary
++   monster clicks unchanged; Shift-click deliberately skips this path. */
++static int interact_priority(const CPU* cpu, u64 table, const WorldPos* pos, const WorldRay* ray,
++                             float occlusion, const int pixel[2], u32 player_actor,
++                             WalkGoal* goal) {
++    WorldPos candidate;
++    u32 id = 0;
++    if (!assist_candidate_near(cpu, table, pos, pixel, INTERACT_PRIORITY_DISTANCE, &candidate, &id,
++                               player_actor, INTERACT_PRIORITY_SCREEN))
++        return 0;
++    u64 entry;
++    u32 cid = 0, sno = 0;
++    if (!kbm_lookup(table, id, ENTITY_STRIDE, &entry) ||
++        !kbm_read32(entry + 0x14, &cid) || cid == 0xFFFFFFFFu ||
++        !kbm_read32(entry + 0x18, &sno)) return 0;
++    GuestResult cap;
++    const u64 cap_args[1] = {entry};
++    if (!guest_call(cpu, CAP_POWER_PC, cap_args, 1, NULL, 0, &cap) || (i32)cap.x0 <= 0 ||
++        (u32)cap.x0 == ASSIST_ACTION) return 0;
++    float t = (candidate.x - ray->origin[0]) * ray->direction[0] +
++              (candidate.y - ray->origin[1]) * ray->direction[1] +
++              (candidate.z - ray->origin[2]) * ray->direction[2];
++    if (!isfinite(t) || t > occlusion + 2.0f) return 0;
++    float radius = 0;
++    if (kbm_readable(entry + 0x80, 20)) {
++        float cylinder[5];
++        memcpy(cylinder, GP(entry + 0x80), sizeof cylinder);
++        if (isfinite(cylinder[4]) && cylinder[4] > 0 && cylinder[4] < 64) radius = cylinder[4];
++    }
++    memset(goal, 0, sizeof *goal);
++    goal->handle = id;
++    goal->controller = cid;
++    goal->entity = candidate;
++    goal->power = (u32)cap.x0;
++    goal->sno = sno;
++    goal->attack = 0;
++    goal->approach = walk_into_sno(sno) ? 0.9f
++                                       : fmaxf(INTERACT_APPROACH, fminf(radius + 0.8f, 4.0f));
++    LOG("native: interact priority handle %08x sno %u power %u (%.2f,%.2f,%.2f)\n",
++        id, sno, goal->power, candidate.x, candidate.y, candidate.z);
++    return 1;
+ }
+ 
+ static int assist_target(const CPU* cpu, u64 table, u64 player_object, const WorldRay* ray,
+@@ -954,6 +1002,13 @@
+             LOG("native: New Tristram gate priority %u handle %08x\n", p.serial, door_handle);
+         } else {
+             picked = pick_entity(cpu, table, &ray, occlusion, &pos, actor, &g_goal);
++            if (picked > 0 && g_goal.attack && !stand_still) {
++                WalkGoal priority;
++                if (interact_priority(cpu, table, &pos, &ray, occlusion, pixel, actor, &priority)) {
++                    g_goal = priority;
++                    picked = 1;
++                }
++            }
+         }
+         if (p.fallback & NATIVE_POINTER_SKILL) {
+             submit_mouse_skill(cpu, player_object, &pos, &ground, ground_ok,
+@@ -963,7 +1018,7 @@
+         }
+         if (picked == 0 &&
+             assist_candidate_near(cpu, table, &pos, pixel, ASSIST_GATE_DISTANCE, &candidate, NULL,
+-                                  actor))
++                                  actor, ASSIST_RADIUS))
+             picked = assist_target(cpu, table, player_object, &ray, pixel, occlusion, &pos, &g_goal, 0);
+         if (picked < 0) return;
+         if (picked > 0) {
+@@ -1032,7 +1087,7 @@
+                click's pixel/ray/depth so the retry can only accept it. */
+             float candidate_distance = 0;
+             if (assist_candidate_near(cpu, table, &pos, pixel, ASSIST_RETRY_DISTANCE, &candidate,
+-                                      &g_goal.assist_handle, actor) &&
++                                      &g_goal.assist_handle, actor, ASSIST_RADIUS) &&
+                 (candidate_distance = hypotf(candidate.x - pos.x, candidate.y - pos.y)) >
+                     ASSIST_GATE_DISTANCE) {
+                 float dx = pos.x - candidate.x, dy = pos.y - candidate.y;

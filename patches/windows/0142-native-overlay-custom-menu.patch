@@ -1,0 +1,29 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1068,6 +1068,16 @@
+         vpad_edit(1);
+     }
+ }
++/* The runtime menu is itself a menu: after a key-capture page has had first
++   refusal, apply the configured menu/confirm/cancel bindings before the
++   ordinary key switch.  Raw arrows, Enter, Esc and Backspace remain fallbacks. */
++static SDL_Keycode overlay_menu_key(SDL_Scancode scan, SDL_Keycode key) {
++    static const SDL_Keycode mapped[] = {SDLK_UP, SDLK_LEFT, SDLK_DOWN, SDLK_RIGHT, SDLK_RETURN, SDLK_BACKSPACE};
++    for (int i = SNX_KBM_MENU_UP; i <= SNX_KBM_CANCEL; i++)
++        if (scan == g_pc_keys[i]) return mapped[i - SNX_KBM_MENU_UP];
++    if (scan == g_pc_keys[SNX_KBM_PAUSE_BACK]) return SDLK_ESCAPE;
++    return key;
++}
+ static int menu_event(const SDL_Event* e) {
+     int w, h;
+     float d;
+@@ -1087,7 +1097,7 @@
+     }
+     if (!overlay_shown()) return 0;
+     if (e->type == SDL_EVENT_KEY_DOWN) {
+-        switch (e->key.key) {
++        switch (overlay_menu_key(e->key.scancode, e->key.key)) {
+             case SDLK_UP: overlay_move(-1); break;
+             case SDLK_DOWN: overlay_move(1); break;
+             case SDLK_LEFT: overlay_side(-1); break;

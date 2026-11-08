@@ -185,6 +185,81 @@ function skillScene(cpu, req) {
   out.ok=out.slots.every(s=>s.returned && s.ptr && typeof s.power==='number');
   return out;
 }
+function cooldownScene(cpu, req) {
+  const s=frameScene(cpu);
+  const out={ok:true,ctx:hx(s.ctx),player:hx(s.player),actor:hx(s.actor),slots:[]};
+  for(let slot=0;slot<6;slot++){
+    const r=callGuest(cpu,0x8525ED0,[s.player,slot],null,null);
+    let power=null;
+    if(r.returned && r.ret){try{power=gm.add(r.ret).readU32();}catch(e){power=null;}}
+    const row={slot,power,remaining:null,total:null,remaining_ok:false,total_ok:false};
+    if(typeof power==='number' && power && power!==0xffffffff){
+      const total=callGuest(cpu,0x89bceb0,[power],null,null);
+      row.total=total.returned?total.f0:null; row.total_ok=!!(total.returned||total.returned===0);
+      const remaining=callGuest(cpu,0x89c2080,[s.actor,power],null,null);
+      row.remaining=remaining.returned?remaining.f0:null; row.remaining_ok=!!(remaining.returned||remaining.returned===0);
+    }
+    out.slots.push(row);
+  }
+  out.ok=out.slots.every(s=>s.power===null||(s.total_ok&&s.remaining_ok));
+  return out;
+}
+function cooldownOneScene(cpu, req) {
+  const s=frameScene(cpu);
+  const power=req.power;
+  const total=callGuest(cpu,0x89bceb0,[power],null,null);
+  const remaining=callGuest(cpu,0x89c2080,[s.actor,power],null,null);
+  return {ok:true,player:hx(s.player),actor:hx(s.actor),power,total:total.f0,remaining:remaining.f0,
+          total_returned:!!total.returned,remaining_returned:!!remaining.returned};
+}
+function cooldownTotalScene(cpu, req) {
+  const s=frameScene(cpu);
+  const out={ok:true,player:hx(s.player),actor:hx(s.actor),slots:[]};
+  for(let slot=0;slot<6;slot++){
+    const r=callGuest(cpu,0x8525ED0,[s.player,slot],null,null);
+    let power=null;
+    if(r.returned && r.ret){try{power=gm.add(r.ret).readU32();}catch(e){power=null;}}
+    const row={slot,power,total:null,returned:false};
+    if(typeof power==='number' && power && power!==0xffffffff){
+      const t=callGuest(cpu,0x89bceb0,[power],null,null);
+      row.total=t.f0; row.returned=!!t.returned;
+    }
+    out.slots.push(row);
+  }
+  return out;
+}
+function cooldownRemainingScene(cpu, req) {
+  const s=frameScene(cpu);
+  const out={ok:true,player:hx(s.player),actor:hx(s.actor),slots:[]};
+  for(let slot=0;slot<6;slot++){
+    const r=callGuest(cpu,0x8525ED0,[s.player,slot],null,null);
+    let power=null;
+    if(r.returned && r.ret){try{power=gm.add(r.ret).readU32();}catch(e){power=null;}}
+    const row={slot,power,remaining:null,returned:false};
+    if(typeof power==='number' && power && power!==0xffffffff){
+      const t=callGuest(cpu,0x89c2080,[s.actor,power],null,null);
+      row.remaining=t.f0; row.returned=!!t.returned;
+    }
+    out.slots.push(row);
+  }
+  return out;
+}
+function attributesScene(cpu, req) {
+  const s=frameScene(cpu);
+  const out={ok:true,player:hx(s.player),entity:hx(s.ent),start:req.start,count:req.count,values:[]};
+  for(let i=0;i<req.count;i++){
+    const id=(req.start+i)>>>0;
+    const r=callGuest(cpu,0x8474B30,[s.ent,id],null,null);
+    out.values.push({id:'0x'+id.toString(16),value:r.f0,returned:!!r.returned});
+  }
+  return out;
+}
+function playerStateScene(cpu, req) {
+  const s=frameScene(cpu);
+  const hp=callGuest(cpu,0x8474B30,[s.ent,0xFFFFF073],null,null);
+  return {ok:!!hp.returned,ctx:hx(s.ctx),player:hx(s.player),actor:hx(s.actor),entity:hx(s.ent),
+          pos:xyz(s.ent+0x60),place:g32(s.ent+0xa0),hp:{cur:hp.f0}};
+}
 function hpScene(cpu, req) {
   const e=req.entity;
   const actor=g32(e), sno=g32(e+0x18);
@@ -235,6 +310,12 @@ def build_js(context: int) -> str:
                       "else if (req.mode === 'pick') { result = pickScene(cpu, req); } "
                       "else if (req.mode === 'interact') { result = interactScene(cpu, req); } "
                       "else if (req.mode === 'hp') { result = hpScene(cpu, req); } "
+                      "else if (req.mode === 'player_state') { result = playerStateScene(cpu, req); } "
+                      "else if (req.mode === 'attributes') { result = attributesScene(cpu, req); } "
+                      "else if (req.mode === 'cooldown') { result = cooldownScene(cpu, req); } "
+                      "else if (req.mode === 'cooldown_total') { result = cooldownTotalScene(cpu, req); } "
+                      "else if (req.mode === 'cooldown_one') { result = cooldownOneScene(cpu, req); } "
+                      "else if (req.mode === 'cooldown_remaining') { result = cooldownRemainingScene(cpu, req); } "
                       "else if (req.mode === 'skill') { result = skillScene(cpu, req); } "
                       "else if (req.mode === 'project') {")
 
@@ -248,6 +329,12 @@ def main() -> None:
     ap.add_argument("--target", type=lambda s: int(s, 0))
     ap.add_argument("--entity", type=lambda s: int(s, 0), help="raw entity pointer for a read-only HP read")
     ap.add_argument("--skill", action="store_true", help="read the six hero skill loadout powers")
+    ap.add_argument("--cooldown", action="store_true", help="read remaining/total cooldown for the six hero skill slots")
+    ap.add_argument("--cooldown-total", action="store_true", help="read total cooldown for the six hero skill slots")
+    ap.add_argument("--cooldown-remaining", action="store_true", help="read remaining cooldown for the six hero skill slots")
+    ap.add_argument("--cooldown-one", type=lambda s: int(s, 0), help="read total/remaining cooldown for one power SNO")
+    ap.add_argument("--attr-start", type=lambda s: int(s, 0), help="attribute id scan start")
+    ap.add_argument("--attr-count", type=int, default=64, help="attribute id scan count")
     ap.add_argument("--click", help="engine pixel x,y to resolve the entity under the cursor")
     ap.add_argument("--height", type=float, default=2.0, help="world height sampled for the screen test")
     ap.add_argument("--submit", action="store_true")
@@ -271,6 +358,16 @@ def main() -> None:
                    "screen": [int(v) for v in args.click.split(",")]}
         elif args.skill:
             req = {"mode": "skill"}
+        elif args.cooldown:
+            req = {"mode": "cooldown"}
+        elif args.cooldown_total:
+            req = {"mode": "cooldown_total"}
+        elif args.cooldown_remaining:
+            req = {"mode": "cooldown_remaining"}
+        elif args.cooldown_one is not None:
+            req = {"mode": "cooldown_one", "power": args.cooldown_one}
+        elif args.attr_start is not None:
+            req = {"mode": "attributes", "start": args.attr_start, "count": args.attr_count}
         elif args.entity is not None:
             req = {"mode": "hp", "entity": args.entity}
         elif args.target is None:

@@ -1,10 +1,10 @@
 # Windows KBM 运行时代码地图
 
-更新：2026-11-08。描述当前源码的实际分层与失败方向，供后续修复定位。当前构建 `0140`，SHA-256 `8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`，补丁链 `0001–0119`、`0124–0129`、`0138–0140`（排除归档 `0029/0030`）重放 PASS；`0140` 的 F2 22 行、移动/菜单/确认取消、重启保留、默认恢复、药水和回城均已通过；顶层测试 20/20、相关 CTest 7/7、补丁链重放 PASS，PC 全键位已完成。
+更新：2026-11-08。描述当前源码的实际分层与失败方向，供后续修复定位。当前构建 `0142`，SHA-256 `B947D5C9FB4C2FBAD759C19B06E4A69B0146EA7D03CE1A35F5466A3431DD9CC1`，补丁链 `0001–0119`、`0124–0129`、`0138–0142`（排除归档 `0029/0030`）重放 PASS。`0141` 增加精确指针下的可交互目标优先；`0142` 让 F2 使用自定义 Menu/Confirm/Cancel，且已在实时进程验证。`0142` 的完整 22 项/20 套/CTest 回归仍待重跑。
 
 ## 构建与补丁
 
-- 真正编译的源码是 `reference/ScarletNX-src/`；`patches/windows/*.patch` 按 `base.json` 顺序叠加。
+- 真正编译的源码是 `reference/ScarletNX-src/`；`patches/windows/*.patch` 按 `base.json` 顺序叠加。`0141-native-interact-priority.patch` 处理宝箱/NPC 被近处 actor 碰撞柱抢占；`0142-native-overlay-custom-menu.patch` 把配置的 Menu/Confirm/Cancel 映射到 F2 运行时菜单，原始方向键/Enter/Esc 仍保留为 fallback。
 - `0079-native-kbm-split.patch` 把原先 3400 行的 `native_world.c` 拆成下列模块；`0080` 调 HUD 字号；`0081` 增加药水标签；`0082` 增加 Act1 城镇传送门 picker；`0083` 修复 mouse UI 聚焦；`0103–0108` 处理底栏直接 pad、技能图标和 HUD；`0113–0115` 放宽 UI 注册表读取并记录桶链；`0116` 修复技能页/地图页的旧焦点与空页面判断，`0117` 接入技能选择器/符文网格点击，`0118` 让底栏 cell 从实时图例解析动作；`0126–0128` 完成 UI Shift 分流、堆叠拆分/数量框点击和重绑定 Pause/Back 门控；`0138–0140` 完成新城门配对传送与 22 项键盘配置。有效补丁链已到 `0140`（排除归档 `0029/0030`），`verify_patch_chain.py` 重放 PASS。
 - 当前构建产物 `out/windows/build/scarletnx.exe`（`0140`，`8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`）；安装副本在 `D:\Games\DiabloIII\01001B300B9BE000\01001B300B9BE000.exe`，候选副本在 `out/windows/kbm/candidates/0140/scarletnx.exe`，上一安装备份为同目录 `previous-0139.exe`。`0140` 补丁 SHA-256 为 `0d5577b8ca77fefe57fda3e08b2b28dd3fda6d70e3bb786a9ee7fcdb1fc262a6`；`0126/0127` 分流 UI Shift 与数量框，`0128` 修复重绑定 Pause/Back 的 UI 门控，`0138/0139` 完成新城门精确拾取与配对 portal 传送链，`0140` 扩展全键位。
 - 历史启动卡点：`0074/0079/0080` 在自动存档附近出现过 frame10 Vulkan 停滞，FIFO、mailbox 与关闭记录线程分别都有反例。`0129` 为 no-activate 后台启动器增加 `SNX_VK_IMMEDIATE=1`、`SNX_VK_RECORD=0`，并拒绝同 exe 的重叠实例；`0139` 串行冷启动 4/4 成功，`0140` 只记录了定向验证与一次到世界的冒烟，尚不能沿用 `0139` 的结果。普通前台 FIFO 仍保留该历史风险。
@@ -25,7 +25,7 @@
 
 ## 输入链路
 
-1. `sdl3.c` 从 SDL 事件取值后交 `pc_key_event`。`backend_kbm_bind` 的 22 项配置把原 12 个动作、四向移动、四向菜单导航、确认和取消映射到各自原生路径；`Confirm`/`Cancel` 直接下发原生 A/B，UI 关闭仍受当前页面门控约束。F2 运行时菜单自身处理原始方向键/Enter/Esc/Backspace，自定义菜单键作用于游戏 UI。
+1. `sdl3.c` 从 SDL 事件取值后交 `pc_key_event`。`backend_kbm_bind` 的 22 项配置把原 12 个动作、四向移动、四向菜单导航、确认和取消映射到各自原生路径；`Confirm`/`Cancel` 直接下发原生 A/B，UI 关闭仍受当前页面门控约束。F2 运行时菜单先处理固定 F2/Esc，再经 `overlay_menu_key` 应用自定义 Menu/Confirm/Cancel；原始方向键/Enter/Esc/Backspace 作为 fallback。
 2. 左键 → `native_world_click`：UI 标志进 UI 队列，技能标志进技能队列，否则是世界单指针。
 3. `world_game` 每帧消费世界指针/技能队列；`world_ui` 每帧消费 UI 指针与悬停队列。
 4. UI 指针 → `pointer_pixel`（按 framebuffer rect 归一化）→ `0x8350BF0` 转 UI 坐标 → `ui_click`。

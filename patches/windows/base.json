@@ -973,6 +973,20 @@
         "src/nx/runtime/platform/backend.h": "0f6e8d907eed5007598f447b4f5c153579dfbd828b4ccafb442b68ee6b821308",
         "src/nx/runtime/platform/backend/sdl3.c": "8ccc935479f5c0012a6e743ed91e8ccc2d8d4f1cb6220fc5457b9572d5031a83"
       }
+    },
+    {
+      "patch": "0141-native-interact-priority.patch",
+      "patch_sha256": "ed8e65d320ed872eda8d643daa7a1e2c6ac45309407bd461189baf00bb809cb1",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "44e1e79ba6ccbf8151435c5590a7df72a37364681ecbf8a8b0d865c276c868ea"
+      }
+    },
+    {
+      "patch": "0142-native-overlay-custom-menu.patch",
+      "patch_sha256": "355bbfff80b0efc4c916912acdc5e66eeef7f555c271384617aad99440561c07",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "19ee5678bf916e269bba8db8216c16c9719cc12a66dc6099fd01565e731d6e2b"
+      }
     }
   ]
 }
