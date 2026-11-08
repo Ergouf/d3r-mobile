@@ -1,0 +1,80 @@
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -25,6 +25,8 @@
+ void native_world_hover(float x, float y, u32 width, u32 height);
+ int native_world_ui_blocked(void);
+ int native_world_frontend(void);
++/* 1 while the local hero is dead; the death prompt takes X/Y/B, not world commands. */
++int native_world_hero_dead(void);
+ /* Space requests a guarded native cancel/close for a service, conversation or
+    prompt. Return 1 also when its guard refuses, so it cannot become confirm. */
+ int native_ui_close_request(void);
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -45,6 +45,11 @@
+     if (!__atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) || !isfinite(x) || !isfinite(y) ||
+         !width || !height || width > 65535 || height > 65535 ||
+         x < 0 || y < 0 || x >= 1 || y >= 1) return 0;
++    if (native_world_hero_dead() && !(fallback_pad & NATIVE_POINTER_UI_EVENTS)) {
++        LOG("native: dead prompt click -> native Y\n");
++        native_action_press(1ull << 2); /* Y: revive at corpse */
++        return 1;
++    }
+     pm_lock(&g_pointer_lock);
+     p = (PointerPress){x, y, width, height, fallback_pad, ++g_serial,
+         (u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED)};
+@@ -94,7 +99,9 @@
+     return __atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) != 0;
+ }
+ static int g_frontend_ui = 1;
++static int g_hero_dead;
+ int native_world_frontend(void) { return __atomic_load_n(&g_frontend_ui, __ATOMIC_ACQUIRE); }
++int native_world_hero_dead(void) { return __atomic_load_n(&g_hero_dead, __ATOMIC_ACQUIRE); }
+ 
+ 
+ int native_world_hold_kind(void) {
+@@ -944,6 +951,8 @@
+     int pending;
+     if (__atomic_exchange_n(&g_cancel, 0, __ATOMIC_ACQ_REL)) g_goal.active = 0;
+     if (__atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE)) return;
++    int have_player = kbm_local_player(cpu, &actor, &entity, &controller, &pos, &player_object, &table);
++    __atomic_store_n(&g_hero_dead, have_player ? !kbm_actor_alive(cpu, entity) : 0, __ATOMIC_RELEASE);
+     pending = take_pointer(&p);
+     if (pending && (p.fallback & NATIVE_POINTER_UI_EVENTS)) {
+         __atomic_store_n(&g_item_drag_active, 0, __ATOMIC_RELEASE);
+@@ -953,7 +962,7 @@
+     if (pending && (u32)((u32)__atomic_load_n(&g_frames, __ATOMIC_RELAXED) - p.frame) > 120) {
+         g_goal.active = 0; return;
+     }
+-    if (!kbm_local_player(cpu, &actor, &entity, &controller, &pos, &player_object, &table)) {
++    if (!have_player) {
+         g_goal.active = 0;
+         return;
+     }
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1561,6 +1561,12 @@
+                     break;
+                 }
+                 if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !e.key.repeat) {
++                    /* The death prompt uses X for "last checkpoint"; it is not the
++                       item-compare/wheel Alt path while the hero is dead. */
++                    if (native_world_hero_dead()) {
++                        native_action_press(1ull << 3);
++                        break;
++                    }
+                     /* Select the pointer's item before entering the native Compare
+                        branch, then restore its previous mode when Alt is released. */
+                     if (native_world_ui_blocked() || g_alt_compare) {
+@@ -1583,7 +1589,7 @@
+                 if (e.key.key == SDLK_ESCAPE) {
+                     /* PC habit: Esc opens the pause menu in the world; with a game UI open it
+                        remains the native back button that closes dialogs and pages. */
+-                    if (!e.key.repeat) native_action_press(native_world_ui_blocked() ? (1ull << 1) : (1ull << 11));
++                    if (!e.key.repeat) native_action_press((native_world_hero_dead() || native_world_ui_blocked()) ? (1ull << 1) : (1ull << 11));
+                     break;
+                 }
+                 if (e.key.key == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT)) {

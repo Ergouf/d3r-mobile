@@ -440,3 +440,9 @@
 - `0142` 在 `sdl3.c` 的 `menu_event` 中先保留键盘捕获，再调用 `overlay_menu_key`：自定义 Menu/Confirm/Cancel 映射到运行时菜单方向/确认/取消，原始方向键、Enter、Esc、Backspace 仍为 fallback；自定义 Pause/Back 映射为 Esc。
 - 实时进程 PID `182232`，安装构建 SHA-256 `B947D5C9FB4C2FBAD759C19B06E4A69B0146EA7D03CE1A35F5466A3431DD9CC1`：在 F2 中按自定义 `PageDown` 后 `focus 0→1`，按 `-` 后 `page=3`（Pads），按 `=` 后 `page=0` 且 `focus=1`。证据 `out/windows/kbm/session/0142-overlay-custom-menu/`。
 - `0142` 尚未重跑完整 22 行编辑、22 动作矩阵、顶层 20 套和 CTest 7 项；因此不把 `0140` 的 PC 全键位完成状态直接外推到当前安装构建。
+
+## 0143：死亡提示输入
+
+- `0140` 现场死亡界面文本为 `你死了。` 和 `[Alt]在上个存档点复活[点击]在尸体处复活[Esc]在城镇中复活`，`ui_blocked=0`；`native_labels.c` 的映射是 `button3=[Alt]`、`button4=[点击]`、`button2=[Esc]`，即原生 X/Y/B。旧路径却把 Alt 送入对比/技能轮盘、把左键送入世界射线、把 Esc 送入暂停，因此三个提示都可能无响应。
+- `0143` 在每帧记录 `g_hero_dead`；死亡时：Alt → 原生 X，世界左键 → 原生 Y，Esc → 原生 B。普通存活时原有 Alt 对比/轮盘、世界点击和 Esc 暂停路径不变。
+- 安装构建 `0143` SHA-256 `5044EEA31658DB0E7D6B26F624651862E993C605FC7710538A1E7C5EA95A054D`，补丁 `0143-native-death-prompt-input.patch` 重放 PASS。死亡界面实时正向复测仍待本轮/用户触发。

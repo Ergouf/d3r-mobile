@@ -987,6 +987,15 @@
       "changed_files_lf_sha256": {
         "src/nx/runtime/platform/backend/sdl3.c": "19ee5678bf916e269bba8db8216c16c9719cc12a66dc6099fd01565e731d6e2b"
       }
+    },
+    {
+      "patch": "0143-native-death-prompt-input.patch",
+      "patch_sha256": "2f4cee9174a385d8fe21b064d8b647e9d4e95dd1b16954b0308b16ef194ec71a",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.h": "68f2a622d24be17721a9c3d0aa07dd8d0696efad10855a90648dbaed4a9ee54e",
+        "src/nx/runtime/native_world.c": "598c519b0e397d366e70eb8aba29eaf251f214edc9cb59610802fc3d05076bc6",
+        "src/nx/runtime/platform/backend/sdl3.c": "f6e498241a3f01847ab6574e06992f224ceada2379946c979c2b64556fbf2ec2"
+      }
     }
   ]
 }
