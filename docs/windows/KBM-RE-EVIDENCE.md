@@ -446,3 +446,11 @@
 - `0140` 现场死亡界面文本为 `你死了。` 和 `[Alt]在上个存档点复活[点击]在尸体处复活[Esc]在城镇中复活`，`ui_blocked=0`；`native_labels.c` 的映射是 `button3=[Alt]`、`button4=[点击]`、`button2=[Esc]`，即原生 X/Y/B。旧路径却把 Alt 送入对比/技能轮盘、把左键送入世界射线、把 Esc 送入暂停，因此三个提示都可能无响应。
 - `0143` 在每帧记录 `g_hero_dead`；死亡时：Alt → 原生 X，世界左键 → 原生 Y，Esc → 原生 B。普通存活时原有 Alt 对比/轮盘、世界点击和 Esc 暂停路径不变。
 - 安装构建 `0143` SHA-256 `5044EEA31658DB0E7D6B26F624651862E993C605FC7710538A1E7C5EA95A054D`，补丁 `0143-native-death-prompt-input.patch` 重放 PASS。死亡界面实时正向复测仍待本轮/用户触发。
+
+## 0144：大碰撞体交互的 stuck operate（诅咒宝箱）
+
+- 安装构建 `0144`（SHA-256 `CDE63F2E8E2FE1A2C5D0352232DEA730CBA71E6A38FE0757A62763ADE9515CE5`，PID `199052`，启动 `2026-11-08T20:19:46+08:00`；上一安装 `0143` 备份 `out/windows/kbm/candidates/0144/previous-0143.exe`）。本局重掷出第一幕悬赏 `诅咒树林` 后传送苦难旷野，用户把角色带到宝箱旁：`sno 365097`、实体 `0x7dcf005a`、距离 `12.83`、屏幕 `(526.7,323.1)`。
+- 原生左键 `[527,323]` 后：goal `handle=7dcf005a, sno=365097, power=30021, approach=4.0`，玩家走到距宝箱 `5.65` 后停住；`probe_runtime_state` 记录 `submitted=0`、`stuck=91`、`active=0`。宝箱碰撞圆柱读数为 `{height 5.0, radius 3.75}`（`entry+0x80`），而运行时 `reach=max(OPERATE_RANGE 4.8, approach+0.8)=4.8`，差 `0.85` 永不提交。
+- 对同一原生操作入口 `probe_click_interact --target 0x7dcf005a --submit` 在 `distance=5.654` 提交返回 `1`；1.5 秒后 UI 出现 `在计时结束之前尽可能消灭更多的敌人 | 31秒` 和 `奖励宝箱：消灭100名敌人：0/100`，宝箱实体从 SNO `365097` 变为 `364559`（诅咒事件箱）。证据 `out/windows/kbm/session/live-cursed-chest/` 下 `chest-click-1.json`、`chest-submit-distance.json`、`chest-after-submit.json`、`chest-after-submit-ui.json`。
+- `0144` 在实体交互 goal 卡住 `>20` tick 且距离 ≤ `圆柱半径+2.5` 时，从停滞点提交一次 `submit_interact`，由游戏裁决；正常接近路径不变。补丁 `0144-native-stuck-interact.patch` 链重放 PASS（`0001–0119, 0124–0129, 0138–0144`）。
+- 尚未完成：安装 `0144` 后用“一次原生左键”自动走到门外并提交、从而开启事件的实机闭环；当前正向证据是同一原生 submit 入口在 `5.654` 被游戏接受。`0141/0144` 仍不能记为业务完成。

@@ -1,0 +1,45 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+index 6178e23..b6a15f1 100644
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -1202,8 +1202,16 @@ static void world_tick(CPU* cpu) {
+         float reached = hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y);
+         /* Some props are walled in so the player cannot get closer than ~3 units
+            even though the game accepts their operate from farther (4.79 measured
+-           on SNO 341800).  Submit at up to OPERATE_RANGE; the game still rejects
+-           a genuinely out-of-range request. */
++           on SNO 341800).  The cursed chest 365097 stops the player at 5.65
++           because of its own collision radius while the game accepts the operate
++           there; the stuck retry below submits at that stopped distance. */
++        float entity_radius = 0;
++        if (kbm_readable(current + 0x80, 20)) {
++            float cylinder[5];
++            memcpy(cylinder, GP(current + 0x80), sizeof cylinder);
++            if (isfinite(cylinder[4]) && cylinder[4] > 0 && cylinder[4] < 64)
++                entity_radius = cylinder[4];
++        }
+         float reach = g_goal.attack ? g_goal.approach + 0.5f
+                                     : ((walk_into_sno(g_goal.sno) && g_goal.sno != 175482u)
+                                            ? g_goal.approach + 0.2f
+@@ -1250,6 +1258,21 @@ static void world_tick(CPU* cpu) {
+             g_goal.active = 0;
+             return;
+         }
++        /* The walk target sits the approach distance from the entity's centre;
++           for a prop whose collision cylinder is wider than that, the player
++           stops just outside the operate gate and the goal would time out
++           without ever submitting.  Submit once from the stopped position and
++           let the game decide (the cursed chest 365097 is accepted from 5.65
++           while its cylinder stops the player at that distance). */
++        if (!g_goal.attack && !g_goal.submitted && g_goal.stuck > 20 &&
++            reached <= entity_radius + 2.5f) {
++            int ok = submit_interact(cpu, player_object, &g_goal);
++            LOG("native: entity goal %u stuck operate %08x power %d at %.2f -> %s\n",
++                g_goal.serial, g_goal.handle, (int)g_goal.power, reached,
++                ok ? "accepted" : "rejected");
++            g_goal.active = 0;
++            return;
++        }
+     }
+     float distance = hypotf(g_goal.target.x - pos.x, g_goal.target.y - pos.y);
+     if (!g_goal.entity_goal && distance <= 0.12f) {

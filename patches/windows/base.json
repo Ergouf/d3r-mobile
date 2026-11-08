@@ -996,6 +996,13 @@
         "src/nx/runtime/native_world.c": "598c519b0e397d366e70eb8aba29eaf251f214edc9cb59610802fc3d05076bc6",
         "src/nx/runtime/platform/backend/sdl3.c": "f6e498241a3f01847ab6574e06992f224ceada2379946c979c2b64556fbf2ec2"
       }
+    },
+    {
+      "patch": "0144-native-stuck-interact.patch",
+      "patch_sha256": "22562635f3e088eb98ad6b0bb9b8c0e512ce1beec18088fd8ddbe5b5849c5254",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "3b413616312cd1853b0dcfc02ccd869f91dba0daf9778e073641dcb57c0460a9"
+      }
     }
   ]
 }
