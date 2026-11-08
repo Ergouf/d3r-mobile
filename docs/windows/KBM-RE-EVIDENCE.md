@@ -2,6 +2,22 @@
 
 > 当前交接入口为 [HANDOFF-20261104-CURRENT.md](HANDOFF-20261104-CURRENT.md)，操作说明见 [KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md)。本文件只保留仍可复用的技术证据，不再保存逐轮日志全文；完整输出仍在 `out/windows/kbm/session/`，该目录可重建且不入 Git。
 
+## 0144：PC 全键位实时矩阵（A 关闭）
+
+- 2026-11-09，PID `4244`（build `C83F70E0…`）：真实 SDL F2 中逐行编辑 22 项，滚动 `top=0→10`，每行完成 `capture`、`Saved.` 与 getter 一致；共 `123` 项检查、`0` 失败。保留键 `i` 和重复键 `6` 被拒绝。首次从旧自定义配置重跑时 `End` 已被第 19 行占用而拒绝，证明冲突门控有效；执行 `Restore defaults` 后重跑全矩阵通过。证据 `out/windows/kbm/session/0144-a/f2-edit.json`、`f2-defaults-precondition.json`。
+- 自定义键重启（PID `19472`）后 22 项 getter 与 `keybinds.ini` 一致；默认恢复后重启（PID `61568`）getter 恢复 `1/2/3/4/Q/T/C/K/J/P/M/Escape/W/A/S/D/Up/Left/Down/Right/Return/Backspace`。证据 `bindings-restart-custom.json`、`bindings-defaults-after-restart.json`、`keybinds-defaults-before-restart.ini`。
+- 默认键面板矩阵 `default-panel-matrix.json`：`C/K/J/P/M/Escape` 六面板均打开/关闭；`default-move-w/a/s/d-*.json` 中四向各产生约 10.6–14.8 单位位移；`default-menu-matrix.json` 中 `Up/Left/Down/Right` 完成难度/选项导航，`Return` 打开子页，`Backspace` 返回暂停。
+- 默认键动作：`potion-key9-1p75.json` 显示“你的生命值已经全满。”；`recall-key0-fields.json` 使 `place 1999634434→1999503360` 并扫描到 SNO `191492` 回城门。四技能动作在 `skill2-provoke-cast.json`、`b-heavens-woodwraith-window.json`、`skill4-falling-cast.json`、`iron-window.json` 中保留；Iron Skin 的减伤窗口/持续时间仍归入 B，不因 A 的动作路由通过而标记完成。
+- A 的汇总和默认/自定义键文件在 `out/windows/kbm/session/0144-a/`；本页不以旧 `0140` 结果代替 `0144`。
+
+## 0144：技能与秘境部分证据（B/C 部分，2026-11-09）
+
+- Heaven's Fury（技能 3）：对 WoodWraith SNO `6572`（actor `0x79200079`）施放，HP `2,221,619.5→0`，serial `13→14`；施法前后 UI 为“树妖”到掉落物。`b-heavens-cooldown-immediate.json` 中 450/900 ms 重按均显示“该技能尚未就绪”；`b-heavens-recovery21s.json` 中约 21 秒后 serial 继续前进且无未就绪提示。文件在 `out/windows/kbm/session/0144-a/`。
+- Falling Sword（技能 4）：对 FleshPitFlyer SNO `4157`（actor `0x7b8f0068`）施放，HP `480,003.5→0`，serial `103→104`；玩家位置从 `(2188.12,1021.97)` 移到 `(2189.26,1024.81)`，UI 出现“16 杀！/大歼灭！”。`b-falling2-cooldown.json` 的立即重按显示“该技能尚未就绪”，21 秒后 `serial 105→106` 重施。证据同上。
+- Iron Skin（技能 1）：`b-iron2-window.json` 有 serial `106→107` 和 UI before/after；6 秒基线 HP 最大跌幅 `7381.25`、施放后 `5529.375`，但现场有多只 4157 交替命中，无法把差异归因于减伤，且没有可靠 buff 文本。该项保持部分，不能写成“减伤已通过”。
+- 秘境：从新崔斯特姆方尖碑进入，`place 1999503360→1999896582`，HUD `0%`，区域“杰雷·哈拉什的遨游之地 1”；从起始房间蓝色 portal 侧退出后回 `1999503360`。本 seed 起始房间只有 Start_Location/Checkpoint/Portal，没有怪物；守护者、`100%`、结束奖励仍未验证。
+- 汇总：`out/windows/kbm/session/0144-a/B-C-SUMMARY.json`。
+
 ## 0059：高等级装备存档与普通宝箱
 
 - 按用户要求，`tools/windows-dev/generate_legendary_loadout.py` 在副本上生成并直接装备 70 级用品：阿克汉头盔/肩甲/胸甲/护手/腿甲/钢靴，行巫时刻、力士护腕、黑暗之光、暴风之盾、皇家华戒、全能法戒、茱莉娅女爵的雕饰项链。原 5 件已装备物品移入背包，原存档保留在 `local/saves/kbm-maxgear-before-20261105/`；生成副本 `local/saves/kbm-maxgear-generated2-20261105/`。
