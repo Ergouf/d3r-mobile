@@ -32,6 +32,9 @@ Windows 当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`（直
 | `reference/ScarletNX-src/` | Windows 上游源码工作树，保留本地 FSR 修改 |
 | `reference/eden/`、`d3-android/gpu/third_party/` | 本地固定版本的第三方源码，默认不入本仓库 Git |
 | `tools/windows-dev/` | Windows 环境、依赖验收、构建及打包工具 |
+| `patches/windows/` | Windows 补丁链与 `base.json` 阶段索引（按序应用到上游源码） |
+| `tools/d3-re/` | Windows 逆向探针、运行时会话驱动与证据工具 |
+| `out/windows/kbm/` | Windows KBM 会话证据、候选构建与安装备份 |
 | `docs/` | 统一维护的状态、构建、依赖和发行说明 |
 | `assets/marketing/` | 保留的宣传图、原图与配套素材 |
 | `local/` | 本地游戏输入、guest、密钥、存档及不可重建材料，不入 Git |
