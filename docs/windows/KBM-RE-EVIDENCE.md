@@ -14,7 +14,7 @@
 
 - Heaven's Fury（技能 3）：对 WoodWraith SNO `6572`（actor `0x79200079`）施放，HP `2,221,619.5→0`，serial `13→14`；施法前后 UI 为“树妖”到掉落物。`b-heavens-cooldown-immediate.json` 中 450/900 ms 重按均显示“该技能尚未就绪”；`b-heavens-recovery21s.json` 中约 21 秒后 serial 继续前进且无未就绪提示。文件在 `out/windows/kbm/session/0144-a/`。
 - Falling Sword（技能 4）：对 FleshPitFlyer SNO `4157`（actor `0x7b8f0068`）施放，HP `480,003.5→0`，serial `103→104`；玩家位置从 `(2188.12,1021.97)` 移到 `(2189.26,1024.81)`，UI 出现“16 杀！/大歼灭！”。`b-falling2-cooldown.json` 的立即重按显示“该技能尚未就绪”，21 秒后 `serial 105→106` 重施。证据同上。
-- Iron Skin（技能 1）：`b-iron2-window.json` 有 serial `106→107` 和 UI before/after；6 秒基线 HP 最大跌幅 `7381.25`、施放后 `5529.375`，但现场有多只 4157 交替命中，无法把差异归因于减伤，且没有可靠 buff 文本。该项保持部分，不能写成“减伤已通过”。
+- Iron Skin（技能 1）：在荒废墓地找到单个 Skeleton_A（SNO `5393`，actor `0x78ff0052`，HP `455,576.1`）。基线 8 秒单次伤害为 `589.19/1446.88/1101.09`；Iron Skin 施放后 2.9 秒内单次伤害为 `1172/1288/1156`，没有 50% 减伤。连续两次 `1` 均被接受，未出现“该技能尚未就绪”。因此该项不通过，不能只记动作路由；证据 `grave-iron-summary.json`。
 - 秘境：从新崔斯特姆方尖碑进入，`place 1999503360→1999896582`，HUD `0%`，区域“杰雷·哈拉什的遨游之地 1”；从起始房间蓝色 portal 侧退出后回 `1999503360`。本 seed 起始房间只有 Start_Location/Checkpoint/Portal，没有怪物；守护者、`100%`、结束奖励仍未验证。
 - 汇总：`out/windows/kbm/session/0144-a/B-C-SUMMARY.json`。
 

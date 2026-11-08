@@ -154,7 +154,7 @@
 
 ## 尚未完成
 
-1. **技能 1/3/4 行为**：Heaven's Fury 与 Falling Sword 已在 `0144` 记录同一 actor HP、serial、UI 和冷却恢复（见 `out/windows/kbm/session/0144-a/B-C-SUMMARY.json`）；Iron Skin 仍只有动作 serial/UI，多个攻击者的 HP 采样不能证明减伤窗口/持续时间，继续需要单 actor 对照。
+1. **技能 1/3/4 行为**：Heaven's Fury 与 Falling Sword 已在 `0144` 记录同一 actor HP、serial、UI 和冷却恢复；Iron Skin 在单 Skeleton_A 对照中基线单次伤害 `589/1,447/1,101`、施放后 `1,172/1,288/1,156`，未出现减伤，连续 `1` 也未观察到“该技能尚未就绪”；该项保持未完成并需调查机制。证据 `out/windows/kbm/session/0144-a/grave-iron-summary.json`、`B-C-SUMMARY.json`。
 2. **秘境后段**：`0144` 已进入秘境（HUD `0%`、区域“杰雷·哈拉什的遨游之地 1”）并通过出口回城；守护者生成、击杀、`100%`、结束奖励仍未验证。
 3. **随从正文**：当前只显示名称与关闭；若受离线前置事件阻断，需给出可复现的内容门证据并单独归类。
 4. **普通前台启动压力**：`0139` 的后台 no-activate 4/4 仅代表启动器；普通前台 FIFO 尚未重复同等压力矩阵。
