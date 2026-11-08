@@ -1,27 +1,52 @@
 # Diablo III Windows 原生键鼠交接
 
-更新时间：2026-11-07。此文件是 Windows KBM 工作的唯一当前入口；历史逐轮报告已经合并删除，详细实验摘要保留在 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)，实际使用说明见 [KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md)，PC 功能差距表见 [KBM-PARITY-20261106.md](KBM-PARITY-20261106.md)。
+更新时间：2026-11-08。此文件是 Windows KBM 工作的唯一当前入口；历史逐轮报告已经合并删除，详细实验摘要保留在 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)，实际使用说明见 [KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md)，PC 功能差距表见 [KBM-PARITY-20261106.md](KBM-PARITY-20261106.md)。
 
 ## 当前基线
 
-- 当前候选安装 `0122`（`32BC5885F48B3CF299BD4604ECB29B54B146264D50191DFE9CC0C11639314FE8`，冷启动 PID `256044`）。补丁链 `0001`–`0118` 排除归档的 `0029/0030`，重放 PASS。当前安装仍是候选，不是用户验收版。
-- 本轮已完成并实测：
+- 当前安装 `0140`（`8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`，最近核对 PID `52500`，启动时间 `2026-11-08T15:52:17.004433+08:00`；code DLL `A829DCE8AC2554A44DF087132CF9D266582010280C660D32A958642C8B7BDA51`）。补丁链 `0001`–`0119`、`0124`–`0129`、`0138`–`0140` 排除归档的 `0029/0030`，重放 PASS。构建副本在 `out/windows/kbm/candidates/0140/scarletnx.exe`，上一安装备份为同目录 `previous-0139.exe`。
+- 堆叠拆分已验收：`0127` 修正探针按住 Shift、接入原生 inventory `0x8373EB0`，并处理数量框的减少/增加及接受/取消回调。红宝石 SNO `437457` 从一叠 `3` 拆为 `2+1` 两叠，背包从 `28/60→29/60`；运行态物品位置分别为 `(0,1,1)` 和 `(0,3,1)`，存档读取同为 `stack 2/1`，退出重进仍保留。取消不改变 `2+1`，对单件 Shift 点击不打开数量框。
+- `0129` 的 12 动作重绑定矩阵已完整验过：运行中改为 `B/E/F/G/H/N/O/R/U/X/Y/5` 后 getter 一致，重启后保留；旧默认键停用、新键作用、面板同键关闭和 F2 Defaults 均通过。`test_keybind_matrix_0132.py` 79 项、`test_keybind_effects_0132.py` 43 项保留为历史基线。
+- `0140` 将配置从 12 项扩到 22 项，新增四向移动、四向菜单导航、确认和取消；`Skills` 默认由 `S` 改为 `K`，旧 12 项文件中的 `skills=S` 会迁移为 `K`。
+- `0140` F2 全 22 行编辑闭环已完成（PID `7928`，启动 `2026-11-08T14:22:25.323303+08:00`）：真实 SDL 键逐行录入 `5/6/7/8/9/0/F3/F4/F5/F6/F7/F8/F9/F10/Home/End/Insert/Delete/PageUp/PageDown/-/=`，每行 `capture`、`Saved.` 和 getter 一致；滚动 `top` 从 `0` 到 `10`，共 `123` 项检查、`0` 失败。
+- 同一组自定义键重启（PID `27636`，启动 `2026-11-08T15:48:12.811150+08:00`）后 getter 22 项保持不变；旧 `C/M/1` 不再触发，新 `F3/F7/5` 正常；四个移动键 `F9/F10/Home/End` 均产生非零位移；`Insert/Delete/PageUp/PageDown` 在难度页完成普通↔困难与选项页上下选择，`-`/`=` 完成确认/取消。
+- F2 `Restore defaults` 后再次重启（PID `52500`）getter 恢复 22 项默认值；`C/K/J/P/M/Esc` 六个面板均打开/关闭，`S` 可下移。
+- `0140` 动作矩阵：自定义 `6/7/8` 分别对 SNO `6572`、`5275`、`5346` 施放并击杀目标（技能 4 同时产生约 6 单位位移）；`5` 使 serial `67→68` 并出现约 5 秒 UI 对象增量。药水键 `9` 触发原生动作并显示“你的生命值已经全满。”；回城键 `0` 日志为 `recall bit=11 -> returned/1`，但本轮没有观察到传送门或 `place` 变化。
+- 证据目录 `out/windows/kbm/session/0140-validation/`：`f2-edit.json`、`restart-bindings.json`、`default-restart-bindings.json`、`restart-actions.json`、`default-panels.json`、`restart-move-*.json`、`restart-menu-nav.json`、`skill2-*`/`skill3-*`/`skill4-*`、`iron-skin-timeline.json`、`potion.json`。
+- PC 全键位仍为“部分”：F2、面板、移动、菜单、确认取消、重启保留和默认恢复已闭环；还差回城在 `0140` 的可观察传送/`place` 结果，以及本构建全部测试、CTest 7 项和补丁链重跑。药水键路由已确认，本构建未重复取得 HP 回复数值。
+- `0125` 实机证据来自 `EC542245…`：技能 4 对 SNO `139454` 造成 HP `2,054,631.625→0`；秘境进入 `1999503360→1999699971`、鼠标出口回 `1999503360`。第五幕实测为城中区 `T → 2000158730`，再鼠标点城镇传送门返回 `2000093193`。
+- `0132` 历史构建第五幕闭环：新崔斯特姆 `1999503360` → 世界页第五幕/威斯特玛城中区 → 底栏 SDL 左键后进入 `1999765508`，HUD 为“威斯特玛城中区/传送点”；按 `T` 到城门侧 `1999831045`，SDL 左键 `[640,340]` 返回 `1999765508`。`test_act5_roundtrip_0132.py` 22 项通过。
+- `0130` 在 `0129` 历史构建上完成的技能 2/3 复测：技能 2 对 SNO `3847` 从 HP `5,028,917.5→1,654,399`；技能 3 对另一只 SNO `3847` 从 `1,038,548.5→957,359.5→434,705→9,846.588→0.001`，均通过三次稳定基线。技能 1（零基槽 2，Iron Skin）对该类目标 7.3 秒无掉血，属于防御技能，减伤/冷却仍待专门验收；技能 4 对 SNO `364563` 从 HP `419,647.6875→0`，约 1.31 秒完成击杀。
+- `0133` 技能 2 方向性复验：在同一 Frida attach 内，SDL 点击玩家左侧怪物身体 `[601,409]` 后 150 ms 按 `2`；SNO `4982` 同一 actor 的 HP `4,966,862→1,479,204.25`，伤害 `3,487,657.75`。证据 `skill2-direction-summary.json`，`test_skill2_direction_0133.py` 10 项通过。
+- `0135` 历史构建的奈非天秘境进度：从新崔斯特姆 `1999503360` 经方尖碑菜单与传送门进入 `1999699971`，HUD 初始 `0%`；同一精英 SNO `5387` HP `9,514,731→5,147,494→2,695,709.75→1,103,115.5→0`，沉思之池 `1%→5%`，后续原生左键/技能清怪到 `7%`；再经暂停→退出→接受→主菜单→继续返回新崔斯特姆 `1999503360`。`test_rift_nephalem_0135.py` 47 项通过；守护者、100% 与结束奖励仍未覆盖。
+- `0136` 历史构建的第四幕米丽安已用原生 SDL 链验证：世界页选择第四幕与巴斯廷要塞据点，HUD“已到达”后从传送点走到 SNO `56948` 并打开工匠面板；“附魔/幻化/染料/训练”四页均可鼠标切换。`test_act4_mystic_0136.py` 18 项通过；只关闭“第四幕可达/页签可切换”，交易沿用前一幕已验收路径，本次未重复扣款。
+- `0137` 第五幕任务 NPC：世界页依次到达威斯特玛城中区 `2000027656` 与幸存者避难营 `2000158730`；原生点击泰瑞尔 SNO `114622` 后对话显示“泰瑞尔”和“感谢你来到这里。这儿还有很多悬赏任务可以进行。”。`test_act5_task_npc_0137.py` 21 项通过。
+- `0139` 完成新城门单击穿越：`0138` 先确保 SNO `90419` 不再被同位置橙色 portal `175482` 抢占；`0139` 在门体 Operate 成功后查找相距 8 单位内的配对 portal，并允许该 portal 在门框约 2.4–4.6 单位处提交。实机从 `(264.47,611.59)` 只发一次原生左键 `[889,489]`，日志依次记录 `90419 operate -> accepted`、`chained portal 175482`、`175482 operate -> accepted`，最终 `place 1999503360→1999634434`、位置 `(2841.52,2932.68)`。`test_gate_90419_0138.py` 19 项、`test_gate_90419_0139.py` 19 项均通过。
+- `0139` 地形遮挡负例：从门洞对侧点击时，隐藏 `90419` cylinder 的深度 `96.35` 大于 terrain `94.16`，日志记录 `door skip` 且不进入 gate priority；可见 portal `175482` 深度 `82.389` 正常选中并返回城镇。`test_portal_occlusion_0139.py` 12 项通过。
+- `0130` 城镇传送门 CAP=0 已实测：哭泣山谷经地图进入后按 `T` 回新崔斯特姆，鼠标定位 SNO `191492`；Frida 将所有该 SNO 的 CAP 查询强制为 0，SDL 左键仍完成 `place 1999503360→1999634434`。`test_town_portal_cap0_0130.py` 6 项检查通过。目标场景未生成第二个同 SNO 门，遮挡/世界端覆盖继续保留为部分。
+- `0129` 修复后台冷启动竞态：`Launch-Background.ps1` 仅为子进程设置 `SNX_VK_IMMEDIATE=1` / `SNX_VK_RECORD=0`，强制 immediate 呈现并在 GPU 渲染线程同步提交；退出脚本时恢复父进程环境，普通前台启动仍使用用户 vsync 设置。启动器同时拒绝同一安装 exe 已有实例。`0139` 单实例串行冷启动 4/4 成功：标题 `18.83–19.42` 秒、主菜单 `21.58–22.11` 秒、世界 HUD `28.81–29.72` 秒；证据 `0139-coldboot-1..4.json`、`0139-coldboot-summary.json`，`test_startup_0139.py` 16 项通过。
+- `0139` 的完整回归基线为顶层测试 20/20、相关 CTest 7/7，冷启动 4/4；这些结果不替代 `0140` 的完整回归。
+- `0140` 当前安装的补丁链重放 PASS、构建成功；现有证据完成 22 项 getter、迁移、冲突/保留键、四向移动、四个菜单方向、确认/取消、重启保留和恢复默认验证。尚未重新跑完整顶层 20 套与 CTest 7 项，也尚未逐行通过 F2 编辑全部 22 项。
+- 地图摄像机已用真实 SDL 输入复验：滚轮输入使 `localmap+0x214` 的缩放 `1.00→0.95→1.00`；按住拖动 `[500,300]→[600,350]` 使平移 `[0,0]→[67,33]`，反向拖动恢复 `[0,0]`，M 可关闭地图。`test_map_camera_0131.py` 9 项通过。
+- 三层模态已在 `0133` 构建验证：游戏暂停（662 项）叠加退出确认（680 项）后，再打开 F2 运行时菜单；按 `Esc` 只关闭 F2 菜单且游戏提示仍为 680 项，`Space` 只关闭退出确认（680→662），“游戏已暂停”保留，最后 `Esc` 返回世界。证据 `stack3-*`，`test_three_layer_stack_0133.py` 14 项通过。
+- 已完成并保留的实机证据（构建按各条标注）：
   - Q 药水：受伤到 `1353340.25` 后按 Q，日志 `native: world command potion bit=5 -> returned/1`，HP 回到 `1353916`；满血时同指令 returned/0。
   - 地图页脚键鼠文案：连续采样均为 `[拖拽] 移动地图 / [Esc] 关闭 / [滚轮] 镜头拉近 / [滚轮] 镜头拉远 / [复位] 地图重定位 / [重置] 重置镜头`，无 `{icon:l1}`/`{icon:r1}`；M 关闭后 HUD 正常。
   - 底栏点击：`footer cell 0 pad 1 -> queued`、`cell 1 pad 2`、`cell 2 pad 4`；世界页选哭泣山谷后点 cell 0，HUD 变为“哭泣山谷/传送点”。
   - 世界地图传送：荒废的墓地 `selection=7`、哭泣山谷 `selection=6`、大教堂一层 `selection=2`，原生 A 后 HUD 地点变化。
   - 技能栏换装：`0122` 技能页点击后能打开原生选择器；技能 2 已换“天谴”（零基槽 2 power `291804→266627`），技能 3 已换“天堂之怒”（零基槽 3 power `243853→316014`），六槽最终为 `[285903,353492,291804,266627,316014,239137]`；自由配置 `ElectiveMode` 已落盘为 `1`。
-  - 技能 2/3 伤害：`0121` 同一构建链上技能 2 对 `sno 6646` HP `77854.578→0`；技能 3 对另一只 `sno 6646` HP `527575.875→318562.5→0.01`。`0122` 只改了底栏路由，尚未重复同一套伤害采样。
-  - 地图页“世界”页签：鼠标点击后出现五幕地点、第一幕节点和“悬赏任务”页脚；但悬赏覆盖层 `bountyoverlayworldmap` 仍保持隐藏。
+  - 技能 2 伤害：`0123-skill2-damage.json`，build `32BC5885`（`0119` 不影响此路径）：sno 131278，HP `737727→0`，passed=True。技能 3 伤害：`0123-skill3-damage.json`，sno 4564，HP `438130→287746→53866`，passed=True。
+  - 按住左键连续攻击：`0123-hold-attack.json`，build `32BC5885`：sno 131278，HP `625287→492314→0`，drop_events=2，pos_delta=[0,0,0]，goal_before active=0。
+  - Shift 站定攻击：`0123-stand-still-ab.json`，build `32BC5885`：3 点位 Shift=True→walk_active=0，Shift=False→walk_active=1，pos_delta=[0,0,0]。
+  - 地图页“世界”页签：鼠标点击后出现五幕地点、第一幕节点和“悬赏任务”页脚。`0119` 修复悬赏路由后，地图内按 `1` pad_bits=[64]（0x40），`bountyoverlayworldmap=true`（`0121-bounty-inmap.json`，build `6FB3180B`）。
 - 未完成：
-  - 悬赏追踪没有业务结果：键盘 `1` 和底栏第三格都实际发出 ZL（trace `pad=0x100`），逐次注入 L/R/L3/R3/ZL/ZR 后覆盖层仍未显示；不能把页脚文案或映射日志当作完成。
-  - 城镇传送门 CAP=0/纯鼠标两端、堆叠拆分/数量选择、键位重绑定、大秘境入口。
-  - 启动 frame10 停滞仍有冷启动反例。
+  - PC 全键位重绑定：`0140` 已实现 22 项，但当前构建尚缺 F2 全 22 行与完整 22 动作效果矩阵复验。
+  - `0139` 单实例 no-activate 后台启动 4/4 已通过；`0140` 已完成一次启动到世界的冒烟，尚未重跑四轮。普通前台 FIFO 仍需同等级压力覆盖。
 - UI 点击链路结论：底栏点击不产生可消费的 UI 分发事件，已在 `native_world_click` 对 `y>0.8` 的四格直接映射 A/B/X/Y；技能槽和地图页签仍受同一链路影响。
-- 测试存档：718003 金、425 血岩、材料 903/895/948、工匠等级 `[4,9,10,0]`、39 件物品、仓库 3 件。
-- 本轮证据文件：`out/windows/kbm/session/takeover-font-startup/0121-loadout-final.json`、`0121-skill2-damage-retest.json`、`0121-skill3-damage.json`；地图/悬赏反例为 `0122-bounty-prebefore.json`、`0122-map-pad-scan.json`、`0122-footer-cell2-trace.json`、`0122-bounty-after-footer.json`；补丁链回放为 `0118-replay.txt`。
+- 测试存档：718859 金、425 血岩、材料 903/895/948、工匠等级 `[4,9,10,0]`；拆分红宝石后英雄 42 件（背包 29、装备 13），仓库 3 件。
+- 相关历史证据文件：`out/windows/kbm/session/takeover-font-startup/0121-loadout-final.json`、`0121-skill2-damage-retest.json`、`0121-skill3-damage.json`；地图/悬赏反例为 `0122-bounty-prebefore.json`、`0122-map-pad-scan.json`、`0122-footer-cell2-trace.json`、`0122-bounty-after-footer.json`；补丁链回放为 `0118-replay.txt`。
 
-## 当前已验证
+## 已验证证据（按条目标注构建）
 
 - `0061`（2026-11-06，PID `103560`，构建 `7C83C38E…`）：按住左键连续移动（同一按下内 `world pointer queued 2..7`，目标随指针推进，角色 `400.41→410.04`）、`Shift`+左键站定攻击（`stand-still attack power 285903 at (417.04,599.92,28.42) -> 1`，无 walk goal）、右键当时映射到 `r`（这是 Npad R/药水位，不是实际次要技能）；`0063` 已纠正为实际技能槽 1 并取得命中掉血，见下文。
 - `0062`（2026-11-06，PID `370892`，构建 `4D6C81C3…`）：背包页按 `S` 得 `UI tab select current=0 target=1 slot=1`，`J`→`slot=5`（任务）、`C`→`slot=0`；世界内 `Ctrl+S` 先开页再切 `slot=1`（`probe_ui_tab_state` 记录 `selected 1`），`Ctrl+C` 打开到 `current=0`。热键只在角色页持有输入时抢占按键，死亡界面等仍走原复活键。
@@ -122,16 +147,27 @@
 
 ## 尚未完成
 
-- 2026-11-06 用户验收：`Q` 药水在当时的安装版 `0074` 上回血正常，需英文输入状态；该结果不能迁移为 `0081` 当前构建的回血证据。`0081` 只实机复测了 `Q` HUD 标签（14×14、持续显示）；同线程 fixture 可把 HP `1353916→500000`（`0081-potion-fixture-injury.json`），但 50 ms 后被原生状态覆盖，不能作为真正受伤前置；Q 提示满血（`0081-potion-hp-baseline1.json`），Q 回血效果仍未在当前构建验证。此前 SDL Q/原生处理器返回 1 而 HP/Tick 未变化的探针记录仍按当时事实保留，不逐条归因于输入法，也没有补写新的 HP 数值。
-1. **逐技能真实效果**：`0075` 候选的 `1`–`4` 逐技能施放、方向、冷却与效果仍待验收。
-2. **`Space` 关闭新路径**：`0084`（`980390E7…`）在没有提示/服务/对话目标时改发原生 B。难度面板 719→665，仍停在暂停且未选难度；退出确认 683→665 被取消。铁匠服务沿用 `0083` 的 839→734。欧雷克对话（秘境/唤醒/关于欧雷克/取消）两次 Space 关闭并回到世界 HUD，没有进入选项。叠加提示仍未验。
-3. **`Alt` 对比内容**：`0077` 候选已接物品行悬停与原生 Compare 分支，但真实详情比较显示、模式恢复与多 UI 场景仍待用户验收。
-4. **HUD 技能键标签**：`0078` 已有离线实现，真实 HUD 中已观察到左键/右键/`1`–`4` 文本变化；`0080` 六槽 18 点、左右键 36×16；`0081` 当前构建七槽 18 点、`Q` 14×14、左右键 36×16 已实机复测，字体与药水标签子项完成，但地图底栏未覆盖、整项 UI 图标仍未完成，`Q` 回血效果仍只有 `0074` 旧证据，不能写成“标签/药水已整体验收正常”。
-5. **站定与连续攻击**：`Shift` 站定攻击只有旧构建证据，`0067` 未用怪物复验；按住左键连续攻击仍缺同一目标连续掉血的证据。当前秘境只有可破坏物件，没有可验证的敌对目标。
-6. **地图节点精确对应**：`0081` 世界页五幕切换全部通过，Act1 哭泣山谷 `2000027656`、Act5 威斯特玛城中区 `1999896582` 已有 place；剩余为部分节点名称/目的地对应、地图缩放/拖拽和城镇传送门 `CAP=0`/遮挡与纯鼠标两端（0082 已串行复测自然场景 `CAP=30021`）。
-7. **暂停退出崩溃**：`098B9D0A` 构建在暂停菜单退出时出现一次原生 UI 分发崩溃（`pc=8399c14`，日志 `game-098B9D0A-crash.log`），`0067` 尚未复现或排除。
-8. **内容侧遗留**：`90419` 城门、秘境守护者/`100%`/结束奖励、随从正文、第五幕任务 NPC 正文、第四幕秘术师 `56948`、叠加多层提示最上层。
-9. **范围外**：好友/队伍面板按纯离线不做适配。
+1. **PC 全键位收尾**：F2 22 行、面板、移动、菜单、确认/取消、重启保留和 `Restore defaults` 已在 `0140` 通过；还差回城键的当前构建可观察结果（日志 `returned/1`，未见 portal/`place`）以及顶层测试、相关 CTest 7 项和补丁链的全量重跑。状态仍为“部分”。
+2. **技能方向/冷却矩阵**：技能 2 左向伤害已闭环；技能 1 需要取得可观察减伤与冷却窗口，技能 3/4 需要补齐目标方向、连续施放受限和冷却恢复。
+3. **秘境内容**：补验守护者生成/击杀、`100%` 进度和结束奖励；现有入口、精英击杀、沉思之池与 `0%→7%` 已通过。
+4. **随从正文**：当前只显示名称与关闭；若受离线前置事件阻断，需给出可复现的内容门证据并从 PC 对等范围中单独归类。
+5. **普通前台启动压力**：`0139` 后台 no-activate 4/4 已过；普通前台 FIFO 仍未重复同等压力矩阵。
+6. **扩展遮挡回归**：CAP=0、第五幕双向、城门配对和地形遮挡已过；复杂场景物遮挡可继续加负例，但不阻塞当前主路径。
+7. **范围外**：好友、队伍、聊天、赛季和排行按纯离线约定不纳入。
+
+## 下一阶段目标
+
+**阶段目标**：在安装构建 `0140`（`8A7BDAFF…`）上关闭“PC 全键位”验收，再进入技能 1/3/4 与秘境后段。
+
+**验收顺序**：
+
+1. F2 → `Keyboard bindings` 逐行编辑全部 22 项：已通过，`123` 项检查、`0` 失败。
+2. 动作矩阵：六个面板、四个移动方向、四个菜单方向、确认/取消已通过；技能 2/3/4 已击杀，药水键已显示原生满血提示；回城键仍缺 `portal`/`place` 观察。
+3. 同一组自定义键重启保留、F2 Defaults 后重启恢复 22 项默认：已通过。
+4. 在 `0140` 上重跑顶层 `test_*.py`、相关 CTest 7 项、补丁链和 `git diff --check`；只有这项完成后才把 PC 全键位改为“已完成”。
+5. 随后按顺序处理技能 1 Iron Skin 减伤/冷却、技能 3/4 方向/冷却、秘境守护者/100%/奖励和随从正文。
+
+**阶段完成标准**：22 项绑定均能从当前安装的 F2 UI 正确编辑且产生对应可观察结果；重启与恢复默认无回退；所有测试通过；未验证或受离线内容门阻断的项目继续明确标为“部分/未完成”。
 
 ## 必读踩坑
 
@@ -161,25 +197,22 @@
 ## 验证命令
 
 ```powershell
-python tools/windows-dev/verify_patch_chain.py            # 81 阶段重放，必须 PASS
-Get-ChildItem tools/windows-dev -Filter test_*.py | ForEach-Object {   # 2 个套件必须全绿
+python tools/windows-dev/verify_patch_chain.py            # 完整补丁链重放，必须 PASS
+Get-ChildItem tools/windows-dev -Filter test_*.py | ForEach-Object {   # 顶层共 20 个；0140 完整重跑待执行
     python $_.FullName; if ($LASTEXITCODE) { throw "$($_.Name) failed" } }
-python d3-android/tools/serena_query.py activate_project '{"project":"ScarletNX-src"}'
+python d3-android/tools/serena_query.py initial_instructions '{}'      # 每会话一次
+python d3-android/tools/serena_query.py get_current_config '{}'
 python tools/d3-re/probe_runtime_state.py --pid <PID>
+python tools/d3-re/probe_keyboard_bindings.py --pid <PID> --out out/windows/kbm/session/<新目录>/bindings.json
+python tools/d3-re/probe_keyboard_bind.py --pid <PID> --set 12=F --out out/windows/kbm/session/<新目录>/bind-set.json
+python tools/d3-re/probe_keyboard_bind.py --pid <PID> --reset --out out/windows/kbm/session/<新目录>/bind-reset.json
 python tools/d3-re/probe_ui_snapshot.py --pid <PID> --match consolepause_main --out out/windows/kbm/session/<新目录>/ui.json
 python tools/d3-re/probe_sdl_key.py --pid <PID> --key tab
 python tools/d3-re/verify_hover_wheel.py --pid <PID> --out out/windows/kbm/session/<新目录>   # 从背包页开始；串行执行
 python tools/d3-re/verify_service_wheel.py --pid <PID> --group 5 --out out/windows/kbm/session/<新服务目录>
 ```
 
-常用探针：`probe_sdl_key.py`（SDL 键）、`probe_pointer_click.py`（SDL 指针）、`probe_ui_snapshot.py`（命名 UI）、`probe_ui_tree.py`（可见 UI 树）、`probe_click_interact.py`（世界实体/操作）、`verify_script_interaction.py`（同进程点击证据）、`walk_to.py`（碰撞预检导航）。探针串行运行。
-
-## 后续优先级
-
-1. 用当前高等级装备跑通秘境内怪物击杀、进度与结束奖励；补做一个可复现的秘境入口路线。
-2. `90419` 城门换侧/换实例；继续补齐第四幕工匠和第五幕任务 NPC 正文。
-3. 逐技能方向与 power/冷却矩阵；地图节点/五幕直选已完成，继续补城镇传送门 `CAP=0`/遮挡与纯鼠标两端，`0082` picker 已串行复测自然场景；当前 `0083` 尚未复测 portal，剩余同一端 CAP0/遮挡与纯鼠标。
-4. 叠加多层提示最上层；好友/队伍继续按纯离线排除。
+常用探针：`probe_sdl_key.py`（SDL 键）、`probe_pointer_click.py`（SDL 指针）、`probe_keyboard_bindings.py`（只读 22 项键位）、`probe_keyboard_bind.py`（设置/恢复 F2 键位）、`probe_ui_snapshot.py`（命名 UI）、`probe_ui_tree.py`（可见 UI 树）、`probe_click_interact.py`（世界实体/操作）、`verify_script_interaction.py`（同进程点击证据）、`walk_to.py`（碰撞预检导航）。探针串行运行。
 
 ## 基线清理记录
 
@@ -189,5 +222,5 @@ python tools/d3-re/verify_service_wheel.py --pid <PID> --group 5 --out out/windo
 
 
 - 旧逐轮报告、旧 handoff、方法评估和重复键盘说明已合并到本文件、[KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md) 与 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)。
-- 删除约 2.8 GiB 的可重建旧构建、旧截图和历史输出；保留 `build-kbm`、当时 exe 和 Round 96 小型 JSON 证据。
+- 删除约 2.8 GiB 的可重建旧构建、旧截图和历史输出；清理时曾保留 `build-kbm`，该目录后来已删除，当前构建目录统一为 `out/windows/build`。
 - 游戏安装目录 11 个旧备份 exe 已放入 Windows 回收站；清理时保留安装 exe，后续安装身份以本文“当前基线”为准。

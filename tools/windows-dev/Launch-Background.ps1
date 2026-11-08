@@ -12,6 +12,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$processName = [IO.Path]::GetFileNameWithoutExtension($Exe)
+$existing = @(Get-Process -Name $processName -ErrorAction SilentlyContinue | Where-Object {
+    try { $_.Path -eq $Exe } catch { $false }
+})
+if ($existing.Count -ne 0) {
+    throw "already running: pid=$($existing.Id -join ',') path=$Exe"
+}
+
 Add-Type -Namespace Win -Name U -MemberDefinition @"
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int cmd);
@@ -20,7 +28,20 @@ Add-Type -Namespace Win -Name U -MemberDefinition @"
 "@
 
 [void][Win.U]::SetProcessDPIAware()
-$p = Start-Process -FilePath $Exe -WorkingDirectory $WorkDir -ArgumentList $GameArgs -PassThru
+# Background FIFO/mailbox presentation and asynchronous Vulkan submission can stall during the first autosave on Intel.
+# Apply the stable no-activate profile only to this child; an interactive launch keeps the user's normal settings.
+$previousImmediate = $env:SNX_VK_IMMEDIATE
+$previousRecordThread = $env:SNX_VK_RECORD
+try {
+    $env:SNX_VK_IMMEDIATE = '1'
+    $env:SNX_VK_RECORD = '0'
+    $p = Start-Process -FilePath $Exe -WorkingDirectory $WorkDir -ArgumentList $GameArgs -PassThru
+} finally {
+    if ($null -eq $previousImmediate) { Remove-Item Env:SNX_VK_IMMEDIATE -ErrorAction SilentlyContinue }
+    else { $env:SNX_VK_IMMEDIATE = $previousImmediate }
+    if ($null -eq $previousRecordThread) { Remove-Item Env:SNX_VK_RECORD -ErrorAction SilentlyContinue }
+    else { $env:SNX_VK_RECORD = $previousRecordThread }
+}
 "pid=$($p.Id)"
 for ($i = 0; $i -lt 120; $i++) {
     Start-Sleep -Milliseconds 250

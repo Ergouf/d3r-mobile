@@ -13,7 +13,7 @@ Get-CimInstance Win32_Process |
 python tools/d3-re/probe_runtime_state.py --pid <PID>
 ```
 
-`probe_runtime_state.py` 返回运行时 enabled、`ui_blocked`、点击 serial 和当前世界 goal。探针的 `version.py` 必须通过 `tools/windows-dev/sync_probe_version.py --exe <安装 exe>` 与当前构建同步。
+`probe_runtime_state.py` 返回运行时 enabled、`ui_blocked`、点击 serial 和当前世界 goal。探针的 `version.py` 从当前安装 exe 符号表动态解析 RVA，并显式校验 `BUILD.exe_sha256` 与 `code_dll_sha256`；安装构建变化时必须先更新这两个哈希。
 
 ## 常用入口
 
@@ -25,13 +25,16 @@ python tools/d3-re/probe_runtime_state.py --pid <PID>
 | SDL 移动键短脉冲（贴墙走位） | `probe_walk_hold.py` |
 | 世界实体与 native collide/operate | `probe_click_interact.py` |
 | 同进程点击 before/after、命令和输入中立性 | `verify_script_interaction.py` |
-| 世界点导航与碰撞预检 | `walk_to.py` |
+| 世界点导航与碰撞预检（直行受阻后扇形绕行） | `walk_to.py` |
 | 命名 UI 控件快照 | `probe_ui_snapshot.py` |
 | 可见 UI 控件树 | `probe_ui_tree.py` |
 | 原生 UI hit-test | `probe_ui_pointer.py` |
 | 单控件字段/vtable | `probe_ui_object.py` |
 | UI navigation group | `probe_nav_group.py` |
 | 当前角色页签状态 | `probe_ui_tab_state.py` |
+| 世界地图 picker 状态与投影行（只读） | `probe_map_picker_state.py` |
+| F2 键位设置/恢复默认（走 F2 后端） | `probe_keyboard_bind.py` |
+| F2 当前键位（只读 getter） | `probe_keyboard_bindings.py` |
 
 ## 世界点击
 

@@ -1,0 +1,60 @@
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -771,8 +771,9 @@
+ 
+ static int door_candidate_near(const CPU* cpu, u64 table, const WorldPos* pos,
+                                const WorldRay* ray, float occlusion, int ground_ok,
+-                               const int pixel[2], int town_portal, WorldPos* found, u32* found_handle,
+-                               u32* found_controller, u32* found_power, u32* found_sno) {
++                               const int pixel[2], int town_portal, u32 only_sno, WorldPos* found,
++                               u32* found_handle, u32* found_controller, u32* found_power,
++                               u32* found_sno) {
+     u32 limit, shift;
+     u64 buckets;
+     float best = 24.0f;
+@@ -792,6 +793,7 @@
+             !kbm_read32(entry + 0xA0, &place) || place != pos->place ||
+             !kbm_read32(entry + 0x14, &cid) || cid == 0xFFFFFFFFu ||
+             !kbm_read32(entry + 0x18, &sno) || !door_sno(sno) ||
++            (only_sno && sno != only_sno) ||
+             !kbm_readable(entry + 0x60, 12) || !kbm_readable(entry + 0x80, sizeof cylinder)) continue;
+         /* Recall portals are picked before NPC/waypoint cylinders. Limit the
+            priority to the observed town-portal actor, not every nearby door. */
+@@ -891,7 +893,7 @@
+         int picked;
+         if (!(p.fallback & NATIVE_POINTER_SKILL) &&
+             door_candidate_near(cpu, table, &pos, &ray, occlusion, ground_ok,
+-                                pixel, 1, &door, &door_handle, &door_controller,
++                                pixel, 1, 0, &door, &door_handle, &door_controller,
+                                 &door_power, &door_sno_value)) {
+             g_goal.handle = door_handle;
+             g_goal.controller = door_controller;
+@@ -901,6 +903,18 @@
+             g_goal.approach = 0.9f;
+             picked = 1;
+             LOG("native: town portal priority %u handle %08x\n", p.serial, door_handle);
++        } else if (!(p.fallback & NATIVE_POINTER_SKILL) &&
++                   door_candidate_near(cpu, table, &pos, &ray, occlusion, ground_ok,
++                                       pixel, 0, 90419u, &door, &door_handle,
++                                       &door_controller, &door_power, &door_sno_value)) {
++            g_goal.handle = door_handle;
++            g_goal.controller = door_controller;
++            g_goal.power = door_power;
++            g_goal.sno = door_sno_value;
++            g_goal.entity = door;
++            g_goal.approach = 3.6f;
++            picked = 1;
++            LOG("native: New Tristram gate priority %u handle %08x\n", p.serial, door_handle);
+         } else {
+             picked = pick_entity(cpu, table, &ray, occlusion, &pos, actor, &g_goal);
+         }
+@@ -940,7 +954,7 @@
+                 p.serial, g_goal.handle, (int)g_goal.power, g_goal.entity.x, g_goal.entity.y,
+                 g_goal.entity.z, hypotf(g_goal.entity.x - pos.x, g_goal.entity.y - pos.y));
+         } else if (door_candidate_near(cpu, table, &pos, &ray, occlusion, ground_ok,
+-                                       pixel, 0, &door, &door_handle,
++                                       pixel, 0, 0, &door, &door_handle,
+                                        &door_controller, &door_power, &door_sno_value)) {
+             if (stand_still) {
+                 LOG("native: stand still ignores door %08x sno %u\n", door_handle, door_sno_value);

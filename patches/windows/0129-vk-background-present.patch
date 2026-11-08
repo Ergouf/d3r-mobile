@@ -1,0 +1,15 @@
+diff --git a/src/nx/gpu/vk/device.c b/src/nx/gpu/vk/device.c
+--- a/src/nx/gpu/vk/device.c
++++ b/src/nx/gpu/vk/device.c
+@@ -609,6 +609,11 @@
+     if (mode == VK_PRESENT_MODE_FIFO_KHR && !vsync)
+         for (u32 i = 0; i < nm; i++)
+             if (ms[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = ms[i];
++    /* The no-activate background runner uses immediate: Intel can leave FIFO/mailbox queues unsignalled while the
++       window is behind another application. Normal launches do not set this variable. */
++    if (getenv("SNX_VK_IMMEDIATE"))
++        for (u32 i = 0; i < nm; i++)
++            if (ms[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = ms[i];
+     free(ms);
+ 
+     u32 count = caps.minImageCount + 1;

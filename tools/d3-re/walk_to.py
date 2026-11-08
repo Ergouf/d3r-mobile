@@ -164,38 +164,43 @@ def main() -> None:
         if dist <= args.reach:
             print("reached")
             return
-        if stalled >= 3:
-            print("no progress for 3 steps, stop")
+        if stalled >= 10:
+            print("no progress after 10 detour attempts, stop")
             return
         k = min(args.step, dist) / dist
         base = [dx * k, dy * k, 0.0]
         pix = None
         viewport = [0, 0, 1280, 720]
-        for attempt in range(3):
+        # Sweep around the requested heading instead of testing only the direct
+        # line and two fixed offsets. A clear ray can still lead into a wall;
+        # starting from an angled ray after a stalled step lets the next click
+        # choose a nearby walkable point around the obstacle.
+        angles = [0, 25, -25, 50, -50, 75, -75, 95, -95, 120, -120, 150, -150]
+        if stalled:
+            offset = min(stalled, len(angles) - 1)
+            angles = angles[offset:] + angles[:offset]
+        for attempt, angle_deg in enumerate(angles):
             if args.out_dir:
                 PROJ = args.out_dir / f"step-{i:02d}-attempt-{attempt}-project.json"
                 PICK = args.out_dir / f"step-{i:02d}-attempt-{attempt}-pick.json"
-            # shift the aim sideways when the direct line would click a prop
-            off = [base[0], base[1], 0.0]
-            if attempt:
-                px, py = -dy / dist, dx / dist
-                sign = 1.0 if attempt == 1 else -1.0
-                off[0] += px * 12.0 * sign
-                off[1] += py * 12.0 * sign
+            angle = math.radians(angle_deg)
+            off = [base[0] * math.cos(angle) - base[1] * math.sin(angle),
+                   base[0] * math.sin(angle) + base[1] * math.cos(angle), 0.0]
             got = project(args.pid, args.context, actor, off)
             if got is None:
-                print("  attempt %d: projection failed" % attempt)
+                print("  attempt %d (%+.0f deg): projection failed" % (attempt, angle_deg))
                 continue
             x, y, viewport = got
             hit = entity_at(args.pid, args.context, x, y)
             if hit is None:
                 pix = (x, y)
-                print("  aim (%.1f,%.1f) -> pixel (%.1f,%.1f)" % (off[0], off[1], x, y))
+                print("  aim %+.0f deg (%.1f,%.1f) -> pixel (%.1f,%.1f)" %
+                      (angle_deg, off[0], off[1], x, y))
                 break
             detail = ("native cylinder, depth %.2f" % hit["depth"] if hit.get("nativeCylinder")
                       else "%.1f px" % hit["screenDistance"])
-            print("  attempt %d: pixel (%.1f,%.1f) would hit %s (SNO %s, %s)" %
-                  (attempt, x, y, hit.get("id"), hit.get("sno"), detail))
+            print("  attempt %d (%+.0f deg): pixel (%.1f,%.1f) would hit %s (SNO %s, %s)" %
+                  (attempt, angle_deg, x, y, hit.get("id"), hit.get("sno"), detail))
         if pix is None:
             print("step %d: no clear aim point, stop" % i)
             return

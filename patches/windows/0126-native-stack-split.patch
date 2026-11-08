@@ -1,0 +1,55 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1994,6 +1994,17 @@
+         return 1;
+     }
+     if (!ui_item_pick(p, &c, &item)) return 0;
++    if ((flags & NATIVE_POINTER_UI_SHIFT) && !(flags & NATIVE_POINTER_UI_RIGHT)) {
++        GuestResult r;
++        const u64 stack_args[] = {item.entity};
++        if (!guest_call(p->cpu, 0x848A2D0, stack_args, 1, NULL, 0, &r) ||
++            (u32)r.x0 < 2) return 1;
++        const u64 split_args[] = {item.handle, c.player};
++        int opened = guest_call(p->cpu, 0x836E360, split_args, 2, NULL, 0, NULL);
++        LOG("native: item split %u handle=%08x stack=%u -> %s\n", press->serial,
++            item.handle, (u32)r.x0, opened ? "opened" : "incomplete");
++        return 1;
++    }
+     if (flags & NATIVE_POINTER_UI_RIGHT)
+         return ui_item_move(p, &c, &item, c.stash || item.side ? -1 : (int)c.category,
+                             c.stash && !item.side ? 15 : 0, 0, press->serial);
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -15,6 +15,7 @@
+ #define NATIVE_POINTER_UI_UP (1ull << 17)
+ #define NATIVE_POINTER_UI_RIGHT (1ull << 18)
+ #define NATIVE_POINTER_CTRL (1ull << 19)
++#define NATIVE_POINTER_UI_SHIFT (1ull << 20)
+ #define NATIVE_POINTER_UI_EVENTS (NATIVE_POINTER_UI_DOWN | NATIVE_POINTER_UI_UP | NATIVE_POINTER_UI_RIGHT)
+ /* World commands are consumed on the game thread; no Npad state is produced. */
+ enum { NATIVE_COMMAND_POTION = 1, NATIVE_COMMAND_RECALL = 2 };
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -1338,7 +1338,8 @@
+                                 native_world_click(
+                                     (e.button.x * density - x) / width, (e.button.y * density - y) / height,
+                                     (u32)width, (u32)height, g_lmb_ui ?
+-                                        NATIVE_POINTER_UI_DOWN | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0) :
++                                    NATIVE_POINTER_UI_DOWN | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0) |
++                                        (g_shift_down ? NATIVE_POINTER_UI_SHIFT : 0) :
+                                         (g_shift_down ? NATIVE_POINTER_STAND_STILL : 0));
+                                 g_lmb_world = !g_lmb_ui;
+                             }
+@@ -1348,7 +1349,8 @@
+                         g_lmb_world = 0;
+                         if (g_map_press && !g_map_dragged)
+                             pc_world_pointer(g_map_press_x, g_map_press_y,
+-                                NATIVE_POINTER_UI_DOWN | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0));
++                                NATIVE_POINTER_UI_DOWN | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0) |
++                                    (g_shift_down ? NATIVE_POINTER_UI_SHIFT : 0));
+                         g_map_press = g_map_dragged = 0;
+                         if (g_lmb_ui) pc_world_pointer(e.button.x, e.button.y,
+                             NATIVE_POINTER_UI_UP | (g_ctrl_down ? NATIVE_POINTER_CTRL : 0));

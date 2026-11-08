@@ -1,0 +1,21 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -563,8 +563,16 @@
+ }
+ int backend_kbm_reset(void) { return pc_keys_store(g_pc_defaults); }
+ static int pc_key_event(SDL_KeyboardEvent* key) {
+-    if (mouse_steer_on() || (native_world_ui_blocked() && !native_ui_char_page() && !native_world_map_open())) return 0;
++    if (mouse_steer_on()) return 0;
+     SDL_Scancode from = key->scancode;
++    /* The custom Pause / Back binding must also close the pause menu and
++       dialogs. Other rebound actions retain the page-specific ownership gate. */
++    if (from == g_pc_keys[SNX_KBM_BINDINGS - 1]) {
++        key->scancode = SDL_SCANCODE_ESCAPE;
++        key->key = SDLK_ESCAPE;
++        return 0;
++    }
++    if (native_world_ui_blocked() && !native_ui_char_page() && !native_world_map_open()) return 0;
+     /* Map actions have their own fixed 1/3 hints, independent of combat keys. */
+     if (native_world_map_open() && (from == SDL_SCANCODE_1 || from == SDL_SCANCODE_3)) return 0;
+     for (int i = 0; i < SNX_KBM_BINDINGS; i++) {

@@ -1,0 +1,46 @@
+diff --git a/src/nx/runtime/native_ui.c b/src/nx/runtime/native_ui.c
+--- a/src/nx/runtime/native_ui.c
++++ b/src/nx/runtime/native_ui.c
+@@ -1608,8 +1608,11 @@
+     else if (!strcmp(name, "button3")) pad = 1ull << 2;
+     else if (!strcmp(name, "button4")) pad = 1ull << 3;
+     else if (!strcmp(name, "l3")) pad = 1ull << 4;
+-    else if (!strcmp(name, "l2")) pad = 1ull << 8;
+-    else if (!strcmp(name, "r2")) pad = 1ull << 9;
++    /* The console hint art names the back triggers l2/r2, but this game
++       exposes them as the L/R shoulder actions (4/5).  Sending ZL/ZR here
++       only closed the map: the bounty list is L and the boss list is R. */
++    else if (!strcmp(name, "l2")) pad = 1ull << 6;
++    else if (!strcmp(name, "r2")) pad = 1ull << 7;
+     if (!pad) {
+         LOG("native: UI footer %u cell %d name %s has no pad\n", serial, cell, name);
+         return 0;
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -497,8 +497,11 @@
+     for (int i = 0; i < 6; i++)
+         if (k == g_skill_key[i]) return SKILL_PAD[i];
+     switch (k) {
+-        case SDL_SCANCODE_1: return 1ull << 8;     /* ZL */
+-        case SDL_SCANCODE_3: return 1ull << 9;     /* ZR */
++        /* The console map advertises the bounty list as l2 and the boss list as
++           r2, but the game binds them to the L/R actions.  The map's own page is
++           not "ui blocked", so test the map page itself instead. */
++        case SDL_SCANCODE_1: return native_world_map_open() ? (1ull << 6) : (1ull << 8);
++        case SDL_SCANCODE_3: return native_world_map_open() ? (1ull << 7) : (1ull << 9);
+         case SDL_SCANCODE_RETURN: return 1ull << 10;
+         case SDL_SCANCODE_BACKSPACE: return 1ull << 11;
+         case SDL_SCANCODE_TAB:
+@@ -1141,7 +1144,10 @@
+ }
+ 
+ static int pc_skill_digit(SDL_Scancode scancode, int repeat, SDL_Keymod modifiers) {
+-    if (scancode < SDL_SCANCODE_1 || scancode > SDL_SCANCODE_4 || native_world_ui_blocked()) return 0;
++    /* The map page is not "ui blocked", so a digit there would otherwise cast a
++       world skill and swallow the key the map advertises as the bounty list. */
++    if (scancode < SDL_SCANCODE_1 || scancode > SDL_SCANCODE_4 ||
++        native_world_ui_blocked() || native_world_map_open()) return 0;
+     if (repeat || (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) return 1;
+     float pointer_x = g_mouse_x, pointer_y = g_mouse_y;
+     if (!isfinite(pointer_x) || !isfinite(pointer_y) || pointer_x < 0 || pointer_y < 0)

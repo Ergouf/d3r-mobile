@@ -1,0 +1,176 @@
+diff --git a/src/nx/runtime/platform/backend.h b/src/nx/runtime/platform/backend.h
+--- a/src/nx/runtime/platform/backend.h
++++ b/src/nx/runtime/platform/backend.h
+@@ -19,7 +19,15 @@
+ /* the touch screen's mode chosen in the game's menu, saved to the .ini: 0 off, 1 fingers, 2 fingers and the mouse */
+ void backend_touch_set(int mode);
+ /* Native PC actions, configured by the keyboard page (scancodes, not text). */
+-#define SNX_KBM_BINDINGS 12
++enum {
++    SNX_KBM_SKILL1 = 0, SNX_KBM_SKILL2, SNX_KBM_SKILL3, SNX_KBM_SKILL4,
++    SNX_KBM_POTION, SNX_KBM_RECALL, SNX_KBM_INVENTORY, SNX_KBM_SKILLS,
++    SNX_KBM_JOURNAL, SNX_KBM_PARAGON, SNX_KBM_MAP, SNX_KBM_PAUSE_BACK,
++    SNX_KBM_MOVE_UP, SNX_KBM_MOVE_LEFT, SNX_KBM_MOVE_DOWN, SNX_KBM_MOVE_RIGHT,
++    SNX_KBM_MENU_UP, SNX_KBM_MENU_LEFT, SNX_KBM_MENU_DOWN, SNX_KBM_MENU_RIGHT,
++    SNX_KBM_CONFIRM, SNX_KBM_CANCEL,
++    SNX_KBM_BINDINGS
++};
+ const char* backend_kbm_action(int index);
+ const char* backend_kbm_key(int index);
+ int backend_kbm_bind(int index, int scancode);
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -440,21 +440,31 @@
+ static int g_skill_keys_loaded;
+ static const char* const g_pc_names[SNX_KBM_BINDINGS] = {
+     "skill1", "skill2", "skill3", "skill4", "potion", "recall",
+-    "inventory", "skills", "journal", "paragon", "map", "pause"
++    "inventory", "skills", "journal", "paragon", "map", "pause",
++    "move_up", "move_left", "move_down", "move_right",
++    "menu_up", "menu_left", "menu_down", "menu_right", "confirm", "cancel"
+ };
+ static const char* const g_pc_actions[SNX_KBM_BINDINGS] = {
+     "Skill 1", "Skill 2", "Skill 3", "Skill 4", "Potion", "Town portal",
+-    "Inventory", "Skills", "Journal", "Paragon", "Map", "Pause / Back"
++    "Inventory", "Skills", "Journal", "Paragon", "Map", "Pause / Back",
++    "Move up", "Move left", "Move down", "Move right",
++    "Menu up", "Menu left", "Menu down", "Menu right", "Confirm", "Cancel"
+ };
+ static const SDL_Scancode g_pc_defaults[SNX_KBM_BINDINGS] = {
+     SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
+-    SDL_SCANCODE_Q, SDL_SCANCODE_T, SDL_SCANCODE_C, SDL_SCANCODE_S,
+-    SDL_SCANCODE_J, SDL_SCANCODE_P, SDL_SCANCODE_M, SDL_SCANCODE_ESCAPE
++    SDL_SCANCODE_Q, SDL_SCANCODE_T, SDL_SCANCODE_C, SDL_SCANCODE_K,
++    SDL_SCANCODE_J, SDL_SCANCODE_P, SDL_SCANCODE_M, SDL_SCANCODE_ESCAPE,
++    SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D,
++    SDL_SCANCODE_UP, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN, SDL_SCANCODE_RIGHT,
++    SDL_SCANCODE_RETURN, SDL_SCANCODE_BACKSPACE
+ };
+ static SDL_Scancode g_pc_keys[SNX_KBM_BINDINGS] = {
+     SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
+-    SDL_SCANCODE_Q, SDL_SCANCODE_T, SDL_SCANCODE_C, SDL_SCANCODE_S,
+-    SDL_SCANCODE_J, SDL_SCANCODE_P, SDL_SCANCODE_M, SDL_SCANCODE_ESCAPE
++    SDL_SCANCODE_Q, SDL_SCANCODE_T, SDL_SCANCODE_C, SDL_SCANCODE_K,
++    SDL_SCANCODE_J, SDL_SCANCODE_P, SDL_SCANCODE_M, SDL_SCANCODE_ESCAPE,
++    SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D,
++    SDL_SCANCODE_UP, SDL_SCANCODE_LEFT, SDL_SCANCODE_DOWN, SDL_SCANCODE_RIGHT,
++    SDL_SCANCODE_RETURN, SDL_SCANCODE_BACKSPACE
+ };
+ 
+ 
+@@ -481,6 +491,7 @@
+         skill_keys_publish();
+         return;
+     }
++    int pc_seen[SNX_KBM_BINDINGS] = {0};
+     while (fgets(line, sizeof line, f)) {
+         char name[16], value[64];
+         int slot = -1;
+@@ -490,7 +501,10 @@
+             if (!strcmp(name, g_pc_names[i])) pc_slot = i;
+         if (pc_slot >= 0) {
+             SDL_Scancode key = SDL_GetScancodeFromName(value);
+-            if (key != SDL_SCANCODE_UNKNOWN) g_pc_keys[pc_slot] = key;
++            if (key != SDL_SCANCODE_UNKNOWN) {
++                g_pc_keys[pc_slot] = key;
++                pc_seen[pc_slot] = 1;
++            }
+             continue;
+         }
+         for (int i = 0; i < 6; i++)
+@@ -511,6 +525,15 @@
+         g_skill_key[slot] = k;
+     }
+     fclose(f);
++    /* Older 12-action files used S for the skills page. With full movement
++       bindings, S is now Move down. Migrate that one legacy collision while
++       leaving any explicitly saved move_down binding untouched. */
++    if (!pc_seen[SNX_KBM_MOVE_DOWN] &&
++        g_pc_keys[SNX_KBM_SKILLS] == g_pc_defaults[SNX_KBM_MOVE_DOWN]) {
++        g_pc_keys[SNX_KBM_SKILLS] = g_pc_defaults[SNX_KBM_SKILLS];
++        WARN("input: migrated legacy skills=S to skills=%s; S is Move down\n",
++             SDL_GetScancodeName(g_pc_defaults[SNX_KBM_SKILLS]));
++    }
+     skill_keys_publish();
+     LOG("input: skill keys %s=%s %s=%s %s=%s %s=%s %s=%s %s=%s\n", names[0],
+         SDL_GetScancodeName(g_skill_key[0]), names[1], SDL_GetScancodeName(g_skill_key[1]),
+@@ -545,17 +568,21 @@
+     return 1;
+ }
+ int backend_kbm_bind(int index, int scancode) {
+-    if (index < 0 || index >= SNX_KBM_BINDINGS || scancode < SDL_SCANCODE_A ||
+-        scancode > SDL_SCANCODE_Z) {
+-        if (scancode < SDL_SCANCODE_1 || scancode > SDL_SCANCODE_0) return 0;
+-        if (index < 0 || index >= SNX_KBM_BINDINGS) return 0;
+-    }
++    if (index < 0 || index >= SNX_KBM_BINDINGS || scancode <= SDL_SCANCODE_UNKNOWN ||
++        scancode >= SDL_SCANCODE_COUNT) return 0;
++    /* Fixed aliases and modifiers must remain reachable. Movement, journal,
++       inventory and all menu controls are represented by the configurable
++       entries below, so their defaults no longer need to be reserved. */
++    if (scancode == SDL_SCANCODE_I || scancode == SDL_SCANCODE_Z || scancode == SDL_SCANCODE_V ||
++        scancode == SDL_SCANCODE_L || scancode == SDL_SCANCODE_ESCAPE ||
++        scancode == SDL_SCANCODE_F1 || scancode == SDL_SCANCODE_F2 ||
++        scancode == SDL_SCANCODE_F11 || scancode == SDL_SCANCODE_LCTRL ||
++        scancode == SDL_SCANCODE_RCTRL || scancode == SDL_SCANCODE_LSHIFT ||
++        scancode == SDL_SCANCODE_RSHIFT || scancode == SDL_SCANCODE_LALT ||
++        scancode == SDL_SCANCODE_RALT || scancode == SDL_SCANCODE_LGUI ||
++        scancode == SDL_SCANCODE_RGUI) return 0;
+     for (int i = 0; i < SNX_KBM_BINDINGS; i++)
+         if (i != index && g_pc_keys[i] == scancode) return 0;
+-    /* Fixed movement, compare and menu controls must remain reachable. */
+-    if (scancode == SDL_SCANCODE_W || scancode == SDL_SCANCODE_A || scancode == SDL_SCANCODE_D ||
+-        scancode == SDL_SCANCODE_I || scancode == SDL_SCANCODE_Z || scancode == SDL_SCANCODE_V ||
+-        scancode == SDL_SCANCODE_K || scancode == SDL_SCANCODE_L) return 0;
+     SDL_Scancode keys[SNX_KBM_BINDINGS];
+     memcpy(keys, g_pc_keys, sizeof keys);
+     keys[index] = (SDL_Scancode)scancode;
+@@ -567,12 +594,25 @@
+     SDL_Scancode from = key->scancode;
+     /* The custom Pause / Back binding must also close the pause menu and
+        dialogs. Other rebound actions retain the page-specific ownership gate. */
+-    if (from == g_pc_keys[SNX_KBM_BINDINGS - 1]) {
++    if (from == g_pc_keys[SNX_KBM_PAUSE_BACK]) {
+         key->scancode = SDL_SCANCODE_ESCAPE;
+         key->key = SDLK_ESCAPE;
+         return 0;
+     }
+-    if (native_world_ui_blocked() && !native_ui_char_page() && !native_world_map_open()) return 0;
++    int positioned_dialog = native_world_ui_blocked() && !native_ui_char_page() &&
++                            !native_world_map_open();
++    int menu_key = 0;
++    if (positioned_dialog) {
++        for (int i = SNX_KBM_MENU_UP; i <= SNX_KBM_CANCEL; i++)
++            if (from == g_pc_keys[i]) { menu_key = 1; break; }
++        if (!menu_key) {
++            for (int i = SNX_KBM_MENU_UP; i <= SNX_KBM_CANCEL; i++)
++                if (from == g_pc_defaults[i]) return 1;
++            return 0;
++        }
++        if (from == g_pc_keys[SNX_KBM_CONFIRM]) { native_action_press(1ull << 0); return 1; }
++        if (from == g_pc_keys[SNX_KBM_CANCEL]) { native_action_press(1ull << 1); return 1; }
++    }
+     /* Map actions have their own fixed 1/3 hints, independent of combat keys. */
+     if (native_world_map_open() && (from == SDL_SCANCODE_1 || from == SDL_SCANCODE_3)) return 0;
+     for (int i = 0; i < SNX_KBM_BINDINGS; i++) {
+@@ -582,8 +622,8 @@
+         return 0;
+     }
+     /* Esc always remains available as a back key. Tab remains a map alias. */
+-    for (int i = 0; i < SNX_KBM_BINDINGS - 1; i++)
+-        if (from == g_pc_defaults[i]) return 1;
++    for (int i = 0; i < SNX_KBM_BINDINGS; i++)
++        if (i != SNX_KBM_PAUSE_BACK && from == g_pc_defaults[i]) return 1;
+     return 0;
+ }
+ 
+@@ -1486,7 +1526,7 @@
+                     int tab = -1;
+                     switch (e.key.scancode) {
+                         case SDL_SCANCODE_C: tab = 0; break;
+-                        case SDL_SCANCODE_S: tab = 1; break;
++                        case SDL_SCANCODE_K: tab = 1; break;
+                         case SDL_SCANCODE_J: tab = 4; break;
+                         case SDL_SCANCODE_P: tab = 2; break;
+                         default: break;

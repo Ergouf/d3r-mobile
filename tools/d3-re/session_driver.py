@@ -29,14 +29,24 @@ import psutil
 import version
 import probe_ui_tree
 
-KEYS = {"ctrl": (224, 0x400000E0), "esc": (41, 27), "backspace": (42, 8), "i": (12, 105), "alt": (226, 0x400000E2),
-        "w": (26, 119), "a": (4, 97), "s": (22, 115), "d": (7, 100),
-        "space": (44, 32), "enter": (40, 13), "z": (29, 122), "c": (6, 99),
-        "v": (25, 118), "q": (20, 113), "e": (8, 101), "j": (13, 106), "t": (23, 116),
-        "h": (11, 104), "k": (14, 107), "l": (15, 108), "m": (16, 109), "p": (19, 112),
-        "1": (30, 49), "2": (31, 50), "3": (32, 51), "4": (33, 52), "tab": (43, 9),
-        "f3": (61, 0x4000003D), "shift": (225, 0x400000E1), "right": (79, 0x4000004F),
-        "left": (80, 0x40000050), "down": (81, 0x40000051), "up": (82, 0x40000052)}
+KEYS = {
+    "ctrl": (224, 0x400000E0), "esc": (41, 27), "backspace": (42, 8),
+    "tab": (43, 9), "space": (44, 32), "enter": (40, 13),
+    "f2": (59, 0x4000003B), "f3": (60, 0x4000003C),
+    "f4": (61, 0x4000003D), "f5": (62, 0x4000003E), "f6": (63, 0x4000003F),
+    "f7": (64, 0x40000040), "f8": (65, 0x40000041), "f9": (66, 0x40000042),
+    "f10": (67, 0x40000043),
+    "home": (74, 0x4000004A), "end": (77, 0x4000004D),
+    "insert": (73, 0x40000049), "delete": (76, 0x4000004C),
+    "pageup": (75, 0x4000004B), "pagedown": (78, 0x4000004E),
+    "minus": (45, 45), "equals": (46, 61),
+    "shift": (225, 0x400000E1), "alt": (226, 0x400000E2),
+    "right": (79, 0x4000004F), "left": (80, 0x40000050),
+    "down": (81, 0x40000051), "up": (82, 0x40000052),
+    **{ch: (4 + i, ord(ch)) for i, ch in enumerate("abcdefghijklmnopqrstuvwxyz")},
+    **{str(i): (29 + i, ord(str(i))) for i in range(1, 10)},
+    "0": (39, ord("0")),
+}
 
 SLEEP_CHUNK_S = 30.0
 
@@ -53,11 +63,108 @@ rpc.exports.drive = function(actions) {
   const getId = new NativeFunction(base.add(RVA.sdl_get_window_id), 'uint', ['pointer']);
   const id = getId(win);
   const push = new NativeFunction(base.add(RVA.sdl_push_event), 'bool', ['pointer']);
+  function keyEvent(scan, code, down, mod) {
+    const ev = Memory.alloc(128);
+    ev.writeByteArray(new Uint8Array(128));
+    ev.writeU32(down ? 0x300 : 0x301);
+    ev.add(16).writeU32(id);
+    ev.add(24).writeU32(scan);
+    ev.add(28).writeU32(code);
+    ev.add(32).writeU16(mod);
+    ev.add(36).writeU8(down ? 1 : 0);
+    return push(ev);
+  }
   const out = [];
   for (const a of actions) {
-    if (a.click) {
-      const fx = a.click[0] * width / 1280.0, fy = a.click[1] * height / 720.0;
+    if (a.drag) {
+      const safe = Memory.alloc(16);
+      new NativeFunction(base.add(RVA.backend_window_safe), 'void',
+                         ['pointer', 'pointer', 'pointer', 'pointer'])(
+                           safe, safe.add(4), safe.add(8), safe.add(12));
+      const area = [0,4,8,12].map(o => safe.add(o).readS32());
+      let dw = area[2], dh = Math.floor(dw * 720 / 1280);
+      if (dh > area[3]) { dh = area[3]; dw = Math.floor(dh * 1280 / 720); }
+      const dx = area[0] + Math.floor((area[2] - dw) / 2);
+      const dy = area[1] + Math.floor((area[3] - dh) / 2);
+      const points = [[a.drag[0], a.drag[1]], [a.drag[2], a.drag[3]]].map(([x,y]) =>
+        [(dx + x * dw / 1280.0) / density, (dy + y * dh / 720.0) / density]);
       const res = [];
+      for (let phase = 0; phase < 3; phase++) {
+        const ev = Memory.alloc(128);
+        ev.writeByteArray(new Uint8Array(128));
+        const point = points[phase === 0 ? 0 : 1];
+        if (phase === 1) {
+          ev.writeU32(0x400);
+          ev.add(16).writeU32(id); ev.add(20).writeU32(1); ev.add(24).writeU32(1);
+          ev.add(28).writeFloat(point[0]); ev.add(32).writeFloat(point[1]);
+        } else {
+          ev.writeU32(phase === 0 ? 0x401 : 0x402);
+          ev.add(16).writeU32(id); ev.add(24).writeU8(1);
+          ev.add(25).writeU8(phase === 0 ? 1 : 0); ev.add(26).writeU8(1);
+          ev.add(28).writeFloat(point[0]); ev.add(32).writeFloat(point[1]);
+        }
+        res.push(push(ev));
+      }
+      out.push({drag: a.drag, logicalPixel: points, pushed: res});
+    } else if (a.wheel) {
+      const ev = Memory.alloc(128);
+      ev.writeByteArray(new Uint8Array(128));
+      ev.writeU32(0x403);
+      ev.add(16).writeU32(id);
+      ev.add(24).writeFloat(a.wheel[0]);
+      ev.add(28).writeFloat(a.wheel[1]);
+      ev.add(32).writeU32(0);
+      ev.add(44).writeS32(Math.trunc(a.wheel[0]));
+      ev.add(48).writeS32(Math.trunc(a.wheel[1]));
+      out.push({wheel: a.wheel, pushed: push(ev)});
+    } else if (a.move) {
+      // Queue a pointer position without synthesizing a button press. This
+      // mirrors probe_pointer_move and lets a following skill key resolve the
+      // live world target from the same attach.
+      const safe = Memory.alloc(16);
+      new NativeFunction(base.add(RVA.backend_window_safe), 'void',
+                         ['pointer', 'pointer', 'pointer', 'pointer'])(
+                           safe, safe.add(4), safe.add(8), safe.add(12));
+      const area = [0,4,8,12].map(o => safe.add(o).readS32());
+      if (!(density > 0 && area[2] > 0 && area[3] > 0)) throw new Error('invalid safe area');
+      let dw = area[2], dh = Math.floor(dw * 720 / 1280);
+      if (dh > area[3]) { dh = area[3]; dw = Math.floor(dh * 1280 / 720); }
+      const dx = area[0] + Math.floor((area[2] - dw) / 2);
+      const dy = area[1] + Math.floor((area[3] - dh) / 2);
+      const fx = dx + a.move[0] * dw / 1280.0, fy = dy + a.move[1] * dh / 720.0;
+      const ev = Memory.alloc(128);
+      ev.writeByteArray(new Uint8Array(128));
+      ev.writeU32(0x400);
+      ev.add(16).writeU32(id);
+      ev.add(20).writeU32(1);
+      ev.add(28).writeFloat(fx / density);
+      ev.add(32).writeFloat(fy / density);
+      out.push({move: a.move, window: [width, height],
+                pictureRect: [dx, dy, dw, dh], logicalPixel: [fx / density, fy / density],
+                pixelDensity: density, pushed: [push(ev)]});
+    } else if (a.click) {
+      // Match probe_pointer_click and the production letterboxed viewport.
+      const safe = Memory.alloc(16);
+      new NativeFunction(base.add(RVA.backend_window_safe), 'void',
+                         ['pointer', 'pointer', 'pointer', 'pointer'])(
+                           safe, safe.add(4), safe.add(8), safe.add(12));
+      const area = [0,4,8,12].map(o => safe.add(o).readS32());
+      if (!(density > 0 && area[2] > 0 && area[3] > 0)) throw new Error('invalid safe area');
+      let dw = area[2], dh = Math.floor(dw * 720 / 1280);
+      if (dh > area[3]) { dh = area[3]; dw = Math.floor(dh * 1280 / 720); }
+      const dx = area[0] + Math.floor((area[2] - dw) / 2);
+      const dy = area[1] + Math.floor((area[3] - dh) / 2);
+      const fx = dx + a.click[0] * dw / 1280.0, fy = dy + a.click[1] * dh / 720.0;
+      const res = [];
+      const modifiers = [];
+      if (a.ctrl) modifiers.push([224, 0x400000E0, 0x40]);
+      if (a.shift) modifiers.push([225, 0x400000E1, 1]);
+      if (a.alt) modifiers.push([226, 0x400000E2, 0x100]);
+      let mod = 0;
+      for (const [scan, code, bit] of modifiers) {
+        mod |= bit;
+        res.push(keyEvent(scan, code, true, mod));
+      }
       for (const down of [true, false]) {
         const ev = Memory.alloc(128);
         ev.writeByteArray(new Uint8Array(128));
@@ -70,11 +177,18 @@ rpc.exports.drive = function(actions) {
         ev.add(32).writeFloat(fy / density);
         res.push(push(ev));
       }
-      out.push({click: a.click, window: [width, height], pushed: res});
+      for (const [scan, code, bit] of modifiers.reverse()) {
+        mod &= ~bit;
+        res.push(keyEvent(scan, code, false, mod));
+      }
+      out.push({click: a.click, window: [width, height],
+                pictureRect: [dx, dy, dw, dh], logicalPixel: [fx / density, fy / density],
+                pixelDensity: density, shift: !!a.shift, ctrl: !!a.ctrl, alt: !!a.alt, pushed: res});
     } else if (a.key) {
       const k = a.key;
       const res = [];
-      for (const down of [true, false]) {
+      const phases = a.phase === 'down' ? [true] : a.phase === 'up' ? [false] : [true, false];
+      for (const down of phases) {
         const ev = Memory.alloc(128);
         ev.writeByteArray(new Uint8Array(128));
         ev.writeU32(down ? 0x300 : 0x301);
@@ -147,9 +261,38 @@ def _prepare(actions: list) -> list[dict]:
             if key not in KEYS:
                 raise SystemExit("unknown key " + str(key))
             scan, code = KEYS[key]
-            prepared.append({"type": "key", "index": index,
-                             "action": {"key": {"name": key, "scan": scan, "code": code},
-                                        "mod": 0xC0 if action.get("ctrl") else 0}})
+            phase = action.get("phase")
+            if phase not in (None, "down", "up", "both"):
+                raise SystemExit(f"action {index}: key phase must be down, up, or both")
+            ready = {"key": {"name": key, "scan": scan, "code": code},
+                     "mod": 0xC0 if action.get("ctrl") else 0}
+            if phase in ("down", "up"):
+                ready["phase"] = phase
+            prepared.append({"type": "key", "index": index, "action": ready})
+        elif "drag" in action:
+            drag = action["drag"]
+            if (not isinstance(drag, (list, tuple)) or len(drag) != 4 or
+                    any(isinstance(v, bool) or not isinstance(v, (int, float))
+                        or not math.isfinite(float(v)) for v in drag)):
+                raise SystemExit(f"action {index}: drag must be [x1, y1, x2, y2] with finite numbers")
+            prepared.append({"type": "drag", "index": index,
+                             "action": {"drag": [float(v) for v in drag]}})
+        elif "wheel" in action:
+            wheel = action["wheel"]
+            if (not isinstance(wheel, (list, tuple)) or len(wheel) != 2 or
+                    any(isinstance(v, bool) or not isinstance(v, (int, float))
+                        or not math.isfinite(float(v)) for v in wheel)):
+                raise SystemExit(f"action {index}: wheel must be [x, y] with finite numbers")
+            prepared.append({"type": "wheel", "index": index,
+                             "action": {"wheel": [float(wheel[0]), float(wheel[1])]}})
+        elif "move" in action:
+            move = action["move"]
+            if (not isinstance(move, (list, tuple)) or len(move) != 2
+                    or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                           or not math.isfinite(float(v)) for v in move)):
+                raise SystemExit(f"action {index}: move must be [x, y] with finite numbers")
+            prepared.append({"type": "move", "index": index,
+                             "action": {"move": [float(move[0]), float(move[1])]}})
         elif "click" in action:
             click = action["click"]
             if (not isinstance(click, (list, tuple)) or len(click) != 2

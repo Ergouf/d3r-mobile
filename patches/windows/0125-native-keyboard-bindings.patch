@@ -1,0 +1,437 @@
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -438,6 +438,24 @@
+ static SDL_Scancode g_skill_key[6] = {SDL_SCANCODE_SPACE, SDL_SCANCODE_Z, SDL_SCANCODE_C,
+                                       SDL_SCANCODE_V, SDL_SCANCODE_Q, SDL_SCANCODE_E};
+ static int g_skill_keys_loaded;
++static const char* const g_pc_names[SNX_KBM_BINDINGS] = {
++    "skill1", "skill2", "skill3", "skill4", "potion", "recall",
++    "inventory", "skills", "journal", "paragon", "map", "pause"
++};
++static const char* const g_pc_actions[SNX_KBM_BINDINGS] = {
++    "Skill 1", "Skill 2", "Skill 3", "Skill 4", "Potion", "Town portal",
++    "Inventory", "Skills", "Journal", "Paragon", "Map", "Pause / Back"
++};
++static const SDL_Scancode g_pc_defaults[SNX_KBM_BINDINGS] = {
++    SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
++    SDL_SCANCODE_Q, SDL_SCANCODE_T, SDL_SCANCODE_C, SDL_SCANCODE_S,
++    SDL_SCANCODE_J, SDL_SCANCODE_P, SDL_SCANCODE_M, SDL_SCANCODE_ESCAPE
++};
++static SDL_Scancode g_pc_keys[SNX_KBM_BINDINGS] = {
++    SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
++    SDL_SCANCODE_Q, SDL_SCANCODE_T, SDL_SCANCODE_C, SDL_SCANCODE_S,
++    SDL_SCANCODE_J, SDL_SCANCODE_P, SDL_SCANCODE_M, SDL_SCANCODE_ESCAPE
++};
+ 
+ 
+ /* Publish the six bindings to the overlay, which owns the display strings. */
+@@ -467,6 +485,14 @@
+         char name[16], value[64];
+         int slot = -1;
+         if (sscanf(line, " %15[^= \t] = %63s", name, value) != 2) continue;
++        int pc_slot = -1;
++        for (int i = 0; i < SNX_KBM_BINDINGS; i++)
++            if (!strcmp(name, g_pc_names[i])) pc_slot = i;
++        if (pc_slot >= 0) {
++            SDL_Scancode key = SDL_GetScancodeFromName(value);
++            if (key != SDL_SCANCODE_UNKNOWN) g_pc_keys[pc_slot] = key;
++            continue;
++        }
+         for (int i = 0; i < 6; i++)
+             if (!strcmp(name, names[i])) slot = i;
+         if (slot < 0) {
+@@ -490,6 +516,67 @@
+         SDL_GetScancodeName(g_skill_key[0]), names[1], SDL_GetScancodeName(g_skill_key[1]),
+         names[2], SDL_GetScancodeName(g_skill_key[2]), names[3], SDL_GetScancodeName(g_skill_key[3]),
+         names[4], SDL_GetScancodeName(g_skill_key[4]), names[5], SDL_GetScancodeName(g_skill_key[5]));
++}
++
++const char* backend_kbm_action(int index) {
++    return index >= 0 && index < SNX_KBM_BINDINGS ? g_pc_actions[index] : "";
++}
++const char* backend_kbm_key(int index) {
++    return index >= 0 && index < SNX_KBM_BINDINGS ?
++        SDL_GetScancodeName(__atomic_load_n(&g_pc_keys[index], __ATOMIC_ACQUIRE)) : "";
++}
++static int pc_keys_store(const SDL_Scancode* keys) {
++    char path[1100], temporary[1120];
++    snprintf(path, sizeof path, "%skeybinds.ini", g_exedir);
++    snprintf(temporary, sizeof temporary, "%s.tmp", path);
++    FILE* file = fopen(temporary, "w");
++    if (!file) return 0;
++    static const char* const legacy[6] = {"a", "b", "x", "y", "l", "r"};
++    int ok = 1;
++    for (int i = 0; i < 6; i++)
++        if (fprintf(file, "%s=%s\n", legacy[i], SDL_GetScancodeName(g_skill_key[i])) < 0) ok = 0;
++    for (int i = 0; i < SNX_KBM_BINDINGS; i++)
++        if (fprintf(file, "%s=%s\n", g_pc_names[i], SDL_GetScancodeName(keys[i])) < 0) ok = 0;
++    if (fclose(file)) ok = 0;
++    if (!ok || !SDL_RenamePath(temporary, path)) { remove(temporary); return 0; }
++    for (int i = 0; i < SNX_KBM_BINDINGS; i++)
++        __atomic_store_n(&g_pc_keys[i], keys[i], __ATOMIC_RELEASE);
++    LOG("input: PC bindings saved\n");
++    return 1;
++}
++int backend_kbm_bind(int index, int scancode) {
++    if (index < 0 || index >= SNX_KBM_BINDINGS || scancode < SDL_SCANCODE_A ||
++        scancode > SDL_SCANCODE_Z) {
++        if (scancode < SDL_SCANCODE_1 || scancode > SDL_SCANCODE_0) return 0;
++        if (index < 0 || index >= SNX_KBM_BINDINGS) return 0;
++    }
++    for (int i = 0; i < SNX_KBM_BINDINGS; i++)
++        if (i != index && g_pc_keys[i] == scancode) return 0;
++    /* Fixed movement, compare and menu controls must remain reachable. */
++    if (scancode == SDL_SCANCODE_W || scancode == SDL_SCANCODE_A || scancode == SDL_SCANCODE_D ||
++        scancode == SDL_SCANCODE_I || scancode == SDL_SCANCODE_Z || scancode == SDL_SCANCODE_V ||
++        scancode == SDL_SCANCODE_K || scancode == SDL_SCANCODE_L) return 0;
++    SDL_Scancode keys[SNX_KBM_BINDINGS];
++    memcpy(keys, g_pc_keys, sizeof keys);
++    keys[index] = (SDL_Scancode)scancode;
++    return pc_keys_store(keys);
++}
++int backend_kbm_reset(void) { return pc_keys_store(g_pc_defaults); }
++static int pc_key_event(SDL_KeyboardEvent* key) {
++    if (mouse_steer_on() || (native_world_ui_blocked() && !native_ui_char_page() && !native_world_map_open())) return 0;
++    SDL_Scancode from = key->scancode;
++    /* Map actions have their own fixed 1/3 hints, independent of combat keys. */
++    if (native_world_map_open() && (from == SDL_SCANCODE_1 || from == SDL_SCANCODE_3)) return 0;
++    for (int i = 0; i < SNX_KBM_BINDINGS; i++) {
++        if (from != g_pc_keys[i]) continue;
++        key->scancode = g_pc_defaults[i];
++        key->key = SDL_GetKeyFromScancode(key->scancode, SDL_KMOD_NONE, false);
++        return 0;
++    }
++    /* Esc always remains available as a back key. Tab remains a map alias. */
++    for (int i = 0; i < SNX_KBM_BINDINGS - 1; i++)
++        if (from == g_pc_defaults[i]) return 1;
++    return 0;
+ }
+ 
+ static u64 keymap(SDL_Scancode k) {
+@@ -936,6 +1023,8 @@
+ static int menu_event(const SDL_Event* e) {
+     int w, h;
+     float d;
++    if (overlay_shown() && e->type == SDL_EVENT_KEY_DOWN &&
++        overlay_keyboard_key(e->key.scancode, e->key.repeat)) return 1;
+     if ((e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && (e->key.key == SDLK_AC_BACK || e->key.key == SDLK_F2)) ||
+         (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)) {
+         if (vpad_editing())
+@@ -1172,6 +1261,7 @@
+ void video_poll(void) {
+     SDL_Event e;
+     char* left;
++    skill_keys_load();
+     g_hle.hid.mouse_on = g_settings.hid_mouse;
+     left = __atomic_load_n(&g_fatal_left, __ATOMIC_ACQUIRE);
+     if (left) { /* another thread's fatal error, left for this thread to show */
+@@ -1183,6 +1273,7 @@
+     int menu_had = overlay_shown() || vpad_editing();
+     while (!g_opt_headless && SDL_PollEvent(&e)) {
+         if (overlay_event(&e)) continue;
++        if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && pc_key_event(&e.key)) continue;
+         switch (e.type) {
+             case SDL_EVENT_QUIT: g_quit = 1; break;
+             case SDL_EVENT_WINDOW_MINIMIZED:
+@@ -1370,7 +1461,7 @@
+                 }
+                 if (e.key.scancode == SDL_SCANCODE_SPACE &&
+                     !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) &&
+-                    native_world_ui_blocked()) {
++                    native_world_ui_blocked() && !native_world_frontend()) {
+                     if (e.key.repeat) break;
+                     if (native_ui_close_request()) { native_ui_compare_set(0); break; }
+                     /* No specialized owner: use the same Back action as Esc.
+diff --git a/src/nx/runtime/platform/backend.h b/src/nx/runtime/platform/backend.h
+--- a/src/nx/runtime/platform/backend.h
++++ b/src/nx/runtime/platform/backend.h
+@@ -18,6 +18,12 @@
+ int backend_ini(const char* k, const char* v);
+ /* the touch screen's mode chosen in the game's menu, saved to the .ini: 0 off, 1 fingers, 2 fingers and the mouse */
+ void backend_touch_set(int mode);
++/* Native PC actions, configured by the keyboard page (scancodes, not text). */
++#define SNX_KBM_BINDINGS 12
++const char* backend_kbm_action(int index);
++const char* backend_kbm_key(int index);
++int backend_kbm_bind(int index, int scancode);
++int backend_kbm_reset(void);
+ 
+ /* The window in pixels, for the swapchain; 0 x 0 when headless */
+ void backend_window_size(int* w, int* h);
+diff --git a/src/nx/runtime/platform/overlay.c b/src/nx/runtime/platform/overlay.c
+--- a/src/nx/runtime/platform/overlay.c
++++ b/src/nx/runtime/platform/overlay.c
+@@ -13,8 +13,8 @@
+ #include <string.h>
+ 
+ enum { FIRST = 3, VISIBLE = OVERLAY_ROWS - FIRST - 1 }; /* the items' first row, and how many show at once */
+-enum { PAGE_MAIN, PAGE_CONTROLS, PAGE_BUTTONS, PAGE_PADS, PAGE_MAP };
+-enum { M_CONTROLS, M_PADS, M_EXIT, M_COUNT };                                          /* the first page's items */
++enum { PAGE_MAIN, PAGE_CONTROLS, PAGE_BUTTONS, PAGE_PADS, PAGE_MAP, PAGE_KEYBOARD };
++enum { M_CONTROLS, M_PADS, M_KEYBOARD, M_EXIT, M_COUNT };                                          /* the first page's items */
+ enum { P_PLAYER, P_SWAP, P_DEADZONE, P_RUMBLE, P_BACKGROUND, P_MAP, P_BACK, P_COUNT }; /* the gamepads' page's */
+ /* the controls page's items */
+ enum {
+@@ -53,6 +53,8 @@
+                                           "gamepad_background",
+                                           SNX_GAMEPAD_MAP,
+                                           "Back"};
++static int keyboard_capture = -1;
++static const char* keyboard_status;
+ static int shown, page, focus, top; /* top: the first item showing */
+ static int pad_player;              /* the player the gamepads' page shows: 0 every player's, 1 to SNX_GAMEPADS */
+ /* the YoRHa menu's colours, from its theme.ini (gui_theme_colors.h), as R G B A bytes; the page hides the game under
+@@ -65,11 +67,13 @@
+ 
+ static int items(void) {
+     return page == PAGE_MAIN       ? M_COUNT
++           : page == PAGE_KEYBOARD ? SNX_KBM_BINDINGS + 2
+            : page == PAGE_CONTROLS ? C_COUNT
+            : page == PAGE_PADS     ? P_COUNT
+                                    : SNX_VPAD_COUNT + 2;
+ }
+ static void page_open(int p) {
++    keyboard_capture = -1; keyboard_status = NULL;
+     page = p;
+     focus = top = 0;
+ }
+@@ -110,9 +114,16 @@
+         return;
+     }
+     if (page == PAGE_MAIN) {
+-        static const char* const main_items[M_COUNT] = {SNX_VPAD_PAGE, SNX_GAMEPAD_PAGE, "Exit"};
++        static const char* const main_items[M_COUNT] = {SNX_VPAD_PAGE, SNX_GAMEPAD_PAGE, "Keyboard bindings", "Exit"};
+         snprintf(text, size, "%s", main_items[i]);
+         if (i != M_EXIT) snprintf(value, vsize, ">");
++        return;
++    }
++    if (page == PAGE_KEYBOARD) {
++        snprintf(text, size, "%s", i < SNX_KBM_BINDINGS ? backend_kbm_action(i) :
++                 i == SNX_KBM_BINDINGS ? "Restore defaults" : "Back");
++        if (i < SNX_KBM_BINDINGS) snprintf(value, vsize, "%s",
++            keyboard_capture == i ? "Press a key..." : backend_kbm_key(i));
+         return;
+     }
+     if (page == PAGE_BUTTONS) {
+@@ -236,6 +247,13 @@
+ }
+ /* the item i done, or its value stepped (step -1 or 1; 0 for a select, which steps up) */
+ static int act(int i, int step) {
++    if (page == PAGE_KEYBOARD) {
++        if (step) return OVERLAY_NONE;
++        if (i < SNX_KBM_BINDINGS) { keyboard_capture = i; keyboard_status = NULL; }
++        else if (i == SNX_KBM_BINDINGS) keyboard_status = backend_kbm_reset() ? "Defaults saved." : "Could not save bindings.";
++        else overlay_back();
++        return OVERLAY_NONE;
++    }
+     const IniOpt* o = setting(i);
+     if (o) {
+         int* v = (int*)o->var;
+@@ -261,7 +279,7 @@
+     if (page == PAGE_MAIN) {
+         if (step) return OVERLAY_NONE;
+         if (i == M_EXIT) return OVERLAY_EXIT;
+-        page_open(i == M_PADS ? PAGE_PADS : PAGE_CONTROLS);
++        page_open(i == M_PADS ? PAGE_PADS : i == M_KEYBOARD ? PAGE_KEYBOARD : PAGE_CONTROLS);
+         return OVERLAY_NONE;
+     }
+     if (step) return OVERLAY_NONE;
+@@ -504,6 +522,7 @@
+     return did;
+ }
+ int overlay_back(void) {
++    if (keyboard_capture >= 0) { keyboard_capture = -1; return OVERLAY_NONE; }
+     int from = page;
+     if (page == PAGE_MAIN) return OVERLAY_CLOSE;
+     if (page == PAGE_MAP) return map_key(SNX_PAD_KEY_BACK);
+@@ -512,13 +531,22 @@
+         focus = C_BUTTONS;
+     } else {
+         page_open(PAGE_MAIN);
+-        focus = from == PAGE_PADS ? M_PADS : M_CONTROLS;
++        focus = from == PAGE_PADS ? M_PADS : from == PAGE_KEYBOARD ? M_KEYBOARD : M_CONTROLS;
+     }
+     keep_in_view();
+     return OVERLAY_NONE;
+ }
+ static const char* pads_hint(char* out, size_t size);
+ /* the page showing as a dialog: its title, its hint, the items in view, their texts in text and value */
++int overlay_keyboard_key(int scancode, int repeat) {
++    if (page != PAGE_KEYBOARD || keyboard_capture < 0) return 0;
++    if (repeat) return 1;
++    if (scancode == 41) { keyboard_capture = -1; keyboard_status = "Cancelled."; return 1; }
++    int result = backend_kbm_bind(keyboard_capture, scancode);
++    keyboard_status = result ? "Saved." : "Key reserved, already used, or save failed.";
++    if (result) keyboard_capture = -1;
++    return 1;
++}
+ static void menu_dialog(Dialog* d, char (*text)[OVERLAY_COLS_MAX + 1], char (*value)[OVERLAY_COLS_MAX + 1], char* pads,
+                         size_t size) {
+     static const char* const titles[] = {"SCARLETNX  /  MENU", "SCARLETNX  /  CONTROLS", "SCARLETNX  /  BUTTONS",
+@@ -527,9 +555,10 @@
+                                         "Tap one to show or hide it."};
+     int r, n = items();
+     memset(d, 0, sizeof *d);
+-    d->title = titles[page];
++    d->title = page == PAGE_KEYBOARD ? "SCARLETNX  /  KEYBOARD" : titles[page];
+     d->user = 1;
+-    d->para[0].text = page == PAGE_PADS ? pads_hint(pads, size) : hints[page];
++    d->para[0].text = page == PAGE_KEYBOARD ? (keyboard_status ? keyboard_status :
++        "Select an action, press a key. Esc cancels.") : page == PAGE_PADS ? pads_hint(pads, size) : hints[page];
+     d->para[0].rgba = SOFT;
+     d->paras = 1;
+     d->items = n;
+diff --git a/src/nx/runtime/platform/overlay.h b/src/nx/runtime/platform/overlay.h
+--- a/src/nx/runtime/platform/overlay.h
++++ b/src/nx/runtime/platform/overlay.h
+@@ -38,6 +38,8 @@
+    key */
+ int overlay_listening(void);
+ void overlay_press(int control);
++/* Called before normal menu keys. A pending binding consumes Escape to cancel. */
++int overlay_keyboard_key(int scancode, int repeat);
+ /* a tap at x, y on a picture of sw x sh: what it did, OVERLAY_CLOSE outside the panel */
+ int overlay_tap(float x, float y, int sw, int sh);
+ /* a finger or the mouse (touch.h's SNX_TOUCH_MOUSE) on the open menu, at x, y in the picture's pixels: down on an
+diff --git a/src/nx/runtime/native_labels.c b/src/nx/runtime/native_labels.c
+--- a/src/nx/runtime/native_labels.c
++++ b/src/nx/runtime/native_labels.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-3.0-or-later
+    Native KBM bridge: HUD and footer key labels */
+ #include "nx/runtime/native_kbm.h"
++#include "nx/runtime/platform/backend.h"
+ 
+ u64 g_footer_object;
+ char g_footer_original[512], g_footer_display[512];
+@@ -48,7 +49,7 @@
+         kbm_read32(hud_player + 0xDB74, &input_player) &&
+         kbm_read32(cpu->x[0] + 0x3E0, &label_player) && label_player == input_player &&
+         kbm_read64(cpu->x[0], &vt) && kbm_read64(vt + 0x110, &setter) && setter == LABEL_PC) {
+-        const char* text = potion ? "Q" : NULL;
++        const char* text = potion ? backend_kbm_key(4) : NULL;
+         GuestResult r;
+         if (skill && cpu->x[22] >= 0x28 &&
+             kbm_read32(cpu->x[22] - 0x28, &binding) && binding < 8) {
+@@ -59,7 +60,7 @@
+                 "\xE5\xB7\xA6\xE9\x94\xAE", "\xE5\x8F\xB3\xE9\x94\xAE", "1", "2", "3", "4"
+             };
+             if (guest_call(cpu, 0x840C650, args, 2, NULL, 0, &r) && r.x0 < 6)
+-                text = labels[r.x0];
++                text = r.x0 < 2 ? labels[r.x0] : backend_kbm_key((int)r.x0 - 2);
+         }
+         if (text) {
+             u64 replacement = g_stack_top - 0x17000;
+diff --git a/src/nx/runtime/native_world.c b/src/nx/runtime/native_world.c
+--- a/src/nx/runtime/native_world.c
++++ b/src/nx/runtime/native_world.c
+@@ -93,6 +93,8 @@
+ int native_world_ui_blocked(void) {
+     return __atomic_load_n(&g_ui_blocked, __ATOMIC_ACQUIRE) != 0;
+ }
++static int g_frontend_ui = 1;
++int native_world_frontend(void) { return __atomic_load_n(&g_frontend_ui, __ATOMIC_ACQUIRE); }
+ 
+ 
+ int native_world_hold_kind(void) {
+@@ -1174,6 +1176,22 @@
+     if (!primary || cpu->pc != lr) return;
+     int blocked = cpu->x[0] != 0;
+     __atomic_store_n(&g_ui_blocked, blocked, __ATOMIC_RELEASE);
++    {
++        u64 global, world, manager, map;
++        int frontend = 0;
++        if (kbm_read64(0x914F840, &global) && kbm_read64(global + 0x10, &world) &&
++            kbm_read64(world + 0xB80, &manager) && kbm_read64(manager, &map)) {
++            static const char* const paths[] = {
++                "root.normallayer.consolestart_main", "root.normallayer.consolemainmenu_main",
++                "root.normallayer.console_splashscreen", "root.normallayer.consolecinematics_main"
++            };
++            for (unsigned i = 0; i < sizeof paths / sizeof paths[0]; i++) {
++                u64 page = ui_object(map, ui_path_key(paths[i]));
++                if (page && ui_visible(map, page)) frontend = 1;
++            }
++        }
++        __atomic_store_n(&g_frontend_ui, frontend, __ATOMIC_RELEASE);
++    }
+     if (blocked) {
+         UiTabState state = {0};
+         u64 global, world, manager, map;
+diff --git a/src/nx/runtime/native_world.h b/src/nx/runtime/native_world.h
+--- a/src/nx/runtime/native_world.h
++++ b/src/nx/runtime/native_world.h
+@@ -23,6 +23,7 @@
+ /* Latest pointer position, same normalised coordinates as native_world_click. */
+ void native_world_hover(float x, float y, u32 width, u32 height);
+ int native_world_ui_blocked(void);
++int native_world_frontend(void);
+ /* Space requests a guarded native cancel/close for a service, conversation or
+    prompt. Return 1 also when its guard refuses, so it cannot become confirm. */
+ int native_ui_close_request(void);
+diff --git a/tests/overlay.c b/tests/overlay.c
+--- a/tests/overlay.c
++++ b/tests/overlay.c
+@@ -42,6 +42,10 @@
+ void pm_unlock(PMutex* m) { (void)m; }
+ static int touch = 1;
+ void backend_touch_set(int mode) { touch = mode; }
++const char* backend_kbm_action(int index) { (void)index; return "PC action"; }
++const char* backend_kbm_key(int index) { (void)index; return "H"; }
++int backend_kbm_bind(int index, int scancode) { return index >= 0 && index < SNX_KBM_BINDINGS && scancode == 11; }
++int backend_kbm_reset(void) { return 1; }
+ /* and the gamepads' settings and names, as backend/gamepad.c keeps them; their rows and touch's name them */
+ static SnxGamepadConfig pads; /* the maps; the settings are g_settings' */
+ static const int* pad_stored;
+@@ -182,11 +186,11 @@
+        tallest page, and as wide as three quarters of the picture hold, between 40 and 72 columns */
+     overlay_place(SW, SH, &px, &py, &s);
+     C = overlay_cols(SW, s);
+-    assert(s == 2 && C == OVERLAY_COLS_MAX && px == (SW - C * 16) / 2 && py == (SH - 7 * 32) / 2);
++    assert(s == 2 && C == OVERLAY_COLS_MAX && px == (SW - C * 16) / 2 && py == (SH - 8 * 32) / 2);
+     assert(overlay_cols(1280, 2) == 60 && overlay_cols(500, 1) == 46 && overlay_cols(400, 1) == OVERLAY_COLS &&
+            overlay_cols(3840, 4) == OVERLAY_COLS_MAX);
+     overlay_place(500, 120, &x, &y, &sc);
+-    assert(sc == 1 && x == (500 - 46 * 8) / 2 && y == 4);
++    assert(sc == 1 && x == (500 - 46 * 8) / 2 && y == -4);
+     /* a phone's display scale: the Poco F8 (408 dpi, 2510x1156) and the Pixel 9 (420 dpi) at 3x, where half the
+        picture gave 2x; a 4K picture at 100% keeps the 4x half of it gives */
+     overlay_set_display_scale(408.0f / 160);
+@@ -202,17 +206,17 @@
+     /* the first page: the title on a band of ink, the items under it, the focused one on a band; the page hides the
+        game, whose text would show through it */
+     draw();
+-    assert(list.q[0].w == (float)(C * 16) && list.q[0].h == 7 * 32 && list.q[1].rgba == ink && list.q[1].h == 32);
++    assert(list.q[0].w == (float)(C * 16) && list.q[0].h == 8 * 32 && list.q[1].rgba == ink && list.q[1].h == 32);
+     assert(list.q[0].rgba >> 24 == 0xFFu);
+     assert(text_at(C - 2, 3, ">") && text_at(C - 2, 4, ">")); /* a page under each */
+     assert(text_at(1, 0, "SCARLETNX  /  MENU") && text_at(1, 3, "\xFE On-screen controls") &&
+-           text_at(1, 4, "\xFE Controllers") && text_at(1, 5, "\xFE Exit"));
++           text_at(1, 4, "\xFE Controllers") && text_at(1, 5, "\xFE Keyboard bindings") && text_at(1, 6, "\xFE Exit"));
+     /* a tap on Exit exits; on the title, nothing; outside the panel, it closes */
+-    assert(tap(2, 3) == OVERLAY_EXIT && tap(-3, 3) == OVERLAY_NONE);
++    assert(tap(3, 3) == OVERLAY_EXIT && tap(-3, 3) == OVERLAY_NONE);
+     assert(overlay_tap(5.0f, 5.0f, SW, SH) == OVERLAY_CLOSE);
+     /* the focus goes round, from Exit to the first item and back over the top; Back from here closes */
+     overlay_move(1);
+-    overlay_move(-4);
++    overlay_move(-5);
+     assert(overlay_select() == OVERLAY_EXIT && overlay_back() == OVERLAY_CLOSE);
+ 
+     /* the controls' page: each setting shown with its value, changed and kept */
+@@ -314,6 +318,7 @@
+            a press held as it opens does not act */
+         assert(overlay_controls(0, still, 1000) == OVERLAY_NONE); /* the focus back on Controllers */
+         assert(overlay_controls(0, down, 1000) == OVERLAY_NONE);  /* to Exit */
++        overlay_move(1); /* pass Keyboard bindings */
+         assert(overlay_controls(0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY - 1) == OVERLAY_NONE);
+         assert(overlay_controls(1ull << 0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY - 1) == OVERLAY_EXIT); /* not yet */
+         assert(overlay_controls(0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* round to the top */
+@@ -323,6 +328,7 @@
+         assert(overlay_controls(1ull << 1, still, 2000) == OVERLAY_NONE);  /* B: back to the menu, on its first */
+         assert(overlay_controls(1ull << 15, still, 2001) == OVERLAY_NONE); /* the D-pad down: Controllers */
+         assert(overlay_controls(1ull << 15, still, 2001 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* Exit */
++        overlay_move(1); /* pass Keyboard bindings */
+         assert(overlay_controls(1ull << 15, still, 2001 + SNX_OVERLAY_REPEAT_DELAY + SNX_OVERLAY_REPEAT_MS - 1) ==
+                OVERLAY_NONE);
+         assert(overlay_controls(1ull << 0, still, 3000) == OVERLAY_EXIT);

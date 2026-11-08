@@ -336,3 +336,93 @@
 - `0084` 已进入苦痛大厅二层：选择传送后 `place 1999634434→1999962119`，HUD 为“消灭苦痛大厅二层的敌人 0/100”和“消灭愚蠢的索特诺布”（`0084-zone-name.json`）。出生点附近 35 米内没有生命值大于 0 的 type-1 敌人；门口 SNO `5891` 点击后 place 不变。1–4 技能仍缺同一敌人的掉血记录。
 
 - `0084` 苦痛大厅门口 SNO `5891`（`0x798300e5`）在距离 4.76 时 `operate -> 1`，日志 `01001B300B9BE000.log` 约 2267s 与 2356s 均为 accepted，但 `place` 仍是 `1999962119`。这不是被拒绝的交互，也不换层。出生房间沿可走区域走到 `[350.5,696.6]` 和 `[327.2,704.3]` 后 30 米内仍只有玩家。1–4 技能掉血还没有目标。
+
+## 0126–0128：堆叠拆分、数量选择与重绑定闭环
+
+- `0126` 把左键的 Shift 修饰从世界 stand-still 路径拆成独立 UI 标志；`0127` 在物品命中后读取 entity stack，调用原生 inventory 分割回调 `0x8373EB0`，并为 `ConsoleSplitstack` 的减少、增加、接受和取消控件接原生回调。只有背包内 stack≥2 才进入，仓库 / 已装备负例不进入。
+- 构建 `BF71CCC5…` 实测：红宝石 SNO `437457` 原为 stack 3，在背包 `(0,1,1)`。SDL `Shift`+点击后原生数量框出现；鼠标减少到 1 并点接受，运行态变为 ID 相同的 `stack=2 @ (0,1,1)` 和 `stack=1 @ (0,3,1)`，背包 `28/60→29/60`。取消保持 `2+1`；单件 Shift 不弹框。冷存档为两个 stack `2/1`，重启读取仍有两个位置。
+- `0125` 的最终运行证据哈希实际为 `EC542245A38A2D3AF0B3245462B15C80E53D54867CE2A09CBCB577AB67F41D6D`。为此前误写的哈希更正来源：`0125-rift-enter/inside-rift/rift-exit-result`、`0125-act5-before-t/after-t/return-result`、`0125-skill4-damage`。第五幕 `T` 是 `2000093193→2000158730`，随后鼠标城镇传送门返回 `2000093193`。
+- `0128` 修复重绑定后的 Pause/Back 键在 UI 已打开时被 `pc_key_event` 通用门控忽略的问题，使自定义键可与 Esc 一样关闭暂停/对话。12 个动作由 `backend_kbm_bind` 保存到 `keybinds.ini`，冲突和保留键拒绝；F2 菜单另有 Defaults。
+- 当前构建 `EE73DDDD…`：临时改 `Inventory=C→H`、`Pause=Escape→E` 后重启，H 实际打开物品栏且 C 不再打开；E 实际打开暂停且同一 E 返回世界。测试完成后已通过 F2 Defaults 恢复 `C/Escape`。`test_stack_split_rebind_0128.py` 对上述 15 项状态和数量证据检查为 0 失败，含恢复默认后 C 开/关且旧 E 无动作。
+- `0128` 连续冷启动第 1 次 25.7 s 成功，第 2 次 49.5 s 超时；后者 `frame_id/g_frames=10`、`g_gval=11`、`g_landed=9`，`vkGetSemaphoreCounterValue` 为 9，渲染线程停于 `frame_recycle/timeline_wait`，记录线程空闲。`--vsync=0` 连续对照也仅第 1 次成功，第 2 次 49.4 s 超时；该规避不能交付。
+
+## 0131：叠加提示与地图摄像机
+
+- 暂停菜单上打开退出确认形成两层提示，SDL Space 只关闭确认：可见对象 `680→662`，确认文本消失、“游戏已暂停”保留；随后 Esc 返回世界。`test_space_stacked_prompt_0131.py` 6 项通过。
+- `session_driver.py` 新增真实 SDL wheel 和 drag 序列。当前 `4F058194…` 的 `map_dialog_mainpage.localmap` 缩放字段从 `1.00` 变为 `0.95`，反向滚轮恢复 `1.00`；按下 `(500,300)`、移动 `(600,350)`、释放后平移字段 `[0,0]→[67,33]`，反向拖拽恢复 `[0,0]`。`test_map_camera_0131.py` 9 项通过。
+
+## 0130：城镇传送门 CAP=0
+
+- 当前构建 `4F058194…` 从新崔斯特姆鼠标地图进入哭泣山谷，再按 `T` 回城到 `place 1999503360`。世界扫描找到 SNO `191492`、type 2、屏幕 `(640,341)`。
+- 测试探针 hook `CAP_POWER_PC=0x84D8790`，仅对该实体的 CAP 查询返回 0；SDL 左键仍产生门户交互，最终 `place 1999634434`。证明当前鼠标候选和原生 Operate 提交不依赖 `CAP>0`。
+- 证据：`0130-town-portal-scan2.json`、`0130-cap0-input.json`、`0130-cap0-result.json`、`0130-town-portal-summary.json`；`test_town_portal_cap0_0130.py` 6 项通过。目标场景没有第二个同 SNO 门，遮挡分支仍为 partial。
+
+## 0130：当前构建技能复核
+
+- 当前 `4F058194…` 对新崔斯特姆外围 SNO `3847`：技能 2 三次稳定基线后 HP `5,028,917.5→1,654,399`；技能 3 对另一 SNO `3847` HP `1,038,548.5→957,359.5→434,705→9,846.588→0.001`。证据 `0130-skill2-current.json`、`0130-skill3-current.json`。
+- 技能 1 对 SNO `3847` 持续 7.3 秒 HP 不变；它对应 Iron Skin（defensive, zero-based slot 2/power 291804），不应用直接伤害判定。技能 4 对 SNO `364563` 发出 `slot=5 power=239137` 后 HP `419,647.6875→0`，约 1.31 秒完成击杀。
+- 城镇传送门 CAP0 与地图/World 旅行证据见本节后的 `## 0130：城镇传送门 CAP=0`。
+
+## 0129：后台冷启动呈现修复
+
+- 冷启动反例修复前均为 `frame_id/g_frames=10..12`、`g_gval=11..13`、Vulkan timeline counter `9..11`；渲染线程停在 `frame_recycle -> timeline_wait`，记录线程已经空闲，交换链为 3 图。该问题在 FIFO、mailbox、记录线程关闭、更大 semaphore 池及 CPU acquire fence 对照下仍可复现。
+- `0129` 只在 no-activate 后台启动器中使用 immediate 呈现，并把 Vulkan 提交改为 GPU 渲染线程同步执行。`Launch-Background.ps1` 临时设置 `SNX_VK_IMMEDIATE=1`、`SNX_VK_RECORD=0`，`Start-Process` 后恢复父进程环境，普通前台启动不受影响。
+- 诊断时发现旧 PID `196372` 与当前构建新实例同时存在，均指向同一安装 exe/存档；这会使“退出后立即重启”进入无可识别菜单画面。`Launch-Background.ps1` 现于启动前拒绝已存在的同一 exe 实例，旧实例清理后只保留单进程。当前构建在单实例条件下重新冷启动 4 次成功：`25.81`、`25.73`、`26.41`、`25.92` 秒，阶段均为 loading → title → menu → loading → world HUD。证据：`0129-immediate-coldboot-1..3.json`、`continue-single-coldboot.json`、`launcher-instance-guard.json`、`0129-startup-profile-summary.json`。
+- 检查脚本：`test_startup_profile_0129.py`（20 项，0 失败，包含 4 次单实例启动与重复实例门禁）；`test_stack_split_rebind_0128.py`（15 项，0 失败）；补丁链重放 PASS；相关 CTest 7/7 PASS。
+## 0132：12 动作重绑定矩阵与第五幕回程
+
+- 当前构建 `4F058194…` 在首次运行态把 12 个动作改为 `B/E/F/G/H/N/O/R/U/X/Y/5`，四项技能每次新键都使 `state.serial +1`；药水 H 显示“生命值已经全满”，回城 N 在城镇显示“不能在此区域中那么做”。随后退出并用 `Launch-Background.ps1` 冷启动，12 项仍保持相同值。
+- 重启后旧 `1–4/Q/T/C/S/J/P/M` 不触发；新键 O/R/U/X/Y 分别打开背包/技能/任务/巅峰/地图，旧键保持世界态，新键第二次按下关闭对应页面。新键 5 可打开并关闭暂停；旧 `Escape` 仍可打开暂停，这是 `pc_key_event` 明确保留的通用返回行为。
+- 证据位于 `out/windows/kbm/session/continue-20261108/full-matrix-before-restart/` 与 `full-matrix-after-restart/`。`test_keybind_matrix_0132.py` 79 项、`test_keybind_effects_0132.py` 43 项，0 失败；测试后 F2 Defaults 已恢复默认。
+- 第五幕：新崔斯特姆 `1999503360` 打开 M/世界页，SDL 点击第五幕与世界页节点后选择“威斯特玛城中区”，底栏 `[285,648]` 后进入 `1999765508`，HUD 为“威斯特玛城中区/传送点”。按 `T` 到城门侧 `1999831045`，世界扫描有两个 SNO `191492`；SDL 点击 `[640,340]` 选中返回路径并回到 `1999765508`。
+- 证据：`act5-map-open.json`、`act5-world-tab.json`、`act5-world-act5.json`、`act5-central-selected.json`、`act5-central-travel.json`、`act5-after-footer-state.json`、`act5-current-world.json`、`act5-portal-return-click2.json`、`act5-portal-return-result2.json`；`test_act5_roundtrip_0132.py` 22 项通过。
+## 0133：方向技能与三层模态
+
+- 当前构建 `4F058194…` 对 SNO `4982` 做同一 attach 的 SDL 点击 + 技能键序列：点击玩家屏幕左侧的目标身体 `[601,409]`，150 ms 后按 `2`；同一 actor 的 HP 从 `4,966,862` 降到 `1,479,204.25`，伤害 `3,487,657.75`。证据 `rift-target2-before.json`、`rift-target2-click-skill2.json`、`rift-target2-after.json`、`skill2-direction-summary.json`；`test_skill2_direction_0133.py` 10 项通过。
+- 当前构建三层关闭：`Esc` 打开暂停（662 项），SDL 点击退出（680 项），F2 打开运行时菜单；`Esc` 后 F2 `shown=0` 且游戏 UI 仍 680 项，`Space` 后 662 项并保留“游戏已暂停”，最后 `Esc` 后 `ui_blocked=0`。证据 `stack3-pause.json`、`stack3-confirm.json`、`stack3-f2-open2.json`、`stack3-f2-closed*.json`、`stack3-space-close-confirm.json`、`stack3-esc-close-pause.json`；`test_three_layer_stack_0133.py` 14 项通过。
+## 0135：奈非天秘境入口与战斗进度
+
+- 当前构建 `4F058194…` 从新崔斯特姆 `1999503360` 用 SDL 左键打开方尖碑菜单并选择“奈非天秘境”，点击传送门后进入 `1999699971`；HUD 为“奈非天秘境 / 消灭奈非天秘境守卫的手下 / 0%”。
+- 同一精英 actor `0x78d50069`（SNO `5387`）的 HP 依次为 `9,514,731→5,147,494→2,695,709.75→1,103,115.5→0`。随后 SDL 点击沉思之池 SNO `373463`，HUD 出现“沉思之池奖励”并从 `1%→5%`。
+- 继续用鼠标点怪物身体和数字技能键清怪，进度 `5%→6%→7%`；SNO `418923` 从 `803,373.125→0`，SNO `4982` 从 `399,782→实体释放`。这是入口、单体战斗、环境奖励和进度链的业务验收，不表示秘境已结束。
+- 退出回程：SDL `Esc`→点 `退出` 行（引擎 `(296,515)`）打开确认框；点“接受”使用引擎 `(602,450)`（旧坐标 `(442,450)` 是未补偿侧栏映射的绘图坐标，实测无效），进入主菜单后再点 `(296,260)`“继续”，回到新崔斯特姆 `place 1999699971→1999503360`，HUD 为“新崔斯特姆/已到达”。
+- 证据：`single-boot-town.json`、`rift-select-nephalem.json`、`rift-enter-current.json`、`rift-after-east1.json`、`rift-target1-*.json`、`rift-elite-finished2.json`、`rift-object-click.json`、`rift-418923b-*.json`、`rift-west-cluster-skill2.json`、`rift-4982b-*.json`、`rift-nephalem-summary.json`；`test_rift_nephalem_0135.py` 47 项通过。守护者、`100%` 和结束奖励仍保持未完成。
+
+## 0136：第四幕米丽安
+
+- 当前构建从世界页选择第四幕 `971.5,297.5` 的章节区域，再选择“巴斯廷要塞据点”，地图底栏后 HUD 显示“巴斯廷要塞据点/已到达”。到达扫描为 place `1999699971`、玩家 `0x783b007f`。
+- 原生鼠标从传送点附近走到米丽安，点击 SNO `56948` 的头部像素 `[827,190]`（工作台 SNO `214444` 遮挡身体中心，头部射线先命中米丽安），打开“米丽安/工匠”面板。
+- 页签依次切换：“附魔→幻化→染料→训练”，训练页显示等级 `10`、下一训练 4000 金与奖励文本；本测试没有接受交易，金币保持 `720293`。
+- 证据：`act4-map-world-current.json`、`act4-world-selected-current.json`、`act4-session2-travel.json`、`act4-session2-arrival-scan.json`、`act4-mystic-click.json`、`act4-mystic-{transmog,dye,training}-tab.json`、`act4-mystic-summary.json`；`test_act4_mystic_0136.py` 18 项通过。
+
+## 0137：第五幕任务 NPC 泰瑞尔
+
+- 当前构建从世界页进入威斯特玛城中区 `2000027656`，再在第五幕区域页选择幸存者避难营并传送；到达扫描为 `2000158730`、位置约 `(557.55,765.34)`，HUD 显示“幸存者避难营/传送点”。
+- 在同一场景对泰瑞尔 SNO `114622` 的头部点击 `[264,309]`，命中同一 actor `0x7b5800df`；最终 `entity_goal sno=114622`，对话 UI 显示两条“泰瑞尔”和“感谢你来到这里。这儿还有很多悬赏任务可以进行。”。
+- 证据：`act5-task-world-current.json`、`act5-task-travel-current.json`、`act5-task-arrival-scan.json`、`act5-map-current-region.json`、`act5-survivor-node-selected.json`、`act5-survivor-travel.json`、`act5-survivor-arrival-scan.json`、`act5-tyrael-hit.json`、`act5-tyrael-click-current.json`、`act5-task-npc-summary.json`；`test_act5_task_npc_0137.py` 21 项通过。
+
+## 0138–0139：新崔斯特姆门体与配对传送
+
+- `0138` 为 `door_candidate_near` 增加可选 SNO 过滤，并在普通实体拾取前优先查询 SNO `90419`。该阶段已修正被橙色 portal `175482` 抢占的问题，但门体 Operate 成功后 `place` 不变，因此只作为目标优先级修复。
+- `0139` 补完传送链。安装构建 `723331B5C6C4C98136ED585D291C760A8F5A8F295825E48E8319C34EAEB084B6`（PID `300544`，启动时间 `2026-11-08T08:58:40.451007+08:00`，code DLL 不变）。门体 `90419` 成功后查找 8 单位内的配对 portal `175482`，并允许后者在门框约 2.4–4.6 单位处提交，解决门体碰撞使角色停在约 2.39 单位、旧逻辑却要求 1.1 单位的问题。
+- 实机从 `(264.47,611.59)` 只发送一次原生左键 `[889,489]`：日志依次为 `New Tristram gate priority 80 handle 7a70000a`、门体 operate `at 4.26 -> accepted`、`New Tristram gate chained portal 7a71000b at 5.29`、portal operate `at 4.57 -> accepted`；最终 `place 1999503360→1999634434`、位置 `(2841.52,2932.68)`。
+- 地形遮挡负例：从目标场景反向点击时，`90419` cylinder 深度 `96.35` 大于 terrain `94.16`，日志为 `door skip` 且没有 gate priority；可见 portal `175482` 深度 `82.389` 被选中，Operate 后 `place 1999634434→1999503360`。
+- `0139` 后台冷启动压力复验：严格每次先关闭上一进程，再由 `Launch-Background.ps1` 启动，连续 4 次均通过标题→主菜单→世界 HUD。标题 `19.42/18.83/18.88/19.36` 秒，主菜单 `22.11/21.59/21.58/21.97` 秒，世界 `29.72/28.81/28.86/29.45` 秒；4 个 PID、完整 exe 路径和构建哈希均逐次核对，证据 `0139-coldboot-1..4.json`、`0139-coldboot-summary.json`、`0139-startup-summary.json`。
+- 证据：`0138-gate-live.json`、`0138-gate-click-priority.json`、`0138-gate-priority-logged.json`、`0139-gate-staged-scan.json`、`0139-gate-single-click.json`、`0139-gate-single-click-result.json`、`0139-gate-chain.log`、`0139-destination-for-occlusion.json`、`0139-occlusion-portal-click.json`、`0139-occlusion.log`、`0139-occlusion-result.json`、`0138-gate-summary.json`、`0139-gate-summary.json`、`0139-occlusion-summary.json`；`test_gate_90419_0138.py` 19 项、`test_gate_90419_0139.py` 19 项、`test_portal_occlusion_0139.py` 12 项通过。
+
+- 当前顶层 `tools/windows-dev/test_*.py` 共 20 套，全部通过；补丁链含 `0139` 重放 PASS，`git diff --check` 通过。
+
+- 相关 CTest `network_stack,pad_map,extraction_native,loader_native,native_recompiler,native_codegen,mme_native` 在 `D:\workspace\msys2\msys64\clang64\bin` 与 `D:\workspace\msys2\msys64\mingw64\bin` 加入 PATH 后 7/7 通过；顶层 Python 回归 20/20 通过，其中 `test_gate_90419_0138.py` 19 项、`test_gate_90419_0139.py` 19 项、`test_portal_occlusion_0139.py` 12 项、`test_startup_0139.py` 16 项，汇总见 `test-suite-final.json` / `test-suite-final.log`、`ctest-final-7-0139.log`。
+
+## 0140：22 项键盘配置
+
+- 当前安装构建 `0140`，SHA-256 `8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`；本轮核对 PID `52500`，启动时间 `2026-11-08T15:52:17.004433+08:00`，code DLL `A829DCE8AC2554A44DF087132CF9D266582010280C660D32A958642C8B7BDA51`。补丁 `patches/windows/0140-native-full-keyboard-bindings.patch` 的 SHA-256 为 `0d5577b8ca77fefe57fda3e08b2b28dd3fda6d70e3bb786a9ee7fcdb1fc262a6`。
+- 配置由 12 项扩到 22 项：新增 `Move up/left/down/right`、`Menu up/left/down/right`、`Confirm`、`Cancel`。默认值为 `1/2/3/4/Q/T/C/K/J/P/M/Escape/W/A/S/D/Up/Left/Down/Right/Return/Backspace`；旧 12 项文件中的 `skills=S` 自动迁移到 `skills=K`。
+- F2 全 22 行编辑（PID `7928`，启动 `2026-11-08T14:22:25.323303+08:00`）：通过真实 SDL 事件逐行进入 capture，并依次录入 `5/6/7/8/9/0/F3/F4/F5/F6/F7/F8/F9/F10/Home/End/Insert/Delete/PageUp/PageDown/-/=`。`123` 项检查、`0` 失败；每行保存提示均为 `Saved.`，getter 与输入一致；滚动 `top` 序列为 `0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10`。证据 `out/windows/kbm/session/0140-validation/f2-edit.json`。
+- 自定义绑定重启（PID `27636`，启动 `2026-11-08T15:48:12.811150+08:00`）：getter 22 项完整保留上述自定义值。旧 `C`、`M` 不打开面板，旧 `1` 不增加 serial；新 `F3` 打开背包、`F7` 打开地图、`5` 使 serial `0→1`。证据 `restart-bindings.json`、`restart-actions.json`、`restart-skill1.json`。
+- 自定义四向移动：重启后在同一新崔斯特姆世界内，`F9/F10/Home/End` 分别把位置从 `(391.25,581.25)` 推进到 `(383.62,573.62)`、`(389.62,567.41)`、`(401.37,579.07)`、`(393.91,586.36)`，四个方向均非零且彼此不同。证据 `restart-move-f9.json`、`restart-move-f10.json`、`restart-move-home.json`、`restart-move-end.json` 及对应 scan。
+- 自定义菜单与确认/取消：`PageDown` 将难度 `普通→困难`，`Delete` 恢复 `普通`；`PageUp`/`Insert` 在选项分类中移动并打开“视频”/“游戏功能”页；`-` 确认、`=` 取消返回。证据 `difficulty-right.json`、`difficulty-left.json`、`options-confirm.json`、`options-up-confirm.json`、`restart-menu-nav.json`。
+- F2 `Restore defaults` 后再次重启（PID `52500`）：getter 恢复 22 项默认值；默认 `C/K/J/P/M/Esc` 分别打开并关闭背包、技能、任务、巅峰、地图、暂停，UI 文本分别命中“物品栏 29/60”“技能符文”“当前任务目标”“总点数”“[拖拽]”“游戏已暂停”；默认 `S` 把位置 `(391.25,581.25)` 推进到 `(401.00,590.84)`。证据 `f2-defaults.json`、`default-restart-bindings.json`、`default-panels.json`、`default-move-s-scan.json`。
+- 原动作技能矩阵（PID `7928`，自定义键）：技能 2 `6` 对 SNO `6572`，HP 记录 `2,283,857.5` 后目标实体释放；技能 3 `7` 对 SNO `5275`，HP `534,515.6875` 后目标组消失；技能 4 `8` 对 SNO `5346`，HP `563,622.875` 后实体槽转为 SNO `4156`，玩家位置 `(814.25,513.85)→(820.19,539.06)`；技能 1 `5` 使 `serial 67→68` 且 UI 对象数在约 5 秒内 `730→733→732→730`。证据 `skill2-*`、`skill3-*`、`skill4-*`、`iron-skin-timeline.json`。
+- 药水键 `9` 在 `0140` 触发原生动作并显示“你的生命值已经全满。”，确认当前构建键位路由有效；本构建未重复取得受伤后 HP 回复数值，`0129` 的 `1353340.25→1353916` 仅作历史实际回血证据。回城键 `0` 日志为 `recall bit=11 -> returned/1`，大教堂内未观察到传送门或 `place` 变化，不能据此记为完成。证据 `potion.json`、`recall-from-cath.json`、`recall-hold.json`。
+- 当前结论：PC 全键位仍为“部分”。F2 22 行、移动/菜单/确认取消、重启保留、默认恢复和大多数动作矩阵已通过；剩余回城当前构建可观察结果，以及顶层 `test_*.py`、相关 CTest 7 项、补丁链和 `git diff --check` 的 0140 全量重跑。

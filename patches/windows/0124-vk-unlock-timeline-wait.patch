@@ -1,0 +1,18 @@
+diff --git a/src/nx/gpu/vk/cmd.c b/src/nx/gpu/vk/cmd.c
+--- a/src/nx/gpu/vk/cmd.c
++++ b/src/nx/gpu/vk/cmd.c
+@@ -275,7 +275,14 @@ static void frame_recycle(Frame* f) {
+     int stats = cmd_stats_on();
+     u64 start = stats ? plat_ns() : 0, maintenance_start = start, reset_ns = 0, budget_ns = 0;
+     if (f->last) {
++        /* Release vk_lock before GPU wait to prevent deadlock with mapping thread (vkr_mapping_begin).
++           The mapping thread needs vk_lock to drain releases during autosave (frame ~10). If we hold
++           vk_lock here while waiting for GPU timeline (which may stall on VSync FIFO + background window),
++           the mapping thread blocks forever on vk_lock. Release before wait, reacquire for land_through. */
++        vk_unlock();
+         timeline_wait(f->last, WAIT_FRAME);
++        vk_lock();
++        /* land_through requires vk_lock per vk.h comment; now safe to land GPU results into guest memory */
+         if (stats) maintenance_start = plat_ns();
+         land_through(f->last);
+         f->last = 0;

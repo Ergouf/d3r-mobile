@@ -892,6 +892,87 @@
       "changed_files_lf_sha256": {
         "src/nx/runtime/native_world.c": "18e8d7be4df7a9bc07f9b7dc53b797a5b7d7e1873560f61c754198549bf13ea8"
       }
+    },
+    {
+      "patch": "0119-native-bounty-pad-route.patch",
+      "patch_sha256": "3b66838284d2e24a3329d2f3ecb8e461d61d88029f3f5ce72684f77859e3c639",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "ff235d2cc89ea13329b177344204c0e31e61f27085b517f7a43ae0f47d1b3a6a",
+        "src/nx/runtime/platform/backend/sdl3.c": "b31a3f9d65f6dab659555a808b497870710d629b3a524f0c44a3a6d7622c0240"
+      }
+    },
+    {
+      "patch": "0124-vk-unlock-timeline-wait.patch",
+      "patch_sha256": "c7f782b80aedb2db632b233b158a7885ff57a2c6da34aad77c3028fa93f06b9d",
+      "changed_files_lf_sha256": {
+        "src/nx/gpu/vk/cmd.c": "a40ea51b5413de448b9c013453ab909aaf537d5cb409711104c150c669141f83"
+      }
+    },
+    {
+      "patch": "0125-native-keyboard-bindings.patch",
+      "patch_sha256": "162f70899786c6682aaca890dd9fa0a8f3534e2f973336954aecb190ef73c84d",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "8eb16398196fb23c3bba64d0f9a1905c248d9c9921ba70a80d3639dd5324b783",
+        "src/nx/runtime/platform/backend.h": "e2789d37abd109a4a49ed6de4c2611ad7362226157902ed0534dfdb22bc1ceca",
+        "src/nx/runtime/platform/overlay.c": "bff280e62ba33da3db2f29cca5ddc6a53dca8a779e5bb1d28191c8a982ad97bc",
+        "src/nx/runtime/platform/overlay.h": "166751ebd96d0c470a665aa107ceb656c1fcb3b50da8979cbdfa8ce53b25cde9",
+        "src/nx/runtime/native_labels.c": "9516d760382c0daf433eb39c9bd80781d12f92c477487e5e4d9d92c0b111e89e",
+        "src/nx/runtime/native_world.c": "76cacf180b52676860aa4db31f531a53abe96df66541d6c4eb40262b43e33915",
+        "src/nx/runtime/native_world.h": "dbbe73cfa286c36eff42b4d6a31aea29ced10c711d99bf58e23e30437e004620",
+        "tests/overlay.c": "0a67497b779d270a2802a29406c87298a865c1a31132474c43e74143a9cbf198"
+      }
+    },
+    {
+      "patch": "0126-native-stack-split.patch",
+      "patch_sha256": "7a498822a11c230a9fb1af9cedde6f7a02c773ecf6963d277c7245325bc61781",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "c29f206867a525ed68c50c4168bbc5fcd3915eefab8437b265ea93ef414cbd33",
+        "src/nx/runtime/native_world.h": "2640d4885e28bd41d5549ffb9f91607a4881f4178172f82c2c5e67d46a0a2e07",
+        "src/nx/runtime/platform/backend/sdl3.c": "2d8aaaa0d564c24052596246c441666b111ded33a70c1aacd95a9ed25d578821"
+      }
+    },
+    {
+      "patch": "0127-native-stack-quantity-pointer.patch",
+      "patch_sha256": "64f103de46d2e534f8ee06cdaffeeda3138aa66df5cfad2a8588025539e8d6fa",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "d80d8f4a718f3a81772312198cb5da7cb72391063362c270a986ef2af3d17d1c"
+      }
+    },
+    {
+      "patch": "0128-native-rebound-pause-back.patch",
+      "patch_sha256": "0d29a468ea58e00fc5f101dffd061b1cc3d74f0094c2397890c750b7841ab814",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "3b5897a1f4818392d7688ebeef6b7d2ee740938ee3a424661ec61c232a0050d0"
+      }
+    },
+    {
+      "patch": "0129-vk-background-present.patch",
+      "patch_sha256": "323252f9736070984a924ac5ca5c235160dd5c6534738b20d6a685d15bc93a19",
+      "changed_files_lf_sha256": {
+        "src/nx/gpu/vk/device.c": "63378a30ba233eee535e64c4a619e1e0afbee1f74346c12d63c727af1b79930b"
+      }
+    },
+    {
+      "patch": "0138-native-new-tristram-gate-priority.patch",
+      "patch_sha256": "33998c12cddbe3492f84a7b08d740cbf80cf21cae9bd12159d2e5ce691112bae",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "fbb1626da61d252c34b4f8f489eaf17dba9284190922727ce27233da2d554af5"
+      }
+    },
+    {
+      "patch": "0139-native-new-tristram-gate-chain.patch",
+      "patch_sha256": "196c5b3b2a1680d9cc3ea20d032ee3fc6d89e69128de799d44e81aeb9cc88d76",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "0b8459816b580a671d83fb83c04d64a44bcdbd7194b0a6008f203bfd151f15cd"
+      }
+    },
+    {
+      "patch": "0140-native-full-keyboard-bindings.patch",
+      "patch_sha256": "0d5577b8ca77fefe57fda3e08b2b28dd3fda6d70e3bb786a9ee7fcdb1fc262a6",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend.h": "0f6e8d907eed5007598f447b4f5c153579dfbd828b4ccafb442b68ee6b821308",
+        "src/nx/runtime/platform/backend/sdl3.c": "8ccc935479f5c0012a6e743ed91e8ccc2d8d4f1cb6220fc5457b9572d5031a83"
+      }
     }
   ]
 }

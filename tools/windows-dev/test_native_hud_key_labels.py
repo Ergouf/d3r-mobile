@@ -63,6 +63,10 @@ static void w64(u64 a, u64 v) { memcpy(GP(a), &v, 8); }
 STUBS = r"""
 /* The only guest function these tests let the real guest_call reach is the
    inverse binding lookup; everything else must be reported as unresolvable. */
+static const char* backend_kbm_key(int index) {
+    static const char* keys[] = {"1", "2", "3", "4", "Q", "T", "C", "S", "J", "P", "M", "Escape"};
+    return index >= 0 && index < 12 ? keys[index] : "?";
+}
 static u32 query_slot;
 static int query_incomplete;
 static int query_calls;
