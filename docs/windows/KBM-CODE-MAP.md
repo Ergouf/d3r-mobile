@@ -1,6 +1,6 @@
 # Windows KBM 运行时代码地图
 
-更新：2026-11-08。描述当前源码的实际分层与失败方向，供后续修复定位。当前构建 `0140`，SHA-256 `8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`，补丁链 `0001–0119`、`0124–0129`、`0138–0140`（排除归档 `0029/0030`）重放 PASS；`0140` 的 F2 22 行、移动/菜单/确认取消、重启保留和默认恢复已通过，但回城当前构建观察及全量回归未完成，全键位仍为部分。
+更新：2026-11-08。描述当前源码的实际分层与失败方向，供后续修复定位。当前构建 `0140`，SHA-256 `8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`，补丁链 `0001–0119`、`0124–0129`、`0138–0140`（排除归档 `0029/0030`）重放 PASS；`0140` 的 F2 22 行、移动/菜单/确认取消、重启保留、默认恢复、药水和回城均已通过；顶层测试 20/20、相关 CTest 7/7、补丁链重放 PASS，PC 全键位已完成。
 
 ## 构建与补丁
 
@@ -53,5 +53,5 @@ python tools/d3-re/probe_keyboard_bind.py --pid <PID> --reset --out out/windows/
 Get-ChildItem tools/windows-dev -Filter test_*.py | ForEach-Object {
     python $_.FullName; if ($LASTEXITCODE) { throw "$($_.Name) failed" } }
 ```
-`probe_keyboard_bindings.py` 只读 getter；`probe_keyboard_bind.py` 走与 F2 相同的后端设置或恢复键位。当前顶层共 20 个 `test_*.py`；最近一次 20/20 与相关 CTest 7/7 是 `0139` 历史基线，`0140` 完整重跑仍待执行。
+`probe_keyboard_bindings.py` 只读 getter；`probe_keyboard_bind.py` 走与 F2 相同的后端设置或恢复键位。当前顶层共 20 个 `test_*.py`；`0140` 已重跑 20/20，相关 CTest 7/7，补丁链重放和 `git diff --check` 均通过。
 历史证据重放测试已移到 `tools/windows-dev/legacy/`，不再默认运行；完成标准只认当前构建的实机业务结果（place/HP/物品/UI 文本前后）。实机驱动脚本 `tools/d3-re/session_driver.py` 一次 attach 可串行发键/点击并回读 UI 与运行时状态。

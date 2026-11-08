@@ -424,5 +424,7 @@
 - 自定义菜单与确认/取消：`PageDown` 将难度 `普通→困难`，`Delete` 恢复 `普通`；`PageUp`/`Insert` 在选项分类中移动并打开“视频”/“游戏功能”页；`-` 确认、`=` 取消返回。证据 `difficulty-right.json`、`difficulty-left.json`、`options-confirm.json`、`options-up-confirm.json`、`restart-menu-nav.json`。
 - F2 `Restore defaults` 后再次重启（PID `52500`）：getter 恢复 22 项默认值；默认 `C/K/J/P/M/Esc` 分别打开并关闭背包、技能、任务、巅峰、地图、暂停，UI 文本分别命中“物品栏 29/60”“技能符文”“当前任务目标”“总点数”“[拖拽]”“游戏已暂停”；默认 `S` 把位置 `(391.25,581.25)` 推进到 `(401.00,590.84)`。证据 `f2-defaults.json`、`default-restart-bindings.json`、`default-panels.json`、`default-move-s-scan.json`。
 - 原动作技能矩阵（PID `7928`，自定义键）：技能 2 `6` 对 SNO `6572`，HP 记录 `2,283,857.5` 后目标实体释放；技能 3 `7` 对 SNO `5275`，HP `534,515.6875` 后目标组消失；技能 4 `8` 对 SNO `5346`，HP `563,622.875` 后实体槽转为 SNO `4156`，玩家位置 `(814.25,513.85)→(820.19,539.06)`；技能 1 `5` 使 `serial 67→68` 且 UI 对象数在约 5 秒内 `730→733→732→730`。证据 `skill2-*`、`skill3-*`、`skill4-*`、`iron-skin-timeline.json`。
-- 药水键 `9` 在 `0140` 触发原生动作并显示“你的生命值已经全满。”，确认当前构建键位路由有效；本构建未重复取得受伤后 HP 回复数值，`0129` 的 `1353340.25→1353916` 仅作历史实际回血证据。回城键 `0` 日志为 `recall bit=11 -> returned/1`，大教堂内未观察到传送门或 `place` 变化，不能据此记为完成。证据 `potion.json`、`recall-from-cath.json`、`recall-hold.json`。
-- 当前结论：PC 全键位仍为“部分”。F2 22 行、移动/菜单/确认取消、重启保留、默认恢复和大多数动作矩阵已通过；剩余回城当前构建可观察结果，以及顶层 `test_*.py`、相关 CTest 7 项、补丁链和 `git diff --check` 的 0140 全量重跑。
+- 药水键 `9` 在 `0140` 触发原生动作并显示“你的生命值已经全满。”，确认当前构建键位路由有效；本构建未重复取得受伤后 HP 回复数值，`0129` 的 `1353340.25→1353916` 仅作历史实际回血证据。
+- 回城键在 `0140` 完成：在大教堂/苦难旷野附近有战斗目标时按 `T` 只记录 `recall bit=11 -> returned/1` 而不生成门户；清掉附近怪物并等待脱战后，在苦难旷野按 `T`，`place 1999634434→1999503360`，出生点为 `(410.90,520.34)`，半径 30 扫描到 SNO `191492` 回城门。证据 `recall-safe2.json`、`recall-safe2-scan.json`。
+- `0140` 回归：顶层 `test_*.py` 20/20、相关 CTest 7/7、补丁链重放 PASS、`git diff --check` PASS；汇总 `out/windows/kbm/session/0140-validation/test-suite-0140.json`、`ctest-final-7-0140.log`、`patch-chain-0140.log`。
+- 当前结论：PC 全键位已在 `0140` 完成。F2 22 行、六个面板、四向移动/菜单、确认取消、药水、回城、重启保留、默认恢复和全部测试均已闭环；技能 1/3/4 的详细方向/冷却矩阵仍按下一阶段单列。

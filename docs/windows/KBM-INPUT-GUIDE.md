@@ -31,7 +31,7 @@ F2 → `Keyboard bindings` 当前有 22 行：技能 1–4、药水、回城、�
 | 世界页五幕切换 | 地图页点目标幕 | `0081` 五幕矩阵与 `0132` 的第五幕历史闭环均已通过；世界地图内先点目标幕，再点区域节点，最后点底栏“传送” |
 | 切换幕（主菜单） | `游戏设定` → `章节` → 目标幕 → 难度 → `Space` | 必须在新进程的主菜单操作；旧进程里改完点「继续」只恢复旧会话 |
 | 药水 | `Q`（世界内） | `0140` 自定义键 `9` 触发原生动作并显示“你的生命值已经全满。”，确认药水键路由有效；本构建尚未重复取得受伤后 HP 回复前后值。历史 `0129` 的 `1353340.25→1353916` 仍作为实际回血业务证据 |
-| 回城 | `T`（世界内，安全区域） | `0140` 自定义键 `0` 日志为 `recall bit=11 -> returned/1`，但大教堂内没有观察到传送门或 `place` 变化；当前构建仍为部分，`0063` 的 `place` 变化只作历史证据 |
+| 回城 | `T`（世界内，安全区域） | `0140` 在苦难旷野清掉附近怪物、等待脱战后按 `T`：`place 1999634434→1999503360`，出现 SNO `191492` 回城门；附近仍有战斗目标时不会生成门户 |
 | 打开暂停菜单 | `Esc` | `0133` 历史构建已验证；秘境入口、击杀和进度已覆盖到 `7%`，见本页秘境行；守护者、`100%` 与结束奖励仍未验收 |
 | 关闭暂停菜单 | `Esc` | `0140` 默认 `Esc` 实测打开/关闭“游戏已暂停”；自定义期间使用对应 Pause/Back 键 |
 
@@ -123,7 +123,8 @@ F2 → `Keyboard bindings` 当前有 22 行：技能 1–4、药水、回城、�
 - `out/windows/kbm/session/maxgear-0059/loadout-summary.json`：13 件 70 级装备生成、存档往返和实机 UI，23 项检查。
 - `out/windows/kbm/session/maxgear-0059/chest-loot-summary.json`：普通宝箱 6.19 距离提交、两件掉落和背包 `25→26`，12 项检查。
 - `out/windows/kbm/session/continue-20261108/act5-roundtrip-summary.json`：第五幕 World 地图进入与鼠标城镇门返回，22 项检查。
-- `out/windows/kbm/session/continue-20261108/full-matrix-after-restart/summary.json`：12 动作重绑定重启、旧/新键、面板同键关闭与恢复默认，43 项检查。
+- `out/windows/kbm/session/0140-validation/`：22 行 F2 编辑、重启保留/Defaults、面板/移动/菜单、技能 2/3/4 击杀、药水提示与回城 `place` 变化；顶层测试 20/20、CTest 7/7。
+- `out/windows/kbm/session/continue-20261108/full-matrix-after-restart/summary.json`：12 动作重绑定重启、旧/新键、面板同键关闭与恢复默认，43 项检查（历史基线）。
 - `out/windows/kbm/session/continue-20261108/skill2-direction-summary.json`：左侧目标方向技能 2 伤害 `4,966,862→1,479,204.25`，10 项检查。
 - `out/windows/kbm/session/continue-20261108/three-layer-stack-summary.json`：暂停/退出确认/F2 三层逐层关闭，14 项检查。
 - `out/windows/kbm/session/act4-artisan-0059/act4-artisan-summary.json`：第四幕铁匠五页签与训练限制，8 项检查。
