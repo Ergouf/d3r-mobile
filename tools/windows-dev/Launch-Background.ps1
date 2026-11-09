@@ -1,7 +1,7 @@
 param(
     [string]$Exe = "D:\Games\DiabloIII\01001B300B9BE000\01001B300B9BE000.exe",
     [string]$WorkDir = "D:\Games\DiabloIII",
-    [string[]]$GameArgs = @("--fullscreen=0", "--docked=0", "--resolution=1", "--mouse_steer=0", "--touch=0"),
+    [string[]]$GameArgs = @("--fullscreen=0", "--docked=0", "--resolution=1.75", "--mouse_steer=0", "--touch=0"),
     [int]$Width = 1024,
     [int]$Height = 576,
     [int]$X = 40,
