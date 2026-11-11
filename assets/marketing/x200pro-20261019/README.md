@@ -6,7 +6,7 @@
 - [发布文案与表述边界](CAPTIONS.md)
 - [本地 HTML 图集](index.html)
 - [原始截图](screens/)、[来源与 SHA-256](sources.json)
-- [今日真机记录](../../d3-android/X200PRO_20261019.md)
+- [当前 Android 状态](../../../android/docs/STATUS.md)
 
 ## 实机运行
 

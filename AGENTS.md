@@ -1,72 +1,64 @@
 # 仓库协作约定
 
-当前 Windows KBM 交接入口：[`docs/windows/HANDOFF-20261104-CURRENT.md`](docs/windows/HANDOFF-20261104-CURRENT.md)。PC 功能差距表：[`docs/windows/KBM-PARITY-20261106.md`](docs/windows/KBM-PARITY-20261106.md)。操作说明见 [`docs/windows/KBM-INPUT-GUIDE.md`](docs/windows/KBM-INPUT-GUIDE.md)，技术证据见 [`docs/windows/KBM-RE-EVIDENCE.md`](docs/windows/KBM-RE-EVIDENCE.md)。
+## 代码探索
 
-## 开始任务
-
-1. 先确认 Serena MCP 可连接；已有服务复用，不重复启动。入口为 `http://127.0.0.1:9144/mcp`，客户端为 `d3-android/tools/serena_query.py`。
-2. 服务不可用时使用隐藏窗口启动，日志写入 `out/`：`serena start-mcp-server --project "D:/workspace/Diablo(fegnjl)" --transport streamable-http --host 127.0.0.1 --port 9144 --enable-web-dashboard false --enable-gui-log-window false --open-web-dashboard false`。
-3. 每会话调用一次 `initial_instructions`，再用 `get_current_config` 或符号查询确认项目已激活。
-4. 分析 `reference/ScarletNX-src` 时单独激活该 Serena 项目。主仓库忽略该目录，不能把主项目空结果当成源码不存在。
-5. Serena 失败先定位并修复；仍不可用时说明原因，按最小范围用其他方法继续，不能伪称已使用。
-
-## 代码探索与验证
-
-- 优先使用 Serena 的符号概要、符号查询和引用查询；只有符号级上下文不足时才读取完整文件。
-- 2026-11-04 最新要求：不再启动审核子代理；直接修改、运行测试并用串行脚本实机检查。发现问题后修复并复测；未验证项不能写成完成。
-- 不并发运行 Frida 探针。并发 attach 曾导致游戏退出；所有探针必须一次一个。
-- 业务完成必须有可观察结果（place、背包/物品、UI before/after、资源数量等）。`operate accepted`、`submit returned`、编译成功或 UI 高亮都不够。
-- 进程身份必须同时核对完整 exe 路径、启动时间和 SHA-256；PID 会被复用。
-
-## 电脑界面操作
-
-最新用户可以随时改变交互授权。执行时先查看本条和用户当前消息：2026-11-04 本轮要求只用脚本探针，不使用 computer-use、第二屏幕或置顶。
-
-默认的 computer-use 约束仍为：如需电脑界面或视觉交互，委派给 `gpt-6.1-terra` 子代理；主代理不自行执行。模型不可用时说明，不擅自改用其他模型。该默认不等于当前脚本探针轮次的许可。
-
-## 游戏窗口
-
-- 新启动统一使用 `tools/windows-dev/Launch-Background.ps1`：1024×576、(40,40)、后台、非置顶、`SWP_NOACTIVATE`。
-- 不调用 `SetForegroundWindow` / `SetActiveWindow`，不设置 topmost，不把窗口拉回前台。
-- 不用真实光标或 `SendInput` 绕过后台窗口限制。
-- 当前脚本注入链路使用 SDL 事件、游戏线程调用和只读内存探针；探针与构建产物写入 `out/`。
-
-## 启动与开场 CG
-
-- 启动游戏后会播放开场 CG / 标题画面：先出现「按任意键」文字，随后是无 UI 的电影画面。不要等它播完。
-- 一看到「按任意键」就立刻发送一次 SDL `Space` 跳过：
+- 优先使用 Serena 的符号概要、符号查询、引用查询；符号级上下文不足时才读取完整文件。
+- Serena MCP 地址为 `http://127.0.0.1:9144/mcp`，客户端为 `android/tools/serena_query.py`。已有服务直接复用，避免重复启动。
+- 每会话调用一次 `initial_instructions`，再用 `get_current_config` 或符号查询确认项目已激活。
+- `windows/source/ScarletNX-src` 被主仓库忽略，分析时必须单独激活该 Serena 项目；不能把主项目空结果当成源码不存在。
+- 服务不可用时用隐藏窗口启动，日志写入 `out/`：
 
   ```powershell
-  python tools/d3-re/probe_sdl_key.py --pid <PID> --key space
+  serena start-mcp-server --project "D:/workspace/Diablo(fegnjl)" --transport streamable-http --host 127.0.0.1 --port 9144 --enable-web-dashboard false --enable-gui-log-window false --open-web-dashboard false
   ```
 
-- 判据是主菜单文本「主菜单」出现。2026-11-04 实测（构建 `4A837A05…`）：启动后 `t+10~13s` 出现「按任意键」，发送 `Space` 后 `t+14~17s` 进入主菜单；不跳过时要 60–100 s。
-- 只在标题 / CG 画面发送。世界 HUD 已经加载时 `Space` 是游戏动作键，不能用来跳过过场。
-- 探针可能错过「按任意键」，只读到无文字的开场 UI。确认是本次新启动、尚无玩家/世界 HUD 的标题或 CG 后仍应立即跳过，不要无限等待该文字再次出现；跳过后仍以「主菜单」出现为准。
+- Serena 失败时先定位并修复；仍不可用时说明原因，按最小范围用其他方法继续，不能伪称使用了 Serena。
+
+## 修改与验收
+
+- 直接修改、运行相关测试并串行实机复测；发现问题后修复并重新验证。
+- 不启动审核子代理。验证优先使用串行脚本探针。
+- 不并发运行 Frida 探针；并发 attach 曾导致游戏退出。
+- 编译成功、UI 高亮、`operate accepted` 或 `submit returned` 都不等于业务完成。必须有可观察结果，例如 place、物品/资源数量、HP、传送及 UI before/after。
+- Windows 进程身份同时核对完整路径、启动时间和 SHA-256；PID 会被复用。
+- 新的 Android 测试窗口开始前核对安装 APK/SO 哈希、进程身份、温度和外部供电状态，并确认上一轮游戏已经停止。
+
+## Android 设备交互
+
+- 2026-11-10 用户明确授权主代理自主完成 ADB 截图、视觉检查和 vivo 安装确认。安装框出现后，直接使用 ADB 检查并点击“同意”，不要求用户手动勾选，也不为此结束回合等待用户。
+- 安装前点亮并解锁屏幕，确认 `dumpsys power` 中 `mWakefulness=Awake`。使用 `adb install -r` 覆盖同一 profile，不用卸载或清数据绕过确认。
+- 设备安全界面或系统策略确实阻止脚本点击时，保存截图和 ADB 输出，继续可独立进行的工作；无法绕过时再向用户报告具体阻塞。
+- 游戏只在实际测试窗口运行。测试成功、失败、超时、采样器异常或 ADB 传输中断时，都必须尝试 `am force-stop` 并核对进程已经退出。
+- 编译、代码分析、等待、吃饭或休息期间保持游戏关闭，避免持续功耗和发热。设备 local 的采集脚本必须带退出清理逻辑。
+- 截图、日志、帧时和诊断输出写入 `out/`；游戏资源、密钥、签名、存档和唯一输入材料只放 `local/`。
+
+## Windows 游戏窗口
+
+- 新启动统一使用 `windows/tools/Launch-Background.ps1`：1024×576、位置 `(40,40)`、后台、非置顶、`SWP_NOACTIVATE`。
+- 不调用 `SetForegroundWindow` / `SetActiveWindow`，不设置 topmost，不把窗口拉回前台。
+- 不使用真实光标或 `SendInput` 绕过后台窗口限制。脚本注入只用 SDL 事件、游戏线程调用和只读内存探针，产物写入 `out/`。
+
+## 启动与片头
+
+- 启动后不等片头 CG 或“按任意键”流程完成。确认是本次新启动、尚无世界 HUD 的标题/CG 后，立即发送一次 SDL `Space` 跳过：
+
+  ```powershell
+  python windows/d3-re/probe_sdl_key.py --pid <PID> --key space
+  ```
+
+- 以“主菜单”出现作为跳过成功判据。世界 HUD 加载后不要再发送 `Space` 充当跳过键。
+- 片头最长可接近两分钟，不能让它进入帧率或功耗采样窗口。
 
 ## KBM 范围
 
-- 目标是原生键盘/鼠标事件、世界点击、目标交互、游戏 UI 和菜单，不接受键盘转 Npad、鼠标转摇杆或“改焦点再发 A”作为交付替代。
-- 已实现并不等于业务完成；以 [当前交接](docs/windows/HANDOFF-20261104-CURRENT.md) 的状态表为准。
-- `0029`、`0030` 已归档；补丁永远只按 `patches/windows/base.json` 的链应用。
-- 仓库路径含括号，构建使用无括号 junction：`D:\workspace\Diablo-kbm`。
+- 目标是原生键盘、鼠标、世界点击、目标交互、游戏 UI 和菜单；键盘转 Npad、鼠标转摇杆或“改焦点再发 A”不能作为交付替代。
+- 功能差距以 [KBM 当前交接](windows/docs/HANDOFF-20261104-CURRENT.md)、[功能差距表](windows/docs/KBM-PARITY-20261106.md)、[输入说明](windows/docs/KBM-INPUT-GUIDE.md)和[技术证据](windows/docs/KBM-RE-EVIDENCE.md)为准。
+- `0029`、`0030` 已归档。Windows 补丁只按 `windows/patches/base.json` 的链应用。
+- 仓库路径含括号；构建使用无括号 junction `D:\workspace\Diablo-kbm`。
 
-## 数据与产物
+## 文档与证据
 
-- 游戏资源、密钥、签名、存档和唯一输入材料只放 `local/`，不得放入可清理的 `out/`。
-- 构建、探针输出、截图、日志和旧 exe 备份属于 `out/`；可删除，但删除前核对绝对路径，保留当前交接所需的少量证据。
-- 不新增逐轮交接、重复状态表和复述同一实验的文档。新结论更新现有交接、输入说明或证据文件。
-
-## 当前基线
-
-- 当前安装与构建：`0117`，SHA-256 `F0AC6A9BA2E573FF7B8BF69A81C83379DACA3AB6194D1D2EF4CDD2F9BD65A490`，进程 `127220`。补丁链 `0001`–`0115` 排除 `0029/0030` 重放 PASS。本轮实测：Q 回血 `1353340.25→1353916`；地图页脚键鼠标签稳定、`l1`/`r1` 已隐藏；底栏 cell 0/1/2 映射 pad 1/2/4；世界地图荒废墓地/哭泣山谷/大教堂一层均可 A 传送；技能 1/4 击杀同一只 `sno 6646` 怪，四键日志 `slot=2/3/4/5 -> 1`。未完成：技能 2/3 效果、技能页换装（C 侧 ring 查找返回 0）、地图页“世界”页签点击、悬赏、拆分、重绑定、城镇传送门 CAP=0。
-- `0079` 已完成巨型文件模块拆分：native_guest / native_labels / native_ui / native_world / native_kbm。代码思路见 `docs/windows/KBM-CODE-MAP.md`。
-- 补丁链 `0001–0080` 排除归档的 `0029/0030`，共78个有效阶段，重放 PASS。默认仅2套源码定向测试；68套历史证据测试在 legacy/。本轮只运行相关 HUD 51项检查（0失败），不重复无关已通过测试。
-- `0080` 六槽字号50→18点；左右键原生布局100×45→36×16（槽位宽46）。中间构建 `BAB1E183…` 已测量和返回世界复测，最终构建 `6823E82A…` 的证据以现有交接为准；药水图标和地图底栏仍未完成。
-- 启动停滞仍未解决：旧0074、0079、0080都有冷启动反例；Vulkan提交/完成11/9、frames10时映射线程与渲染线程阻塞。关闭垂直同步与限制60帧均不能记为可靠规避；证据在 takeover-font-startup/。
-- 探针RVA从安装exe符号表动态解析；version.py显式绑定安装哈希。session_driver.py现真实执行sleep并记录顺序/耗时；旧sleep序列没有按预期等待，不能作为时序完成证据。
-- 当前测试存档：718003 金、425 血岩、材料 903/895/948、工匠等级 `[4,9,10,0]`、39 件物品（背包 26、装备 13）、仓库 3 件；13 个装备槽为脚本生成的 70 级 6 词缀装备。测试后主手已恢复为生成装备，HP 已恢复到 `1353916`。生成前备份 `local/saves/kbm-maxgear-before-20261105/`；扩词缀前备份 `local/saves/kbm-maxgear-affix6-before-20261106-020755/`；最终检查点 `local/saves/kbm-maxgear-chest-0059-20261105/`。
-- 已验证（原生鼠标/键盘实机 + 可观察证据）：世界移动与 `W/A` 位移、NPC 对话与选项、主菜单/暂停菜单、角色页签、装备/技能轮盘悬停、三类工匠页签与训练、铁匠制作/分解/维修、珠宝匠合成/镶孔/移除、秘术师附魔（含取消与替换）与幻化（行点击 + 底栏确认）、染色（胸甲选色 + 确认、取消与重启持久化、底栏 L3 移除染色）、商人购买/出售/回购/启用态修复、卡达拉血岩购买、共享仓库移入移出、地面丢弃与拾取、旅店门往返、传送点传送与地牢往返（退出主菜单→继续）、秘境方尖碑（菜单→奈非天秘境→接受→HUD→进入→退出回城）、选项滑块与布尔开关（`ElectiveMode` 0→1→0 落盘）、底栏图例通用映射、双按钮提示按标签 + 焦点门控。
-- `0061`–`0067` 新增并实测：右键次要技能走实际第 2 技能槽（同一怪物 HP `523117→302299`，日志 `slot=1 power=353492`）；按住左键在指针不动时持续位移；`T` 安全区域回城 `place 1999634434→1999503360`；`C/S/J` 从世界或角色页开关物品栏/技能/任务；第一幕地图页签鼠标切换、节点选中 `0→1` 并传送；第五幕传送点地图鼠标选中节点并传送（选中索引实测 `0→1`、`7`、`9`）；背包右键装备、拖到装备槽装备、反向拖回卸下、拖出丢弃并鼠标拾取、`Ctrl` 点击快速转移；仓库 `Ctrl`/拖拽双向转移 `16/0→15/1→16/0`，同一物品在背包 0 与仓库 15 间移动，无效拖放不移动物品。`0066` 新增 `M` 地图、`P` 巅峰页、世界内 `Esc` 暂停（有 UI 时仍只返回），均已实机验收。`0067` 将世界内 `1`–`4` 映射到技能槽 3–6；`0073` 改为槽 2–5，并存档点亮 Iron Skin / Steed Charge / Laws of Valor / Falling Sword，并让 `Space` 在角色页持有输入时关闭页面；`0068` 让 `M` 在地图内再次按下时关闭地图；`0069` 让 `Space` 也能关闭地图；`0070` 让 `C/S/J/P` 在目标页已打开时按同键关闭；`0071` 让 UI 内 `Alt` 显示原生对比底栏（选中物品后 UI 文本 57→58，含“对比”）。
-- 2026-11-06 用户在当前安装版 `0074` 上实机验收 `Q` 药水回血正常；此前无法触发与中文输入法状态有关，切英文输入状态后可用。历史探针中 `SDL Q`/原生处理器返回 1 而 HP/Tick 未变化的记录仍按当时事实保留，不能把此前每次失败都逐条归因于输入法；本次验收没有记录新的 HP 前后数值或新构建实机证据。
-- 当前未完成：当前安装链已含 `0075`–`0080`，实现已包含但业务验收仍缺：`1`–`4` 逐技能真实效果、`0076` 的 `Space` 关闭服务页/NPC 对话/模态提示、`0077` 的物品行悬停与 `Alt` 原生对比真实详情显示、`0078` 的 HUD 技能键标签真实显示、`Shift` 站定攻击的当前构建复验、按住左键连续攻击同一目标连续掉血、第五幕地图精确节点名称与目标传送点对应仍需补强。内容侧 `90419` 城门、秘境守护者/100%/结束奖励、随从正文、第五幕任务 NPC 正文、第四幕秘术师、叠加多层提示最上层不变。暂停退出在 `098B9D0A` 构建曾出现一次原生 UI 分发崩溃，`0067` 尚未复现或排除。好友/队伍按纯离线不做适配。
+- 不新增逐轮交接、重复状态表或同一实验的复述。Android 新结论更新 `android/docs/STATUS.md` 与 Android 构建/架构说明；Windows 新结论更新 `windows/docs/STATUS.md` 与当前 Windows 交接；跨平台概要放 `docs/STATUS.md`。
+- `out/` 中的构建、截图、日志和旧二进制可清理；删除前核对绝对路径。
+- 未实测的画质、帧率、正确性和省电收益标为候选或未验证，不能写成完成。
+- AGENTS.md 只保存长期协作规则；会变化的安装 SHA、性能数据和未完成列表以 `docs/STATUS.md` 和对应交接为准。

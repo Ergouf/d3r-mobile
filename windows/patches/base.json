@@ -1,0 +1,1026 @@
+{
+  "project": "ScarletNX",
+  "origin": "https://github.com/scarletnx/ScarletNX.git",
+  "base_commit": "dbf8915965367e8a9616b19e5a0c1eddafaf28f3",
+  "patch": "0001-fsr1-present-stats.patch",
+  "patch_sha256": "e367ab818b6eb30cb1b1e5297ec94a413a3591af85ef29f685806a76695c41b2",
+  "changed_files_lf_sha256": {
+    "src/nx/CMakeLists.txt": "54188f5f91592047556e3d3a76fa74136c82a2144c71ba0ba24ea02ea5e030a3",
+    "src/nx/gpu/vk/cmd.c": "5a53cc6968763bc480756387805aa6b4c521b06d74dbbf7a626c3868e3b37269",
+    "src/nx/gpu/vk/device.c": "5778aca6fac3866475ac0fbcddc3cd64ced11f699bda58870ce9fe9d23337360",
+    "src/nx/gpu/vk/fsr.c": "ac89558f35eb223ea9d92fff460f1927da4239fe42d1d9bad0284786b662e2e6",
+    "src/nx/gpu/vk/fsr_spv.h": "fd3bb52b1b8bb94662f862c9a1aaf984730491ccb4013f215a71a287455b9732",
+    "src/nx/gpu/vk/renderer.c": "4db1f670109c2ab701ca264b4fc5cc4e017dc1e121df90f5fb1bee5efcf5630c",
+    "src/nx/gpu/vk/shaders/fsr.frag": "e231f77deae34f036a4adb7e805269901171ac603aba76025b4b48d8e6b927f3",
+    "src/nx/gpu/vk/shaders/fsr.vert": "431d78230788e2b9884c494009f82689af121b8b4edd8fa64940f9423710c62d",
+    "src/nx/gpu/vk/shaders/fsr_rcas.frag": "f6cff018b09ab98811fa0fe1e8f5b8d891d1030302389c6223e21f13ac0b02db",
+    "src/nx/gpu/vk/ui.c": "27c6e68ac490dd2eee89b625077505cbf4944f5456bddf1cbbae183d99031b01",
+    "src/nx/gpu/vk/vk.h": "2ecaf635fe7ac55d1adc75b22778b0dc353e6ece8d9939dfa30209fef4d283a6",
+    "src/nx/runtime/platform/backend/sdl3.c": "e954c58e86218108a94bda9013c943324ac7b356403ed5521fa4f30c92bfebab",
+    "src/nx/runtime/present.c": "54d889b3729796f8b57976ad62eaefe0b944230cc74b2a00bfa5912654f556c2",
+    "src/nx/runtime/settings.txt": "c9eab50291afdb7838ca95c8fa528cfc4f21fab6f157cdf061aeeff07838cdd7"
+  },
+  "verification": "Apply only this ordered chain; 0029/0030 are archived. Each stage is checked by verify_patch_chain.py against recorded patch and LF-normalised source hashes.",
+  "runtime_release_sha256": "194e5b59ca8b8d155faf0c242ce2c5bb3d6910a6e3a28a268924aed50e9878e5",
+  "extra_patches": [
+    {
+      "patch": "0002-mouse-steer.patch",
+      "patch_sha256": "4dc3615abeb807d23b55abb0eea8d7060d2e4858fe68d9e3018ad726054de851",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "5b193b7f6321fb156a0697587db6f3f56db345a1c0f89f19ed4b92b86e480741",
+        "src/nx/runtime/settings.txt": "6c6cd5da57c03859b9d53a152dee3f4cbeca3b40197c8e1db6798f4e453b9f21"
+      }
+    },
+    {
+      "patch": "0003-native-bridge.patch",
+      "patch_sha256": "5a0b9f322e0c2fd739e77f1520fd9e7849cb3c9d86768d314f59cd38472c930e",
+      "changed_files_lf_sha256": {
+        "src/nx/CMakeLists.txt": "528aed3990336ec7aca6f04e6834615b6527848db94251f43a13bf1d9db2e700",
+        "src/nx/hle/svc/svc.c": "584a8ec38c0ae30662d985eb223c0e0c28d404b14db46510496918c249fae3a0",
+        "src/nx/runtime/main.c": "741420979423342ad0b4bbc58027a020fe5ab5bce2d685e2306409929933a5b7",
+        "src/nx/runtime/native_input.c": "fbe8122b6d1e98d41a6329a44b24ab45bc19b4f63a5ad8616a65fff6eabb8a17",
+        "src/nx/runtime/native_input.h": "a5207095506d0977e48ef71c5ac7f0847ffec6616242bf88bf5d5494cdec35f7",
+        "src/nx/runtime/platform/backend/sdl3.c": "44cd9443b9f4625f56c080902bfad6c71db77f1d331dd53f77d04bfe4dc4f9fb",
+        "src/nx/runtime/rtapi.c": "e4e387b8cee683c2bebe47b52502c6782e32283730abc61e6f644ebbf7f96cf6"
+      }
+    },
+    {
+      "patch": "0004-hid-mouse.patch",
+      "patch_sha256": "f42fdac9f6766b159fb1f8fb437f9c72e642231f51e3f79c02d14a477911d08e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/settings.txt": "a495427855b939c3461efc542d6c4c4f9ac71971b74762709e91adbab7ce9771",
+        "src/nx/hle/services/hid.h": "bbca85a4b85bfe549bdfa25bd4d3fa01bb567b33ba06db549ec6941a0b6efc8e",
+        "src/nx/hle/services/hid.c": "3e464818b466de0026302658fe32e11f718a337fc3bca41357f9d7d857d05574",
+        "src/nx/runtime/platform/backend/sdl3.c": "34132479deedc0cddbf17aa45d07214271e1a5bac78da87e7dc864a2e8deb2c7"
+      }
+    },
+    {
+      "patch": "0005-native-inventory-key.patch",
+      "patch_sha256": "2f6caed67c29210ab065b473eb6ff5cb7cd790c92496d19d3e3b55e46b4b0cc7",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_input.c": "01274852c86299b51d447e81953081c4be4d7ced8f1b06e5d176853a819f0531",
+        "src/nx/runtime/native_input.h": "5c99f3fa529089e67875d1802706227067469eea0c635be247ae403b31cb305f",
+        "src/nx/runtime/platform/backend/sdl3.c": "f185c7811b1e0899a38458ec6399dcb92d3cf33c8d1e4369cd0dfb2bb20606c2"
+      }
+    },
+    {
+      "patch": "0006-native-action-keys.patch",
+      "patch_sha256": "9ff5e496cfe8f65bdf33c0871ac24f2ad8e62e2fdede86d3a8f8ef0c306a9cdc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_input.c": "085329e818d414b497b54058111cbbaf29c13c4074c9dc43a98f69f940ae391b",
+        "src/nx/runtime/native_input.h": "0cec5400eecd071a183454d105a122e911bd8c4579255c89f966811b0cd5743d",
+        "src/nx/runtime/platform/backend/sdl3.c": "b748d4887e2eee0b048fecde65465239225a92964a290b0ccfb11fae06e56a5b"
+      }
+    },
+    {
+      "patch": "0007-native-mouse-buttons.patch",
+      "patch_sha256": "fac7a4ab05e70f03fdb244487520855fda469c48f9d61908ccf2aecc649c89a5",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "dc4419e39cdc9fb0d283162591571dcf17c0466419dfd846e7ff325bb66cc7e1"
+      }
+    },
+    {
+      "patch": "0008-native-action-followup.patch",
+      "patch_sha256": "3aaa663cbf21ad1069c47186d13f5d24ff37c32157b6f0da2bb3271b9795fa23",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_input.c": "9d347ac3d5f1001afe724a8e968069607d6ba8aa18031d36fddb47afda448165",
+        "src/nx/runtime/native_input.h": "7b4374bcc7da0f82eeb12efc5d334e9b36e792a2cb8da7d7249518c263f6737c",
+        "src/nx/runtime/platform/backend/sdl3.c": "133060266682838ce2ff291a5faaeb3821c5f5750dbcca4ff1e6243ed2589638",
+        "src/nx/runtime/settings.txt": "e5b861291bffd3ea3beb50b79f0a3747ddf19856a406accf7a0728f398b7bfb3"
+      }
+    },
+    {
+      "patch": "0009-native-world-pointer.patch",
+      "patch_sha256": "4e0e1f43160b6b9d66f2de9e4fb55576cc97f16fe5227f959ebaff2ae23a4fe6",
+      "changed_files_lf_sha256": {
+        "src/nx/CMakeLists.txt": "518dc1d9efe0cd7a0653e68f91dde87cb85c51fbc2dfacf77312dc54175337a7",
+        "src/nx/runtime/native_input.c": "6a41f070921cfbe463d20182c221de7d43f31c1b87ea5faa78611336ebf49336",
+        "src/nx/runtime/native_world.c": "3c993156b53b9fd1a02b732ba63826bd3a02d2ca7f0fcf3046323b84f8e23871",
+        "src/nx/runtime/native_world.h": "a23aeed2d2cc3926bb9997a3fe8bd2f68e6906d5b8b212f98f90152887e44a12",
+        "src/nx/runtime/platform/backend/sdl3.c": "587aaa4dc9d4001b0a620e4bac5a10d3cb065ce52f2e82c8e9a0c0735d7723d2"
+      }
+    },
+    {
+      "patch": "0010-native-actor-interact.patch",
+      "patch_sha256": "443265b866b21bbbfa996eeac58d0f90a5e9cc1c15dd0c6a4d0404e8fc977a60",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "ebc83666f1e0b8cba861d944ccf389adf0c950874adb143b19e62ca2c9227bcb",
+        "src/nx/runtime/platform/backend/sdl3.c": "dcafd19d96bbcbf7b1beb868a38cbe9cb6700d67a8a683f6616b79c647eec30b",
+        "src/nx/runtime/platform/overlay.c": "035d6b000ac1a5363783bb74c4dfb48abe56b64c2760dad93d3d1ec9bfa121e3",
+        "src/nx/runtime/platform/overlay.h": "2c62c7170962805e402bdcdc4bd6e1dfd8ab95ed9968cadad6cc9b7402472cce",
+        "src/nx/gpu/vk/ui.c": "c30e116ce0f20301aac13d8148a7ef3e43eaf9e520aad59a9db3384f5b4b52d9",
+        "tests/overlay.c": "8df5af81f0831f40adc733a6740b9b9ab07632134b4ff76876c1239527908b1f"
+      }
+    },
+    {
+      "patch": "0011-native-ui-page-fallback.patch",
+      "patch_sha256": "12497c7b710e4bd755db3a55c9c39c025aeeb08b631fbf825b21524b6779686f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "1304c3d09eab482fe2ceb32c542bb8edea05c174e5d2df8a8027469447672c44"
+      }
+    },
+    {
+      "patch": "0012-native-skill-keybinds.patch",
+      "patch_sha256": "1057c1c53dd2b295aedc63ed6f25434f6088efbfc663b99de4281fc6e92c726f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "684ce0db4d4cc757dd76aab2a5190f00e81a9956b68add76e7bb6644cc9496d1"
+      }
+    },
+    {
+      "patch": "0013-native-assisted-target.patch",
+      "patch_sha256": "68c0252a2d1608113e7fb680a76bdf4ab21acb175ca42b44b9fbded054d34a76",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "44b260edfe2c758d1f2a45b59f02cc1c72d73b35b0682df522a85b403bf04691"
+      }
+    },
+    {
+      "patch": "0014-native-assist-retry.patch",
+      "patch_sha256": "d2923ae0174dba3736399b48c2ab3daed83d9d991381412cd55dda44c4acfb94",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "4f4ec6b7286650061af460531d511da9b17c63ec97beacf0fba420a941e06c20"
+      }
+    },
+    {
+      "patch": "0015-native-attack-target.patch",
+      "patch_sha256": "282e74bead7077990f78f8ac4ffc4d771c26878805d37ab57fc1fe8ad09174fa",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "17418e664b5d72338ef8cdf3b75cbad9ddc89ccd1af95f561e9636a983f784da"
+      }
+    },
+    {
+      "patch": "0016-native-nearer-retry.patch",
+      "patch_sha256": "a85781d61230271cb47b630df668eda0619470d350dcfcea1b6a20e64e63f0a6",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "19f98c4abdf421019ef80c1e8e501735fdc349e4989f9e2e66c26566793e5523"
+      }
+    },
+    {
+      "patch": "0017-native-wheel-keybinds.patch",
+      "patch_sha256": "88a4d4e73fdcc65a5c14e88122a2b7b76494bf530a7c1e1987a272f083c61777",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/overlay.c": "cfc4cb5528f55b104bb41bba2a0563a6127732451b50355641254d5f75ccec48",
+        "src/nx/runtime/platform/overlay.h": "8e04dc39a78c0d7a2e0c19396dc340177f1491e62b131cda5bbbbbba9018fd1e",
+        "src/nx/runtime/platform/backend/sdl3.c": "ea3d4d977891603e2d387d5cdd3011493277156930c3f341deb0f8c46801ebd1"
+      }
+    },
+    {
+      "patch": "0018-native-operate-standoff.patch",
+      "patch_sha256": "3b49f68b24b0243fe385375b83476c44427ff2406459eebe49be2444f1c0e373",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8b5b730700eb16748c1b9ae997a89dcd28e31dfc50251298b68fa8fce38ce6d1"
+      }
+    },
+    {
+      "patch": "0019-native-main-menu-click.patch",
+      "patch_sha256": "95c965aae176c5175c523eef925ba619f452f4c4554f7ce2359623d1819396cd",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "420fdee517cf9142c5f64edb9d58839023cf83a0c988f63fba382dda68abe09a"
+      }
+    },
+    {
+      "patch": "0020-native-actor-attack.patch",
+      "patch_sha256": "1e88cf7bf58899241594675f83b4f1918c7707dd3316e75f3d116c2fa39b91bc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "aabf3d204e199bdb8fa4923a4f1cccc8f2596ccff3b2776a0eba767d774a62af"
+      }
+    },
+    {
+      "patch": "0021-native-map-tab.patch",
+      "patch_sha256": "90bb51abbc98f48c387ca611443f83980e9680653017c2bb9f47da53a7003b51",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "c30fa72dcfce06f7bc1d03c4721d6d894c943271a9f82d3993f1894ce686808b"
+      }
+    },
+    {
+      "patch": "0022-native-ui-tab-click.patch",
+      "patch_sha256": "6b55ee3440f89d82399c718b43fc83f00d7952157030fc8a768b88832de6624e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "9a07b76044926b84ad5ee6c7058477ea3f9d8033adaa5d8a6795892d21298c76"
+      }
+    },
+    {
+      "patch": "0023-native-ui-tab-controller.patch",
+      "patch_sha256": "f878c33836fc0b27a543850a140b1b61741b7a0e103f2d6bbabf0500026c0a78",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "46b67817651196c4e10a1458ab659047d05dd084c44b6b4dcff719d35dad44b3"
+      }
+    },
+    {
+      "patch": "0024-native-equipment-icon-click.patch",
+      "patch_sha256": "a1e617790d4a63e73b0da0ea1b0cac3f8cdac8972b32acbf9e1bf71e1971f5b7",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "ca1b83725f369b8d3dceda29ec369fe9e802155767df37f7706f62785ee3e22b"
+      }
+    },
+    {
+      "patch": "0025-native-skill-icon-click.patch",
+      "patch_sha256": "5b3f319d967c30520f0904270d088281dea70e3f5677d5a55eb2f76dc7bd617e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "494df72e3ce65b74d2985c543098e6c92465e3fec8376ad1d981cc8f1a630428"
+      }
+    },
+    {
+      "patch": "0026-native-pc-cursor.patch",
+      "patch_sha256": "1b2b204f9e4caf6aa85a83e2f35c4f98cc95531360878d818674595ae87cf774",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "5c1c0d29ba91093853bf34dbdd63a558d8dafea8c33b574a3ead841a18b136db",
+        "src/nx/runtime/platform/overlay.c": "994b8e3a58b134f8864410192bfbcaf2a806ac9921faec531e9811fe253dc2ca",
+        "src/nx/runtime/platform/backend/cursor_pc.h": "db9170a5a369fa07d83045cb3823161060f710c033c895d9ccc7a81d7581e70a"
+      }
+    },
+    {
+      "patch": "0027-native-dialog-buttons.patch",
+      "patch_sha256": "7f9ff76c392395adc5d9e2c53adbb7375660565ba302525dcdd22a91fbc18271",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "b628fc3966274ab6d6c40abd9b65df9b422b2dc699af93bd10b246841fc33811"
+      }
+    },
+    {
+      "patch": "0028-native-walk-into.patch",
+      "patch_sha256": "0579bc05e3e64dde565a248a88527ab24d790285fcf2402f9342b99ab316bc28",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8c4ed235b5737dbd767f5b0602c1ab3b97272b94286b412a6ae9a4759e6a7fca"
+      }
+    },
+    {
+      "patch": "0031-native-door-probe.patch",
+      "patch_sha256": "ac3ec5b4d49a6263124ed0eaf0c010f75108b058741318d55dcea2e073ab51dc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8e354c9ced8f5aef5f8a2b8d7fceba9c7dffb1ae15d7105f6d9ccc8a3cbfbc1a"
+      }
+    },
+    {
+      "patch": "0032-native-door-radius0.patch",
+      "patch_sha256": "0311454b88e384fcc34e0b5733d72716614e85ac361cb768ab7cb5eea9391c30",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "54bbc004f76e9c5a4e94827cee4b44e6a67601c56ac84372bc542f192b555040"
+      }
+    },
+    {
+      "patch": "0033-native-door-occlusion.patch",
+      "patch_sha256": "717b887209ed344e5c59be49de8b3113c8c27af7930c630a095e7c405c9ec2bc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "9e1a5d4d2d78ca9dd5722ddbf7acc3d7964935af1fe4ebf6c94e2aa7247c464f"
+      }
+    },
+    {
+      "patch": "0034-native-map-key-guard.patch",
+      "patch_sha256": "d89fe42e0264a0ba2586ef7e5e3d8f6f55c96b9ef70bf7ddbeed51aecbea6eda",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "4481d0fb453403f4bc0be931d003f7068b2e40aa359a7b7e3301b9b0aa348bd5",
+        "src/nx/runtime/native_world.h": "11696d864f6f0f9fbf9c85e4a1dfd3095e50ef06b3619f2dee93b6a5d55ec7f3",
+        "src/nx/runtime/platform/backend/sdl3.c": "4668996e234652c05b8193b86355ebeae91b7e280742152e235c400c1bc046a3"
+      }
+    },
+    {
+      "patch": "0035-native-vendor-tabs.patch",
+      "patch_sha256": "69393f5da2a7eac17ccd68f4022e15339745b78a3c1a767b293fb4bc61fdf3af",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "ccd88a471795b14cbaf280d2253c0479fdeda8bf00350616f5e37297f642b0c4"
+      }
+    },
+    {
+      "patch": "0036-native-artisan-tabs.patch",
+      "patch_sha256": "ae60b10913b51965ebd227f89a5f5e95e371310d85f207bb52c92ea7ad32acd2",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "e1e3c422b241144e761c8492899d4adcb3abccb639420940f8eef7a549061daa"
+      }
+    },
+    {
+      "patch": "0037-native-hover-wheel.patch",
+      "patch_sha256": "e3af6a82549cb3c04f73f126fdba9419b39e7f08d1515cc21e1738531ab28204",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "a4a43b9fd384d08f6e31f1bbb2de59ddb3ae2224f88ee0fef1a5f68789d73e82",
+        "src/nx/runtime/native_world.h": "ca1f133b2ee43efeae944433fe176ed11df29a31969d63a05598f799e24223ca",
+        "src/nx/runtime/platform/backend/sdl3.c": "cef09c7c306d8378f79940dadc966b82955c05adecbaef5775396ca88694d09e"
+      }
+    },
+    {
+      "patch": "0038-native-service-inventory-ring.patch",
+      "patch_sha256": "96766551a571c7ee7484aa8d56e55ae1fe88ac9688e29667f57a54a941cc176f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "0e33cd08f4f694bdb39115a98b8e6dbe4da0e5be74f0862ad8bc24e8d2571e67"
+      }
+    },
+    {
+      "patch": "0039-native-blacksmith-crafting-ring.patch",
+      "patch_sha256": "9e205f7ac2e58b51a4b8f3ec395470e22377171e3727fa0733b24fab95202eeb",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "36771b2909c56c8b1a8ce1ac9c8f36131a92a5d0e6da02c4a8dbaca5ffc5e279"
+      }
+    },
+    {
+      "patch": "0040-native-settings-tabs.patch",
+      "patch_sha256": "958561712228cbf105f6ca4e61bad5f24f9440c056fd8d8b6695b170e72abd7e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "c926237efa2ed63f5ec8d7808e269daf282be5680844845a26c101ce4867310f"
+      }
+    },
+    {
+      "patch": "0041-native-vendor-act2-tabs.patch",
+      "patch_sha256": "dfb3a9fb68bd110bcb69f76cae7adc8fc9b89351d96bf6055d6bd6790b427abe",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "0f3749f38eb547f940972bc7479e9035387093944c1ca6581597785cd65d9692"
+      }
+    },
+    {
+      "patch": "0042-native-vendor-act2-fallback.patch",
+      "patch_sha256": "a5d7d91cc1de510a97015be79ea8c03e3b4a5f752cd4b4f190520540b7c8ec3a",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "d1db6865ec1cbb34fd66f1d28a14cdb701453e1520e458b2aae15560e8f34bac"
+      }
+    },
+    {
+      "patch": "0043-native-settings-tab-guard.patch",
+      "patch_sha256": "3e11ddca603a3676896532b5755ecf40ea64fbf0ac3026a737483a1af3df1d2c",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "ea63379cab65ccc45b76700e8d2116470bd6ad1ee087aedc1b3018a9bf1c2a10"
+      }
+    },
+    {
+      "patch": "0044-native-jeweler-combine.patch",
+      "patch_sha256": "4ecc0f5515603c6e889e018dc0b1d007526798dd95c04e2e4aba69034413e25d",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "076b5c8273ae4e038506bf09bb8fc31fe736a9d1affdd229996b552511b92456"
+      }
+    },
+    {
+      "patch": "0045-native-jeweler-socket-remove.patch",
+      "patch_sha256": "6d7da90cc0a3953566f49cf631445c10372822671feb3de4501ffd378c6ae06a",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "5a1e3b0588900cf6ad2a85cba604d134fb7a67844d50312f038ce2b32c82ec1a"
+      }
+    },
+    {
+      "patch": "0046-native-jeweler-page-labels.patch",
+      "patch_sha256": "afffbf8215a60a7f4ed8194d2ec4c206c6e339176d10f4ae0f05276f8e34bec6",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "9441fa35bce0b989f46a78ff4799a23284ad2ca556769886d2bbc281351bd4e9"
+      }
+    },
+    {
+      "patch": "0047-native-mystic-enchant.patch",
+      "patch_sha256": "ea46fb74e868187ee9d392ec7e19258e7c1f2df2ab762bda3f427cabc3396394",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "56d06e9731e3d86e405041457e2aed32888da1cccbd410e692fb6fa702a6a5c7"
+      }
+    },
+    {
+      "patch": "0048-native-mystic-enchant-confirm.patch",
+      "patch_sha256": "264aeb2b52282398b3ac594765de3f174491ef197d6f35860565ae7c5789c1a9",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "c43ed5ff65db7792c0f0db305f0a66268cbee134cb00c02aef7e135b1203365c"
+      }
+    },
+    {
+      "patch": "0049-native-mystic-transmog.patch",
+      "patch_sha256": "7f0060c2ddf591698c15971efa336dc0a08cecdd71437b1bbc98f39db9548898",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "671b5d8a7766c9a87f7727d36e242a197063a2d48a46aee467cc69cd2c3875e4"
+      }
+    },
+    {
+      "patch": "0050-native-world-attack-retry.patch",
+      "patch_sha256": "8b45d6bd7d36616cedca03e8f7886bc9db451eeb6ee644dd71c9ffea3805786d",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "dfa25aee9ae6989fa686a188ea0981ba9feecb2c190ce2c50d9d85f0dcbc004b"
+      }
+    },
+    {
+      "patch": "0051-native-stash-transfer.patch",
+      "patch_sha256": "1a423040f77fcc2ee122dc2d194d810e83cdc1731119c368524d1360d5c3a1b0",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8ebb3ee879e023b2bf4bd54e9658c1b31a2151e196009b442f258720be9aa30c"
+      }
+    },
+    {
+      "patch": "0052-native-options-toggle.patch",
+      "patch_sha256": "be498373ce00d1ba51df08f34042187853a1edea3da2d5426bb32c380187feee",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8856a9e774d81154414b54cf8d95acf580023572386e64609f0b9e4277827cc6"
+      }
+    },
+    {
+      "patch": "0053-native-footer-legend.patch",
+      "patch_sha256": "d3df92349b15e29e7332ab59634a4ff929ed434b17e28d2d83130082a15cf524",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "8492210bc5fc6ca10281d22d997f500fdd821f171b2e361aa026f4e0f144d626"
+      }
+    },
+    {
+      "patch": "0054-native-dialog-labels.patch",
+      "patch_sha256": "1b226494379c01ccde0afb2c61669929ee5fcead37daf16936c0a55c821694bd",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "095ed3289889d0e8e6c9b6ec41add3829aa052597f1ee0792826e46f69ca975a"
+      }
+    },
+    {
+      "patch": "0055-native-footer-stick-hints.patch",
+      "patch_sha256": "8e198c98810bbde6063e07994052e8b567b6dfb776a62aa856d1be76ac6c53cb",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "7d45363addf7fc505567bc9e8dff2659cdeab0ecf92c21bb9e5923946acae22c"
+      }
+    },
+    {
+      "patch": "0056-native-rift-portal-priority.patch",
+      "patch_sha256": "339cc8d40db2d50c3e0004ac90a586642df3b00058a65ad49f31ecfd5294fa73",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "5bbfcb82bd87d6e8d5f316ffa2fd2dde559108f8da4a7bca49ec6a7c75876950"
+      }
+    },
+    {
+      "patch": "0057-native-attack-position-path.patch",
+      "patch_sha256": "d4e34eee1665e0aba4c92972611e50491e7ce6cc88859207525816690bd84dbc",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "09e74440ec9489d9ee59a1963c9c9c69e98ac2b8611efdfcaf0f2354f3882347"
+      }
+    },
+    {
+      "patch": "0058-native-actor-attack-alive.patch",
+      "patch_sha256": "15cf822aef52225fc45657e9dceafbdc88aa09de64c0f6eadf2801df612fe285",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "e70eeab0f961e725c86904d70acba73d3725cbe05d684e8dd000e77c69bdcceb"
+      }
+    },
+    {
+      "patch": "0059-native-chest-operate-range.patch",
+      "patch_sha256": "46c8d4258739b00f1861f6443bd751c0496d49feec0dbf800ef6b1f970da22c0",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "32d3e1cb43ed6fccbff2525e344dd6d3e8c2c20dacd80ef89bc833020c77e20f"
+      }
+    },
+    {
+      "patch": "0060-native-chest-specific-range.patch",
+      "patch_sha256": "881d310905cbb811e3365418ec69c9e7c141b2057001c3955ab8c6b85a8e8e2d",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "9fa8b0096117d6f06516c2759932e381a6fa4aec55a226154471525f99835c0e"
+      }
+    },
+    {
+      "patch": "0061-native-mouse-hold-standstill-secondary.patch",
+      "patch_sha256": "cb6cab8b40f42b4e9d7bf3b863a0777b813ebba2bbd13510e62e736e8af22b52",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "5176b2c3eee61f68b78dc8978fbfe545dfc2e946d24500af31c01f4d07be962b",
+        "src/nx/runtime/native_world.h": "fa61d0930ef9b41bd470ea4035268cb6864f10b785a9952183dddfae4aaf3cfd",
+        "src/nx/runtime/platform/backend/sdl3.c": "d666e84ccc6202f16af3b53d31930c2672a2b688a42ab0c9f947b13004f62ba9"
+      }
+    },
+    {
+      "patch": "0062-native-panel-hotkeys.patch",
+      "patch_sha256": "22a275048f1434bd3b6a00a528f8baa55ec99ca07c61207f1ba98d87c050d30f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "ab9b6075d6d43f12caf028ff41798692c7ec190d64de8d936bd9eb33690c141c",
+        "src/nx/runtime/native_world.h": "f62e6b32728a3f647e6663b3590e6d3c0360ce475391c3bc271cf8578f4a9235",
+        "src/nx/runtime/platform/backend/sdl3.c": "5c9c8fd9a3364141cae5e5682621e2edab33a31a4e71421e8d0400d3889a94d1"
+      }
+    },
+    {
+      "patch": "0063-native-world-commands-map-picker.patch",
+      "patch_sha256": "adc1937e64bd17c80bf0d029b6a428e43b3dd0113885ff6a72c0a032b054655d",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "6ebb7ca6ea929fa1caeb1252ee5f8b0b12de113aef2ccec0590915683f84d9bf",
+        "src/nx/runtime/native_world.h": "6d24f74b648d91af30de3d485fbbdd2505dbb4ae8f291e7ba3f2a238d62f34dc",
+        "src/nx/runtime/platform/backend/sdl3.c": "f97d87266b5ffadb7ba5a1063d9a32ac61959596a07ba08c7369273790fb24aa"
+      }
+    },
+    {
+      "patch": "0064-native-inventory-pointer-actions.patch",
+      "patch_sha256": "a065b5c0237add99912fadc9d164cc3a212aff0001ee9a8f34a8c9b25b6f2e0f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "896ebb98bad0dc33e3f2353a017ac351a166eafc2391134bd9c05c53bf753f27",
+        "src/nx/runtime/native_world.h": "fdb000f0943bf17fcb23e52aa65fc16b2f0f0fdad6aaa761e0bc92da38d596f7",
+        "src/nx/runtime/platform/backend/sdl3.c": "2857ae00eb303026817a37f8930f98832b1ea9e95a613e5b389aeb11732c6e14"
+      }
+    },
+    {
+      "patch": "0065-native-map-waypoint-id-range.patch",
+      "patch_sha256": "fe5b923fa840be1c765bfc953f1d32e12d7cc892ebc62de3d4f84684fdc2446c",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "56c59dcdc85d1b0f238692b9d0b9c9efb6e9d35da8c53b0c70e36ee497f6f543"
+      }
+    },
+    {
+      "patch": "0066-native-pc-hotkeys-m-p-esc.patch",
+      "patch_sha256": "7f4309923e6a860ac75e21c73895cf2ab2b1ff9aa3b6cf3cb32289620ecd55ab",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "976a0fce3de9d25dabc8b5de3bfa05b3039fadcbe7cda0a830a3b995717f89a1"
+      }
+    },
+    {
+      "patch": "0067-native-skillbar-space.patch",
+      "patch_sha256": "72fc71288d46456d125c1a524758bd678335414a5ec2e15b14db119c56705eba",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "b959c49edccf9e62b9037d8aa99823f7a972258f9295d40957d146276e2af7d5"
+      }
+    },
+    {
+      "patch": "0068-native-map-m-toggle.patch",
+      "patch_sha256": "956ed69c57b9879967e9a33ae4b6f9945412937a71c282b0a5102bfff62d28ed",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "0579818598b69907c4fcb1007dcaf2d5fb3b09e833cb15a7620d331da7702ec4",
+        "src/nx/runtime/native_world.h": "8c085e86807d3df9ec0d4b0e5262615e8aafde0cb063b4cd97d3c0ef6371cbad",
+        "src/nx/runtime/platform/backend/sdl3.c": "d70c8e280305d9b07d9295bd12550ff387bf8b6329660718fd83e0e79576fcd4"
+      }
+    },
+    {
+      "patch": "0069-native-space-windows.patch",
+      "patch_sha256": "d1b0fc9fd9c14a5ce21c9337826296c19399864fc7b6c421a83c173f2e19708c",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "2358ab7d79857122e364c27c976236d90e487af9886392bd2cccc23173acdd90"
+      }
+    },
+    {
+      "patch": "0070-native-panel-toggle.patch",
+      "patch_sha256": "58b47ce99b51a0fbe870a322de4126318dc8d8ac3e8f59037b8fac9b860b05d2",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "545707bb8705d0b04c6bf2552ea219a7349b37913f140da68c94a03d77bb4a27",
+        "src/nx/runtime/native_world.h": "1e5135e0e3029811d032ecaad2871dd7f5dc3e2c6f2246d2011f998bb878cfea",
+        "src/nx/runtime/platform/backend/sdl3.c": "6d3f350c44173a269b490047c8f76f0e3b0fe5cc1a81f0b1f8547feb9f448579"
+      }
+    },
+    {
+      "patch": "0071-native-alt-compare.patch",
+      "patch_sha256": "3f22f8a5e23b1fe8f02abf7e1e05b9c4b12e7bfa0c1dee2f5d2a39729f125c80",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "30c2d8586af06c5a877e63640700865f30121ab6bd3afb44b56475a1578c466f"
+      }
+    },
+    {
+      "patch": "0072-native-tab-map-toggle.patch",
+      "patch_sha256": "11354a3bd95dc7075962408b292e63fd09b415a719da5be5af07fb7c9fad4d70",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "c822defd1e5e61246e0b8ea68c68795489461a6ff66769ea658f0b5b98bfbc71"
+      }
+    },
+    {
+      "patch": "0073-native-skillbar-labels.patch",
+      "patch_sha256": "21f0d72553e8bd5a5adf0188289688698094bccf087631253f520413a237688c",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "aa0e136abe59bb52e2ba007c537ccf2347188b0e3426e13147be607fd8842399",
+        "src/nx/runtime/platform/backend/sdl3.c": "4a3eee1e7120e6f37735bda70e9ea2f11d5da0e8cbc7898f1cd517565a2a1d5a"
+      }
+    },
+    {
+      "patch": "0074-native-map-portals-footer.patch",
+      "patch_sha256": "f39728a9153fc514d78baef069d768917601a637086e54750ce7ccbba90b47d1",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "a7340d5a97aede5289282d50425a77987569bd2f8f88950246f1cb8471c0a065"
+      }
+    },
+    {
+      "patch": "0075-native-digit-skill-pointer.patch",
+      "patch_sha256": "936a889d20e7dd724fc3cbe123fb9ff073973a46ba9500bee563b8131beec769",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "fb64833480665696dabaab1ced213d47958977ebc49286d178b09ffec7cbd49e",
+        "src/nx/runtime/platform/backend/sdl3.c": "6cc2835ceb4ed7f42dc90d06fb0babfc47a7098fd71d1e33918f60640d88ef72"
+      }
+    },
+    {
+      "patch": "0076-native-space-close.patch",
+      "patch_sha256": "38508a5b54ee4932a66d53d85b181af86bd6de42a38e3a8d16c1969dbf9bd16d",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "fb5efb78e58e2e36c56ac7092cf50065fd41b8ad95ea3fdd17ce7a25f90f1847",
+        "src/nx/runtime/native_world.h": "9c4aa9ca8003299ec069f57b44e4fd475b4950b1b2d66d5b5c1dea033b2fb495",
+        "src/nx/runtime/platform/backend/sdl3.c": "e2d8ee10b6885db6ca99140f78f3c545945286df93c4cbc56b1aa6d5d1d36011"
+      }
+    },
+    {
+      "patch": "0077-native-item-hover-compare.patch",
+      "patch_sha256": "7682c8d5594bb7877a7d07c52db45b2a22eac10d42e8adb16de68f4c88484207",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "b748147081f83182f1c90137c26490ae101a8ac14162d40f5de137d4ec2385b2",
+        "src/nx/runtime/native_world.h": "6cf6f28a781e6bc49ea35097f09b019c682605bd8df3a79634eff40eba5bc0c8",
+        "src/nx/runtime/platform/backend/sdl3.c": "94cd858f95852016d6608679a425295a130a02e0e7417ebbf5d2a512fb112786"
+      }
+    },
+    {
+      "patch": "0078-native-hud-key-labels.patch",
+      "patch_sha256": "3d983a9fafbe925cee1d970ef6eccebd2807b122b600762069fead6b277cf36c",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "1a7b32b4d7cffbb9f0c76a729c267104c18c6016ff7482c34c9a1f3a6dc3c7aa"
+      }
+    },
+    {
+      "patch": "0079-native-kbm-split.patch",
+      "patch_sha256": "c667a4eff9269d53046b08ff1aa6fac9cce7f36ddc68a2e996bc44352b219a3a",
+      "changed_files_lf_sha256": {
+        "src/nx/CMakeLists.txt": "929d85efe71d332fb35bb212805dc3704757013c6a557e3aec03370e257d9f68",
+        "src/nx/runtime/native_kbm.h": "9b0fa9f62e929dea2e7538fee79cae8c22be90c4577180a0e38891fd4a994e03",
+        "src/nx/runtime/native_guest.c": "e4e48c763293f53845dc591fdd3df236a888a1c8c7afc0fe9b28233f1f3e9539",
+        "src/nx/runtime/native_labels.c": "5e2eeea2f019145e5d47e9086270d0048f5ebab374cce8e786be74e37f86c3a5",
+        "src/nx/runtime/native_ui.c": "62d59113cefbd8665aafbab68b1d1215a3f57b4e22ccff1e7f3e47699b4f5aad",
+        "src/nx/runtime/native_world.c": "f0e96e27c9fd06d368e1b6be9c3fe205b0358c509084eefc622577849dd28783"
+      }
+    },
+    {
+      "patch": "0080-native-hud-label-size.patch",
+      "patch_sha256": "1fd79363ce75b8f94061136785a94939c92b22a6e6a02a8d7fe86cf0ef554d94",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_labels.c": "1f801fbf5bc818ee3ad67494d38d029de3182c94afed9d19735bc61c1fa1661c"
+      }
+    },
+    {
+      "patch": "0081-native-hud-potion-label.patch",
+      "patch_sha256": "20d92db0be179bd8477889ae459fabb099fbf36c3c6decfe9073063ac066fa56",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_kbm.h": "ce46a6e16de7f68816412efc9a762daf71d9abe857feb1f7491248e5a21b937d",
+        "src/nx/runtime/native_labels.c": "b441e948a6c74fa3de8eb23e9ee680845c600bdc12eccc9ab5a88225dec59092"
+      }
+    },
+    {
+      "patch": "0082-native-town-portal-picker.patch",
+      "patch_sha256": "0747e8dd33db02ed4cf9814cf72eb55f5bb87b4c94497aa3c6159446b6fc52a8",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "61bda4306f1aae905cc4954e8b6a6e7746c7c464cb3c67cab715ee866cb44164"
+      }
+    },
+    {
+      "patch": "0083-native-space-pointer-focus.patch",
+      "patch_sha256": "e71833e073fc6b5128983ef2bc53d000ca9370dc13e97a5335e4f8069f22c1d3",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "3841bb02d490cfa1461d940b114d8b34551b14209c87704b3ce06803646eeca5"
+      }
+    },
+    {
+      "patch": "0084-native-space-back-fallback.patch",
+      "patch_sha256": "39771e77c90165972c2afd3882eb5b65e22d390d498766405da91ad09f67b297",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "361b6f834ac767cf491553e4795cde65694fcd696c9d221c89f02a6c92dae766",
+        "src/nx/runtime/platform/backend/sdl3.c": "229cdc54b43b521ae332307706562969d0e8003c872af0a207fb09a6f69931fe"
+      }
+    },
+    {
+      "patch": "0085-native-map-camera.patch",
+      "patch_sha256": "af5c7d58ccb25834b219506bae7db5804824673c1778deae4a72231b54e7fe8a",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "e35e0ccc4571c50ff2c1a39104c963116131ec1459a1db44c3d54270978b3f6d",
+        "src/nx/runtime/native_world.c": "53a4ddb0f96873bddd413e4d0df33b1fccea01afc23a1316ec03506af760b792",
+        "src/nx/runtime/native_world.h": "4579d822dd7389ac7e97f06ef47ee87729384b1be322ce2d7caf97adcdebf607",
+        "src/nx/runtime/native_kbm.h": "b2a7681e618231a51033b9d0f6f6e5c57f3d345a794964c2370a6f4f5b15c77c",
+        "src/nx/runtime/native_labels.c": "d8e666894409455f7221ca1c484034926ebee283012b7451f9a7d4368eaa606b",
+        "src/nx/runtime/platform/backend/sdl3.c": "41eec5602eebe203fc30161e56ae6f19ba20c0cb9ccad2d8896fad219f168d8c"
+      }
+    },
+    {
+      "patch": "0086-native-footer-after-refresh.patch",
+      "patch_sha256": "44f0d5fd0f4eb835fad80d610af7f63697441654fd0bf5e57e624f5492b45d34",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_labels.c": "56bc8d8fac6bf2095602781f918f154984838a0884f0b95cab886b493a71e3d2"
+      }
+    },
+    {
+      "patch": "0087-native-footer-setter.patch",
+      "patch_sha256": "66be4c58236ebd29fbd76e83308a0f608a39d44fe6517eef4a9ed42fb86dea7e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_labels.c": "638b3ce35bf8b858d4117dcf1007a403e1b5aafd61e33ac340d7b74fad7d233e"
+      }
+    },
+    {
+      "patch": "0088-native-footer-actions.patch",
+      "patch_sha256": "b3ccd1f7f78e1c18f617c20b0950f2f634f128ad37df306fd4b0b37ec8d0ef94",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_labels.c": "d5111cb8196586a6b027916fe4370a2da66b0fd4085cc4e6ede63f14b753f9b4",
+        "src/nx/runtime/native_ui.c": "0ea5bd86ac27c9e7f8cf455d2ab22d82f2e10384cbb89673deb725d605f3ff50"
+      }
+    },
+    {
+      "patch": "0089-native-skill-diagnostics.patch",
+      "patch_sha256": "f970733df2a00bb4344f3484dd392dd2dcf611e1c11ff42ee45add7fb9d7cb89",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "63843f1eafd425adb74d56a3137f1ea40e42069df47b7cc22dd118be7b00a937"
+      }
+    },
+    {
+      "patch": "0090-native-map-tab-icons.patch",
+      "patch_sha256": "2771ae7e84016b1aaf10326c9d36ee7db124ddeb9122c49c8053e8bb1b458e6a",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "4a010fda0ffbbe10f3d1551a9b1310c0599d84f117c58b5e6bb31a00eabd2d6b"
+      }
+    },
+    {
+      "patch": "0091-native-footer-diagnostics.patch",
+      "patch_sha256": "96afa5a37d1e662ed4641172d9d1b62f757c93b9c7e713c0e3a572848d9e46c8",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "4d625b47dbbf91b2b8c5e10643f0836db5e3f4e7f7c2125db5a70d5e3082d67f"
+      }
+    },
+    {
+      "patch": "0092-native-footer-click-order.patch",
+      "patch_sha256": "69a7ff7566fefa07d547199c7b0dfccff3629e69314ffa75c2372f7e4a49829f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "da56a17487933ffbda79887006632b03570b893ef2de1b3b2c964b908d9d0d07"
+      }
+    },
+    {
+      "patch": "0093-native-footer-point-log.patch",
+      "patch_sha256": "38bd5e24c30b850933bd4f2bf8cd185c25428a8d1c8905ef385ddff9871ff939",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "a2b22116a9fafcfdb521577d0a6778f3f0ebeee51aa7ae7d273c56727483c521"
+      }
+    },
+    {
+      "patch": "0094-native-pointer-log.patch",
+      "patch_sha256": "28b625da5cfb3e1de297d19fb42ad492d01bd261bc0542f7380f25b3a1ac4a52",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "f6aaa024bf0c326f57a64adf990b91ef4b5b1f934ede4b88c097f3fed28f6898"
+      }
+    },
+    {
+      "patch": "0095-native-mouse-click-log.patch",
+      "patch_sha256": "f395582fa734d392417b44cab9d30bb15c4fbcfba7123ff2b86207a30578bfab",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "ab530d4a9bd2f6403ec0c9385bfa1c88e1b1887c9acb90075f065d5815bb19db"
+      }
+    },
+    {
+      "patch": "0096-native-click-in-log.patch",
+      "patch_sha256": "c1192a27fdcbfb56ca0178500257ad3ca63ce5d68a6eb1722a5805d89e4a3e4c",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "e7f204e284ac5a974ba00ef265504a3bf9ebee308abaccd0011cd02e9bc55795"
+      }
+    },
+    {
+      "patch": "0097-native-ui-queue-drop-oldest.patch",
+      "patch_sha256": "f02845607bd5a2255f50073bfa5cc8c7ed249dde90dbd23cea69b850115c1a95",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "00b7b601018b5c7885394348e92755ab2fa755e2566c64edeb86cba452f769fc"
+      }
+    },
+    {
+      "patch": "0098-native-primary-event-range.patch",
+      "patch_sha256": "46336ab3cc8f626107f70242812c97b296d2bf54513c35545d84b2735ebe7b17",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "98f9c3a86c028b6ad4215e2ac5cef9916720e016afb94d974604f3924a181a3c"
+      }
+    },
+    {
+      "patch": "0099-native-world-game-ui-drain.patch",
+      "patch_sha256": "c5c6255c6cf9a21e0160b8cfd339b4ff0b43d42566a31d77d480652d53ae9270",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "35e46aa61e85571bbe6a473d1f00e439b4eebffac73d677f61318086c2e25545"
+      }
+    },
+    {
+      "patch": "0100-native-ui-queue-log.patch",
+      "patch_sha256": "699474fda5e4f3688482155a6f845c0782ad65919362d4cda70a46bfbc8f0c43",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "5048749fd1f95ba1f5e49f6a7fc66d688b495b6ffff53beac7f5d46348e6282e"
+      }
+    },
+    {
+      "patch": "0101-native-game-ui-drain-early.patch",
+      "patch_sha256": "2ad9fe15f16a15c30348853d32ff7db99849eeb02d98678acf9c13b82c63e002",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "5bb22205e3aa87dee84ceb21c8f7e9e8c01e2f1364deebcb250b2205c70314d3"
+      }
+    },
+    {
+      "patch": "0102-native-game-ui-drain-unconditional.patch",
+      "patch_sha256": "fe7f23cec90099461a9a358f49fbd97b147bd9f58d9f47be8ed62874d977fbae",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "fe4a3b499fa4b77dfcedb3683f33b17ff79feaac362151e18775528fa4bb87a9"
+      }
+    },
+    {
+      "patch": "0103-native-footer-direct-pad.patch",
+      "patch_sha256": "8a67a47cd5e2417420170290eaab37c24e54e6292eaf887b7dd6c7967ff8ae18",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "3bba569ac1ef5c62fa06eee385eb580e235ee241ee236154a6a40ffcba4019ba"
+      }
+    },
+    {
+      "patch": "0104-native-skill-icon-priority.patch",
+      "patch_sha256": "8766919b9a22329df97b5a45ee8bc1b37cb735c6337ca4fdec9e8b374c731a04",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "84a8b1d4aba529cf0afe8e29b438292ef0d44c8f3e7f3b46dffa199f8c4fd215"
+      }
+    },
+    {
+      "patch": "0105-native-skill-callback-range.patch",
+      "patch_sha256": "3ece0e896b6dc74c6639ab7b141826101ce185dca5cafeec786e25d87f91e930",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "e63fd9696a76fce9fa65316a9652f1de96af376d073c1822a243591924199781"
+      }
+    },
+    {
+      "patch": "0106-native-skill-icon-logs.patch",
+      "patch_sha256": "24a1524f734e42242bf86300ef7164949afbd51a2e354e48a8fab9ca84d83c7f",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "892df597a6f93b068a2bbaf54e969975869cfcd4f1ea523f5c0ad0a08bedfc87"
+      }
+    },
+    {
+      "patch": "0107-native-skill-ring-visibility.patch",
+      "patch_sha256": "8bf5bc0e6b2e495db42fffa9c66c043e1944492d47f477bcee38834877b1d821",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "df62c9ea9de9d9c2f6d6f18764946ec83e3add6595053c77151b2db699c8a545"
+      }
+    },
+    {
+      "patch": "0108-native-ui-key-fallback.patch",
+      "patch_sha256": "daee87dc96200a4c05c3df345df0ebd5ede42f299f8b01d2391d0ed62f995de7",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "cfbc808274422a406506ced875718c29f38160e838d838fd2241e46c4c12b9b5"
+      }
+    },
+    {
+      "patch": "0109-native-skill-key-log.patch",
+      "patch_sha256": "8bd4bc6e11725bcffe0b688cd940424073110988dad0a9db24359ead85aed70b",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "37254beea34116871afbce53a90155b02afc1ec310a938474ef34cfdd062ec00"
+      }
+    },
+    {
+      "patch": "0110-native-skill-map-log.patch",
+      "patch_sha256": "1c870e2c07d1043ea00707c0b631f758608c030928f9ddb9e0aa8bf797293859",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "87974f5c376e7fc29be9d3548b6b8d70e52cd98b1bf692ffe349d10bda9bb53a"
+      }
+    },
+    {
+      "patch": "0111-native-skill-manager-lookup.patch",
+      "patch_sha256": "e525fdfaa346aff12398764224ee2879d63cb7572383801fddeb7104b9a9ab62",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "1ea796cdfeb8d4ad9806c46cd8415be69061e4f2658c8f7ef8b464e1089ddeb6"
+      }
+    },
+    {
+      "patch": "0112-native-skill-find-log.patch",
+      "patch_sha256": "c18a7aca1f84a713cc6efdbaaddc218161f753172830a2e86a65ceb0a4d135fe",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "eb3536ced36822af1c872596b36b37b85c6ea34a03421594466de3210aae59a2"
+      }
+    },
+    {
+      "patch": "0113-native-ui-relaxed-read.patch",
+      "patch_sha256": "2d6386801d9af6c4a0d0b1933b869a4476faa22b07344ab41a71ef7598c08eae",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "31662f7758448fefd27a13439657c55538e05690e7cd5429754cede395b04b9e"
+      }
+    },
+    {
+      "patch": "0114-native-ui-find-buckets-log.patch",
+      "patch_sha256": "0f218a7bb95bb3ef2e26b84dc34f4a4434cfae4d789dec05baf0094a171ef6c4",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "505f9012f82d5ac59fec15f92c790add12beaa7a5131ae6d94dc5270ee11ebca"
+      }
+    },
+    {
+      "patch": "0115-native-ui-bucket-node-log.patch",
+      "patch_sha256": "2b67cf480d7911c106d4319ef7e60429257f4cbebe364f9811adbc4f06e8e33e",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "d0c7d97caf7ff03af775c37aefea5e626a0b1c0670f0d02c3b7b42b3a8c7542e"
+      }
+    },
+    {
+      "patch": "0116-native-page-pointer-guards.patch",
+      "patch_sha256": "bff76681885db543a252e19fcc44da7653b4ab2ac10d93490a29c35090581616",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "d4ffbd283d71775c47f9b65e71e4740144071a3fc5a3a5277800d046692504cf"
+      }
+    },
+    {
+      "patch": "0117-native-skill-choice-pointer.patch",
+      "patch_sha256": "a12656bace9b9e61998b8147532a731521669be132dc8b4f8ffb71a35983e967",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "08390188bbedcba86b83a3eaf94d90f869770108dedc1d446563511cdd8d74b8"
+      }
+    },
+    {
+      "patch": "0118-native-footer-hint-routing.patch",
+      "patch_sha256": "41649e5409ab8472cb9097f49211cbad3a65a6e875b402501a699e7b975bd89b",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "18e8d7be4df7a9bc07f9b7dc53b797a5b7d7e1873560f61c754198549bf13ea8"
+      }
+    },
+    {
+      "patch": "0119-native-bounty-pad-route.patch",
+      "patch_sha256": "3b66838284d2e24a3329d2f3ecb8e461d61d88029f3f5ce72684f77859e3c639",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "ff235d2cc89ea13329b177344204c0e31e61f27085b517f7a43ae0f47d1b3a6a",
+        "src/nx/runtime/platform/backend/sdl3.c": "b31a3f9d65f6dab659555a808b497870710d629b3a524f0c44a3a6d7622c0240"
+      }
+    },
+    {
+      "patch": "0124-vk-unlock-timeline-wait.patch",
+      "patch_sha256": "c7f782b80aedb2db632b233b158a7885ff57a2c6da34aad77c3028fa93f06b9d",
+      "changed_files_lf_sha256": {
+        "src/nx/gpu/vk/cmd.c": "a40ea51b5413de448b9c013453ab909aaf537d5cb409711104c150c669141f83"
+      }
+    },
+    {
+      "patch": "0125-native-keyboard-bindings.patch",
+      "patch_sha256": "162f70899786c6682aaca890dd9fa0a8f3534e2f973336954aecb190ef73c84d",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "8eb16398196fb23c3bba64d0f9a1905c248d9c9921ba70a80d3639dd5324b783",
+        "src/nx/runtime/platform/backend.h": "e2789d37abd109a4a49ed6de4c2611ad7362226157902ed0534dfdb22bc1ceca",
+        "src/nx/runtime/platform/overlay.c": "bff280e62ba33da3db2f29cca5ddc6a53dca8a779e5bb1d28191c8a982ad97bc",
+        "src/nx/runtime/platform/overlay.h": "166751ebd96d0c470a665aa107ceb656c1fcb3b50da8979cbdfa8ce53b25cde9",
+        "src/nx/runtime/native_labels.c": "9516d760382c0daf433eb39c9bd80781d12f92c477487e5e4d9d92c0b111e89e",
+        "src/nx/runtime/native_world.c": "76cacf180b52676860aa4db31f531a53abe96df66541d6c4eb40262b43e33915",
+        "src/nx/runtime/native_world.h": "dbbe73cfa286c36eff42b4d6a31aea29ced10c711d99bf58e23e30437e004620",
+        "tests/overlay.c": "0a67497b779d270a2802a29406c87298a865c1a31132474c43e74143a9cbf198"
+      }
+    },
+    {
+      "patch": "0126-native-stack-split.patch",
+      "patch_sha256": "7a498822a11c230a9fb1af9cedde6f7a02c773ecf6963d277c7245325bc61781",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "c29f206867a525ed68c50c4168bbc5fcd3915eefab8437b265ea93ef414cbd33",
+        "src/nx/runtime/native_world.h": "2640d4885e28bd41d5549ffb9f91607a4881f4178172f82c2c5e67d46a0a2e07",
+        "src/nx/runtime/platform/backend/sdl3.c": "2d8aaaa0d564c24052596246c441666b111ded33a70c1aacd95a9ed25d578821"
+      }
+    },
+    {
+      "patch": "0127-native-stack-quantity-pointer.patch",
+      "patch_sha256": "64f103de46d2e534f8ee06cdaffeeda3138aa66df5cfad2a8588025539e8d6fa",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_ui.c": "d80d8f4a718f3a81772312198cb5da7cb72391063362c270a986ef2af3d17d1c"
+      }
+    },
+    {
+      "patch": "0128-native-rebound-pause-back.patch",
+      "patch_sha256": "0d29a468ea58e00fc5f101dffd061b1cc3d74f0094c2397890c750b7841ab814",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "3b5897a1f4818392d7688ebeef6b7d2ee740938ee3a424661ec61c232a0050d0"
+      }
+    },
+    {
+      "patch": "0129-vk-background-present.patch",
+      "patch_sha256": "323252f9736070984a924ac5ca5c235160dd5c6534738b20d6a685d15bc93a19",
+      "changed_files_lf_sha256": {
+        "src/nx/gpu/vk/device.c": "63378a30ba233eee535e64c4a619e1e0afbee1f74346c12d63c727af1b79930b"
+      }
+    },
+    {
+      "patch": "0138-native-new-tristram-gate-priority.patch",
+      "patch_sha256": "33998c12cddbe3492f84a7b08d740cbf80cf21cae9bd12159d2e5ce691112bae",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "fbb1626da61d252c34b4f8f489eaf17dba9284190922727ce27233da2d554af5"
+      }
+    },
+    {
+      "patch": "0139-native-new-tristram-gate-chain.patch",
+      "patch_sha256": "196c5b3b2a1680d9cc3ea20d032ee3fc6d89e69128de799d44e81aeb9cc88d76",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "0b8459816b580a671d83fb83c04d64a44bcdbd7194b0a6008f203bfd151f15cd"
+      }
+    },
+    {
+      "patch": "0140-native-full-keyboard-bindings.patch",
+      "patch_sha256": "0d5577b8ca77fefe57fda3e08b2b28dd3fda6d70e3bb786a9ee7fcdb1fc262a6",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend.h": "0f6e8d907eed5007598f447b4f5c153579dfbd828b4ccafb442b68ee6b821308",
+        "src/nx/runtime/platform/backend/sdl3.c": "8ccc935479f5c0012a6e743ed91e8ccc2d8d4f1cb6220fc5457b9572d5031a83"
+      }
+    },
+    {
+      "patch": "0141-native-interact-priority.patch",
+      "patch_sha256": "ed8e65d320ed872eda8d643daa7a1e2c6ac45309407bd461189baf00bb809cb1",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "44e1e79ba6ccbf8151435c5590a7df72a37364681ecbf8a8b0d865c276c868ea"
+      }
+    },
+    {
+      "patch": "0142-native-overlay-custom-menu.patch",
+      "patch_sha256": "355bbfff80b0efc4c916912acdc5e66eeef7f555c271384617aad99440561c07",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/platform/backend/sdl3.c": "19ee5678bf916e269bba8db8216c16c9719cc12a66dc6099fd01565e731d6e2b"
+      }
+    },
+    {
+      "patch": "0143-native-death-prompt-input.patch",
+      "patch_sha256": "2f4cee9174a385d8fe21b064d8b647e9d4e95dd1b16954b0308b16ef194ec71a",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.h": "68f2a622d24be17721a9c3d0aa07dd8d0696efad10855a90648dbaed4a9ee54e",
+        "src/nx/runtime/native_world.c": "598c519b0e397d366e70eb8aba29eaf251f214edc9cb59610802fc3d05076bc6",
+        "src/nx/runtime/platform/backend/sdl3.c": "f6e498241a3f01847ab6574e06992f224ceada2379946c979c2b64556fbf2ec2"
+      }
+    },
+    {
+      "patch": "0144-native-stuck-interact.patch",
+      "patch_sha256": "22562635f3e088eb98ad6b0bb9b8c0e512ce1beec18088fd8ddbe5b5849c5254",
+      "changed_files_lf_sha256": {
+        "src/nx/runtime/native_world.c": "3b413616312cd1853b0dcfc02ccd869f91dba0daf9778e073641dcb57c0460a9"
+      }
+    },
+    {
+      "patch": "0145-scene-fsr-before-ui.patch",
+      "patch_sha256": "4f9d6eb772e4f58726d8dfa7df9306e54842ab64a9a80795e5afecba5fdd6977",
+      "changed_files_lf_sha256": {
+        "src/nx/CMakeLists.txt": "03c96ffc5549fc3abfd72c83de9e401ac3ba4292ab276286caa49c032f419895",
+        "src/nx/gpu/vk/render.c": "3e3b9cb24846425a66037f29beb0d1e68271fc80ca8595950e854fa2cb1d61cc",
+        "src/nx/gpu/vk/surface.c": "0524b1dc85257b16f72766974ef71a8b89bfc36b8d6293022d45f83eaa2497eb",
+        "src/nx/gpu/vk/texture.c": "b329da12da1a453395a2f9145a2966660b6d58a45f864d2f63d6aad39e4c6747",
+        "src/nx/gpu/vk/query.c": "a5cbb823c9ebcfc749debaeb3e0cee02b03a576c85b9ea3209d6df4309eb17a5",
+        "src/nx/gpu/vk/renderer.c": "686ba688913747f277414fb5db2bc4f6e3b92dde7761609599c7f8f8fae829b4",
+        "src/nx/gpu/vk/fsr.c": "b32450fd5944e587140bbf019c4175baff31fc081f3840ce1b2a72461ed0b72c",
+        "src/nx/gpu/vk/vk.h": "876bba25b81c87537842c73f49f37c8df6abb7be8a77f4bb0401b1dcc8452477",
+        "src/nx/gpu/vk/depth_scale_spv.h": "dcbe9cbf0f5fce21a446a0ecc859e5417c48948f3bfbd8ef23bddda072083813",
+        "src/nx/gpu/vk/shaders/depth_scale.frag": "2b2220d83fdfd5c6b5c260e9f8a795ada04dad177d28a29008b62d58d6be84a9",
+        "src/nx/runtime/platform/backend/sdl3.c": "27fdf9b28fb6aaf18d29a01e639526c069ad7eea515d09b6ad4a2647f2905b10",
+        "tests/vulkan_headless.c": "18176fd6ee898e227e4371b6f76355229d1153764a7ea8836fee073190708dc3"
+      }
+    }
+  ]
+}

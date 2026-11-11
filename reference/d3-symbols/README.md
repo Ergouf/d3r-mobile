@@ -7,7 +7,7 @@ guest 原件位于 `local/android/libd3guest.so`，基础版与更新版的 ExeF
 重新分析已解压的 NSO0 文件：
 
 ```powershell
-python -I d3-android/tools/nso_symbols.py local/assets/exefs_update/sdk.nso0
+python -I android/tools/nso_symbols.py local/assets/exefs_update/sdk.nso0
 ```
 
-结果默认写入 `out/android/symbols/`，不会覆盖这里的基线。实际 hook 行为以 `d3-android/host/` 当前源码与测试为准，旧报告中的地址表不作为接口规范。
+结果默认写入 `out/android/symbols/`，不会覆盖这里的基线。实际 hook 行为以 `android/host/` 当前源码与测试为准，旧报告中的地址表不作为接口规范。

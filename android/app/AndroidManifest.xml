@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The installed package is separate; the Activity retains the JNI class name. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.d3mobile.host.recovery"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="34" android:targetSdkVersion="36" />
+
+    <!-- arm64 guest + host: no x86/armeabi fallbacks on purpose. -->
+    <application
+        android:label="Diablo III"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+        android:appCategory="game"
+        android:enableOnBackInvokedCallback="true"
+        android:debuggable="true"
+        android:extractNativeLibs="true"
+        android:hasCode="true">
+
+        <activity
+            android:name="com.d3mobile.host.MainActivity"
+            android:label="Diablo III"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"
+            android:exported="true">
+            <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

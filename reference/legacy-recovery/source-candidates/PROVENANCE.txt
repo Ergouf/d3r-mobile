@@ -9,7 +9,7 @@ FILE d3_host.c
   bytes: 80778
   newline_count: 2260
   sha256: 5d162b54ac0d19d92242f124801c48c17a0ff67ef40d62684a55829f6a2ebc7b
-  original_path: d3-android/host/d3_host.c
+  original_path: android/host/d3_host.c
   role: earliest full snapshot; pre-edit original at session start
   backup_time: 2026-10-15T17:09:30.469Z
   partial: false
@@ -21,11 +21,11 @@ FILE d3_host.c.last-full
   bytes: 86749
   newline_count: 2391
   sha256: 132d4e09b9d6b04c25e2bf1ac96b8a4f8623136eb66c9296cda7f5421cf9c164
-  original_path: d3-android/host/d3_host.c
+  original_path: android/host/d3_host.c
   role: last complete file before the short reconstruction overwrote it; includes this session's edits
   backup_time: 2026-10-16T04:55:03.522Z
   partial: false
-  provenance: transcript fa6ddb6e file-history-snapshot L5745 trackedFileBackups d3-android\\host\\d3_host.c backupFileName=d05a13771a77cd34@v7 version=7 backupTime=2026-10-16T04:55:03.522Z
+  provenance: transcript fa6ddb6e file-history-snapshot L5745 trackedFileBackups android\\host\\d3_host.c backupFileName=d05a13771a77cd34@v7 version=7 backupTime=2026-10-16T04:55:03.522Z
   note: Not the session-start original. Verbatim later version. Next backup v8 (2026-10-16T05:07:49.323Z, 115 lines) is the HANDOFF reconstruction and was NOT copied. Read at 2026-10-16T02:23 reported totalLines 2392; this file has 2391 newlines.
   source_backup: C:/Users/fengj/.claude/file-history/fa6ddb6e-577c-4353-931e-903c9fcf7111\d05a13771a77cd34@v7
 
@@ -33,7 +33,7 @@ FILE d3_service.c
   bytes: 38267
   newline_count: 1100
   sha256: 3753c3adda44c1b1f2b6c377f4ddc278af6a1d626b5ef9e4ff3d74fc8db0248f
-  original_path: d3-android/host/d3_service.c
+  original_path: android/host/d3_service.c
   role: earliest full snapshot; pre-edit original (before TLR edit)
   backup_time: 2026-10-16T02:24:57.689Z
   partial: false
@@ -45,11 +45,11 @@ FILE d3_service.c.last-full
   bytes: 38722
   newline_count: 1112
   sha256: 2575ff88ba70e70647631ac5c9d8e91ff589bdd4c5d0e835dcc68e61dd93b968
-  original_path: d3-android/host/d3_service.c
+  original_path: android/host/d3_service.c
   role: last complete file before the short reconstruction; includes later edits
   backup_time: 2026-10-16T04:55:03.523Z
   partial: false
-  provenance: transcript fa6ddb6e file-history-snapshot L5745 trackedFileBackups d3-android\\host\\d3_service.c backupFileName=296e320ba6e3e081@v2 version=2 backupTime=2026-10-16T04:55:03.523Z
+  provenance: transcript fa6ddb6e file-history-snapshot L5745 trackedFileBackups android\\host\\d3_service.c backupFileName=296e320ba6e3e081@v2 version=2 backupTime=2026-10-16T04:55:03.523Z
   note: Not the session-start original. Next backup v3 (2026-10-16T05:07:49.324Z, 60 lines) is the HANDOFF reconstruction and was NOT copied.
   source_backup: C:/Users/fengj/.claude/file-history/fa6ddb6e-577c-4353-931e-903c9fcf7111\296e320ba6e3e081@v2
 
@@ -69,7 +69,7 @@ GAPS:
 Transcript fa6ddb6e-577c-4353-931e-903c9fcf7111.jsonl. Live tree not modified.
 
 COMPLETE d3_jni.c
-  path: d3-android/host/d3_jni.c
+  path: android/host/d3_jni.c
   provenance: Read result L1559, tool call L1558, ts 2026-10-15T17:44:01, start=1 num=24 total=24
   sha256: 1b416c576de23e7c2bb7195a3792e4bedf7a11ea2d9c061c76f5da3e0b5b292b bytes: 555 newlines: 23
   partial: false
@@ -94,7 +94,7 @@ COMPLETE build_quick.py (session-created, not a pre-existing original)
   partial: false
   note: file-history v3 (962445f7593000ff@v3, 2213 bytes, 70 newlines, 2026-10-15T23:30:25.672Z) is a later edit of this same script and was not copied. Not a reconstruction stub.
 
-PARTIAL guest_layout.h  (original totalLines=61 at d3-android/guest_layout.h; not in host/)
+PARTIAL guest_layout.h  (original totalLines=61 at android/guest_layout.h; not in host/)
   No full read. Not stitched. Snippets in partials/ are raw tool text only.
   partials/guest_layout.h.read-offset52.txt from Read L2528 ts 2026-10-15T18:12:09 (tool start=52 num=10 total=61; stored text is 190 bytes, 9 newlines, begins with the typedef). sha 0fef69843eda75ad7d4a5462be86aa8befca4c92ccca27321047fa4d2497b9c8
   partials/guest_layout.h.line17.txt from grep -n VENEER stdout L3159 (line prefixed 17:).
@@ -102,9 +102,9 @@ PARTIAL guest_layout.h  (original totalLines=61 at d3-android/guest_layout.h; no
   grep -A 20 at L1234 is the same tail as the Read window and was not saved again.
 
 ABSENT (listed on disk, no Read/cat/Write of the body in this transcript or its subagents):
-  d3-android/host/d3_host.h            241 bytes  mtime Oct 15 12:54  (ls L1830, L4091, L4618)
-  d3-android/host/d3_service.h        2511 bytes  mtime Oct 15 19:23  (same listings). Later 752-byte file at Oct 16 13:10 is the post-wipe stub and was not saved.
-  d3-android/host/d3_service_names.h 11664 bytes  mtime Oct 15 20:51  (same listings). No snapshot.
+  android/host/d3_host.h            241 bytes  mtime Oct 15 12:54  (ls L1830, L4091, L4618)
+  android/host/d3_service.h        2511 bytes  mtime Oct 15 19:23  (same listings). Later 752-byte file at Oct 16 13:10 is the post-wipe stub and was not saved.
+  android/host/d3_service_names.h 11664 bytes  mtime Oct 15 20:51  (same listings). No snapshot.
   tools/gen_service_names.py        13341 bytes  mtime Oct 15 19:39  (ls L565). Not read.
   tools/build_guest_elf.py          43832 bytes  mtime Oct 15 20:49  (ls L565). Not read.
   MainActivity.java: no Read/Write. A javac command at L2076 compiles a .java path; source text was not captured.

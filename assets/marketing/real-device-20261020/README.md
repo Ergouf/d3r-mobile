@@ -13,7 +13,7 @@
 - [干净发布版 MP4](act1-opening-controls.mp4)：前 2 分 40 秒，1920×864、30fps H.264 与 AAC；截掉末段系统面板，未拼接战斗片段。
 - [X 短版 MP4](act1-opening-controls-x.mp4)：发布版开头约 2 分 19 秒，避免超过常见短视频时长限制。
 
-原始 MKV、录制日志和录制前存档备份位于本机 `../../d3-android/build/recording-20261020/`，不上传。
+原始 MKV、录制日志和录制前存档备份位于本机 `../../android/build/recording-20261020/`，不上传。
 MP4 交付文件保存在此项目目录，按本目录 `.gitignore` 排除，避免大视频误入 Git。
 原始截图和概念海报分别保留在其他目录，不混入本次实机录像。
 

@@ -62,19 +62,19 @@ cache/
 
 
 # Vendored third-party checkouts and extracted game data stay local.
-reference/eden/
+android/third_party/eden/
 reference/extract/
 reference/d2r-mobile/
-reference/ScarletNX-src/
-d3-android/gpu/third_party/
-d3-android/gpu/gen/
-d3-android/gpu/probe/.spv_tmp/
+windows/source/ScarletNX-src/
+android/gpu/third_party/
+android/gpu/gen/
+android/gpu/probe/.spv_tmp/
 
 # Generated device traces/screenshots stay local; curated handoff evidence is
-# versioned under d3-android/evidence/. Existing tracked probe files are kept.
-/d3-android/gpu/probe/*.txt
-/d3-android/gpu/probe/*.png
-/d3-android/tools/resource_recovery/xci-index.json
+# versioned under android/evidence/. Existing tracked probe files are kept.
+/android/gpu/probe/*.txt
+/android/gpu/probe/*.png
+/android/tools/resource_recovery/xci-index.json
 
 # Editor/agent diagnostic caches are not project sources.
 /.serena/logs/
