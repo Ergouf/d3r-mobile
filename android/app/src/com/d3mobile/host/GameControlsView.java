@@ -25,7 +25,7 @@ final class GameControlsView extends View {
     private final ArrayList<Control> buttons = new ArrayList<>();
     private final SparseArray<Control> touches = new SparseArray<>();
     private final Control left = new Control("移动", 150, 550, 91, -1);
-    private final Control right = new Control("闪避 / 瞄准", 925, 563, 66, -2, true);
+    private final Control right = new Control("闪避 / 瞄准", 830, 563, 66, -2, true);
     private final FloatingJoystick floatingLeft = new FloatingJoystick();
     private boolean floatingMovement = true;
     private int movementWidth = 42, movementHeight = 60;
@@ -33,8 +33,7 @@ final class GameControlsView extends View {
     private Insets safe = Insets.NONE;
     private List<Rect> cutouts = Collections.emptyList();
     private float leftOffsetX, leftOffsetY;
-    private float[] leftPosition = new float[2], leftShoulderPosition = new float[2];
-    private float[] rightPosition = new float[2], rightShoulderPosition = new float[2];
+    private float[] leftPosition = new float[2], rightPosition = new float[2];
     private long hardwareButtons;
     private int hlx, hly, hrx, hry;
     private boolean active;
@@ -61,16 +60,18 @@ final class GameControlsView extends View {
         this.activity = activity;
         setFocusable(true);
         setContentDescription("游戏虚拟手柄：左摇杆移动，右摇杆闪避，右侧攻击与技能，顶部菜单");
-        buttons.add(new Control("A", 1167, 575, 66, 0, true));
-        buttons.add(new Control("B", 1050, 642, 42, 1, true));
-        buttons.add(new Control("X", 1202, 452, 45, 2, true));
-        buttons.add(new Control("Y", 1090, 436, 45, 3, true));
+        // Like a MOBA attack cluster, the four smaller buttons climb in an arc
+        // from the left of the larger A towards its upper edge.
+        buttons.add(new Control("A", 1172, 570, 56, 0, true));
+        buttons.add(new Control("B", 1172, 360, 44, 1, true));
+        buttons.add(new Control("X", 962, 570, 44, 2, true));
+        buttons.add(new Control("Y", 990, 465, 44, 3, true));
         buttons.add(new Control("L3", 65, 686, 25, 4));
-        buttons.add(new Control("R3", 925, 686, 25, 5, true));
-        buttons.add(new Control("L", 56, 330, 32, 6));
-        buttons.add(new Control("R", 1025, 352, 35, 7, true));
-        buttons.add(new Control("ZL", 139, 330, 34, 8));
-        buttons.add(new Control("ZR", 1165, 334, 38, 9, true));
+        buttons.add(new Control("R3", 1036, 56, 25, 5, true));
+        buttons.add(new Control("L", 1075, 610, 29, 6, true));
+        buttons.add(new Control("R", 955, 335, 30, 7, true));
+        buttons.add(new Control("ZL", 1222, 475, 29, 8, true));
+        buttons.add(new Control("ZR", 1067, 388, 44, 9, true));
         buttons.add(new Control("+", 1200, 56, 30, 10, true));
         buttons.add(new Control("−", 1118, 56, 30, 11, true));
         buttons.add(new Control("◀", 302, 595, 27, 12));
@@ -140,10 +141,8 @@ final class GameControlsView extends View {
         ox = safe.left;
         rx = getWidth() - safe.right - 1280f * scale;
         oy = safe.top + (h - 720f * scale) / 2f;
-        leftPosition = placeGroup(false, false);
-        leftShoulderPosition = placeGroup(false, true);
-        rightPosition = placeGroup(true, false);
-        rightShoulderPosition = placeGroup(true, true);
+        leftPosition = placeGroup(false);
+        rightPosition = placeGroup(true);
         float radius = screenR(left);
         float padding = 12 * getResources().getDisplayMetrics().density;
         floatingLeft.configure(safe.left + radius + padding,
@@ -153,13 +152,11 @@ final class GameControlsView extends View {
         invalidate();
     }
 
-    private boolean isShoulder(Control control) { return control.bit >= 6 && control.bit <= 9; }
-
-    private float[] placeGroup(boolean rightSide, boolean shoulders) {
+    private float[] placeGroup(boolean rightSide) {
         ArrayList<Control> group = new ArrayList<>();
-        if (!shoulders) group.add(rightSide ? right : left);
+        group.add(rightSide ? right : left);
         for (Control button : buttons)
-            if (button.rightSide == rightSide && isShoulder(button) == shoulders) group.add(button);
+            if (button.rightSide == rightSide) group.add(button);
         float origin = rightSide ? rx : ox;
         float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, maxX = 0, maxY = 0;
         for (Control control : group) {
@@ -187,13 +184,11 @@ final class GameControlsView extends View {
     }
 
     private float screenX(Control c) {
-        float[] position = c.rightSide ? (isShoulder(c) ? rightShoulderPosition : rightPosition)
-            : (isShoulder(c) ? leftShoulderPosition : leftPosition);
+        float[] position = c.rightSide ? rightPosition : leftPosition;
         return (c.rightSide ? rx : ox) + c.x * scale + position[0];
     }
     private float screenY(Control c) {
-        float[] position = c.rightSide ? (isShoulder(c) ? rightShoulderPosition : rightPosition)
-            : (isShoulder(c) ? leftShoulderPosition : leftPosition);
+        float[] position = c.rightSide ? rightPosition : leftPosition;
         return oy + c.y * scale + position[1];
     }
     private float screenR(Control c) { return c.radius * scale; }
@@ -313,9 +308,10 @@ final class GameControlsView extends View {
     }
 
     private void drawStick(Canvas canvas, Control c) {
-        if (c == left && floatingMovement && !floatingLeft.active()) return;
         float cx = screenX(c), cy = screenY(c), r = screenR(c);
-        if (c == left && floatingMovement) { cx = floatingLeft.centerX(); cy = floatingLeft.centerY(); }
+        if (c == left && floatingMovement && floatingLeft.active()) {
+            cx = floatingLeft.centerX(); cy = floatingLeft.centerY();
+        }
         paint.setStyle(Paint.Style.FILL); paint.setColor(0x40101820);
         canvas.drawCircle(cx, cy, r, paint);
         paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.5f * scale); paint.setColor(0x779db5bd);

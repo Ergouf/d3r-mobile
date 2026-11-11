@@ -1,12 +1,12 @@
 # Windows KBM 运行时代码地图
 
-更新：2026-11-08。描述当前源码的实际分层与失败方向，供后续修复定位。当前构建 `0144`，SHA-256 `C83F70E07A1A5FC217124EE761014EC3AE2E70A34FADD40AE7CB16D4E4858520`，补丁链 `0001–0119`、`0124–0129`、`0138–0144`（排除归档 `0029/0030`）重放 PASS。`0141` 增加精确指针下的可交互目标优先；`0142` 让 F2 使用自定义 Menu/Confirm/Cancel；`0143` 修复死亡提示；`0144` 在大碰撞体交互目标卡住时从停滞点提交 operate（诅咒宝箱 `365097`/`357331`）。`0144` 上的 22 项实时矩阵已于 2026-11-09 通过（含默认恢复后重启、四向移动/菜单与动作矩阵，证据 `out/windows/kbm/session/0144-a/`）；技能 1/3/4 的减伤/冷却与秘境后段仍未闭环。
+本文以 `0144` 的 KBM 源码分层和当时的验证为主；当前安装为 `0145`，补丁链至 `0146`（仅修正测试），场景 FSR 实验不等于所有键鼠行为已在 `0145` 重验。当前身份见 [状态](STATUS.md)，验收边界见 [当前交接](HANDOFF-20261104-CURRENT.md)。`0144` canonical SHA-256 为 `C83F70E07A1A5FC217124EE761014EC3AE2E70A34FADD40AE7CB16D4E4858520`。`0141` 增加可交互目标优先，`0142` 接入 F2 自定义 Menu/Confirm/Cancel，`0143` 修复死亡提示，`0144` 处理大碰撞体交互卡住。`0144` 上的 22 项实时矩阵已于 2026-11-09 通过；技能 1/3/4 的完整行为与秘境后段仍未闭环。
 
 ## 构建与补丁
 
 - 真正编译的源码是 `windows/source/ScarletNX-src/`；`windows/patches/*.patch` 按 `base.json` 顺序叠加。`0141-native-interact-priority.patch` 处理宝箱/NPC 被近处 actor 碰撞柱抢占；`0142-native-overlay-custom-menu.patch` 把配置的 Menu/Confirm/Cancel 映射到 F2 运行时菜单，原始方向键/Enter/Esc 仍保留为 fallback；`0143-native-death-prompt-input.patch` 在英雄死亡时把 Alt/点击/Esc 分别送到原生 X/Y/B。
-- `0079-native-kbm-split.patch` 把原先 3400 行的 `native_world.c` 拆成下列模块；`0080` 调 HUD 字号；`0081` 增加药水标签；`0082` 增加 Act1 城镇传送门 picker；`0083` 修复 mouse UI 聚焦；`0103–0108` 处理底栏直接 pad、技能图标和 HUD；`0113–0115` 放宽 UI 注册表读取并记录桶链；`0116` 修复技能页/地图页的旧焦点与空页面判断，`0117` 接入技能选择器/符文网格点击，`0118` 让底栏 cell 从实时图例解析动作；`0126–0128` 完成 UI Shift 分流、堆叠拆分/数量框点击和重绑定 Pause/Back 门控；`0138–0140` 完成新城门配对传送与 22 项键盘配置；`0141` 交互优先；`0142` F2 自定义菜单；`0143` 死亡提示；`0144` 大碰撞体交互的 stuck operate。有效补丁链已到 `0144`（排除归档 `0029/0030`），`verify_patch_chain.py` 重放 PASS。
-- 当前构建产物 `out/windows/build/scarletnx.exe`（`0140`，`8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`）；安装副本在 `D:\Games\DiabloIII\01001B300B9BE000\01001B300B9BE000.exe`，候选副本在 `out/windows/kbm/candidates/0140/scarletnx.exe`，上一安装备份为同目录 `previous-0139.exe`。`0140` 补丁 SHA-256 为 `0d5577b8ca77fefe57fda3e08b2b28dd3fda6d70e3bb786a9ee7fcdb1fc262a6`；`0126/0127` 分流 UI Shift 与数量框，`0128` 修复重绑定 Pause/Back 的 UI 门控，`0138/0139` 完成新城门精确拾取与配对 portal 传送链，`0140` 扩展全键位。
+- `0079-native-kbm-split.patch` 把原先 3400 行的 `native_world.c` 拆成下列模块；`0080` 调 HUD 字号；`0081` 增加药水标签；`0082` 增加 Act1 城镇传送门 picker；`0083` 修复 mouse UI 聚焦；`0103–0108` 处理底栏直接 pad、技能图标和 HUD；`0113–0115` 放宽 UI 注册表读取并记录桶链；`0116` 修复技能页/地图页的旧焦点与空页面判断，`0117` 接入技能选择器/符文网格点击，`0118` 让底栏 cell 从实时图例解析动作；`0126–0128` 完成 UI Shift 分流、堆叠拆分/数量框点击和重绑定 Pause/Back 门控；`0138–0140` 完成新城门配对传送与 22 项键盘配置；`0141` 交互优先；`0142` F2 自定义菜单；`0143` 死亡提示；`0144` 大碰撞体交互的 stuck operate；`0145` 为独立场景/UI FSR 实验。有效顺序以 `base.json` 为准，排除归档 `0029/0030`。
+- 历史 `0140` 构建 SHA-256 为 `8A7BDAFFF759BFFAF6766467E73A5D3AD3829882CFE4CD8673A012FD4800EDB0`，候选副本记录在 `out/windows/kbm/candidates/0140/`；不要把它当作当前安装或当前构建产物的身份。安装路径和实际哈希见 [状态](STATUS.md)。`0126/0127` 分流 UI Shift 与数量框，`0128` 修复重绑定 Pause/Back 的 UI 门控，`0138/0139` 完成新城门精确拾取与配对 portal 传送链，`0140` 扩展全键位。
 - 历史启动卡点：`0074/0079/0080` 在自动存档附近出现过 frame10 Vulkan 停滞，FIFO、mailbox 与关闭记录线程分别都有反例。`0129` 为 no-activate 后台启动器增加 `SNX_VK_IMMEDIATE=1`、`SNX_VK_RECORD=0`，并拒绝同 exe 的重叠实例；`0139` 串行冷启动 4/4 成功，`0140` 只记录了定向验证与一次到世界的冒烟，尚不能沿用 `0139` 的结果。普通前台 FIFO 仍保留该历史风险。
 - 探针的 RVA 不再硬编码：`windows/d3-re/version.py` 从已安装 exe 的符号表动态解析（`llvm-nm`）；换构建时显式更新 `BUILD.exe_sha256`（必要时同步 `code_dll_sha256`），并由 `assert_installed()` 校验。旧 `sync_probe_version.py --exe` 的手工重绑记录只作历史来源，不再是换构建步骤。`version.py` 已加进程锁：两进程验证拒绝并发且退出释放。
 
@@ -44,7 +44,7 @@
 ## 验证
 
 ```powershell
-python windows/tools/verify_patch_chain.py                         # 当前 0140 补丁链重放 PASS
+python windows/tools/verify_patch_chain.py                         # 按当前 base.json 重放
 python windows/d3-re/probe_keyboard_bindings.py --pid <PID> --out out/windows/kbm/session/<目录>/bindings.json
 python windows/tools/drive_f2_keyboard_ui.py --pid <PID> --phase edit --out out/windows/kbm/session/<目录>/f2-edit.json
 python windows/d3-re/session_steps.py --pid <PID> --steps '[{"label":"open","action":{"key":"f3"},"sleep_ms":600}]' --out out/windows/kbm/session/<目录>/steps.json

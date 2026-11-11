@@ -2,11 +2,12 @@
 
 源码位于 `windows/source/ScarletNX-src/`，本目录保存可复用脚本。MSYS2 CLANG64 工具链默认安装在项目外的 `D:\workspace\msys2\msys64`。Vulkan 开发组件来自 MSYS2；显卡运行时由已安装的 Intel 驱动提供。
 
-当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`，直接启动运行时且没有控制台窗口；`Launch.cmd` 仍保留。旧 `D:\Program Files` 安装已迁移删除。120Hz 严重卡顿仍在诊断，FSR 最终实战验收尚未完成；运行与性能状态见 [STATUS.md](../docs/STATUS.md)。
+当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`，直接启动运行时且没有控制台窗口；`Launch.cmd` 仍保留。旧 `D:\Program Files` 安装已迁移删除。120Hz 长期表现和 FSR 最终实战验收尚未完成；运行与性能状态见 [STATUS.md](../docs/STATUS.md)。
 
-从项目根目录运行：
+从无括号 junction 的项目根目录运行：
 
 ```powershell
+Set-Location D:\workspace\Diablo-kbm
 . .\windows\tools\Activate.ps1
 .\windows\tools\Test-Dependencies.ps1
 .\windows\tools\Build.ps1
@@ -24,7 +25,7 @@
 
 `Run-PresentMon.ps1 -Tag <名> -Seconds <秒>` 以管理员权限启动 PresentMon 记录 `01001B300B9BE000.exe`（Windows 需要管理员或 Performance Log Users 组才能开启 ETW 会话），CSV 落在 `out/windows/diagnostics/`。`Capture-Probe.ps1 -Tag <名> -Exe <探针> -Seconds <秒>` 串行采集探针与 PresentMon；`Capture-Screen.ps1 -OutPath <png> [-CropX -CropY -CropW -CropH]` 以 DPI 感知方式抓取原生像素。
 
-`Focus-Game.ps1 -ProcessId <pid> [-Keys <SendKeys>]` 通过 AttachThreadInput 把游戏窗口切到前台并校验结果，用于无人值守回归；`SNX_PRESENT_STATS=1` 让运行时输出呈现节奏统计，默认关闭。
+`Focus-Game.ps1` 是历史前台诊断工具；当前仓库规则禁止激活游戏窗口和发送真实输入，测试中不要使用。`SNX_PRESENT_STATS=1` 让运行时输出呈现节奏统计，默认关闭。
 
 ## 打包
 
@@ -57,27 +58,16 @@ python .\windows\tools\package_fsr_release.py --source <完整资源包.zip> --e
 
 ## 输入探针与无括号构建路径
 
-`Post-GameInput.ps1` 直接向游戏窗口 PostMessage 键鼠，不抢前台：
+`Post-GameInput.ps1` 与 `Real-Input.ps1` 保留为历史工具；当前测试规则只允许 SDL 事件、游戏线程调用和只读内存探针，不使用 PostMessage 或真实键鼠。`Capture-Window.ps1` 用 `PrintWindow` 抓窗口，不抢焦点；Vulkan 窗口可能返回旧帧，状态确认以桌面抓图（`Capture-Screen.ps1`）为准。
 
-```powershell
-.\windows\tools\Post-GameInput.ps1 -Key space
-.\windows\tools\Post-GameInput.ps1 -Key up -Repeat 3
-.\windows\tools\Post-GameInput.ps1 -Click '600,120'
-.\windows\tools\Post-GameInput.ps1 -Move '600,200'
-```
-
-方向键会自动带 extended 标志。`Capture-Window.ps1` 用 `PrintWindow` 抓窗口，不抢焦点；Vulkan 窗口可能返回旧帧，状态确认以桌面抓图（`Capture-Screen.ps1`）为准。
-
-`Real-Input.ps1` 用真实键鼠事件驱动已聚焦的游戏窗口（`-Key`/`-HoldMs`，以及需另行授权的 `-Click`/`-Move`），供 `probe_player_scan.py` 的行走采样使用；它不再放在被忽略的 `out/` 下。后台窗口收不到真实鼠标事件是预期行为，不要用它替代原生指针验收。
-
-当前 KBM 轮次使用脚本注入，不执行 `Real-Input.ps1` 或 computer-use。`Launch-Background.ps1` 默认 `--mouse_steer=0 --touch=0`，仍为小窗口、后台、非置顶。原生地板点击使用 `windows/d3-re/probe_pointer_click.py` 从 SDL 队列注入，`verify_pointer_world.py` 观察世界目标和玩家到达；当前操作矩阵见 `windows/docs/KBM-INPUT-GUIDE.md`，交接边界见 `windows/docs/HANDOFF-20261104-CURRENT.md`。
+`Launch-Background.ps1` 默认 `--resolution=1.75 --mouse_steer=0 --touch=0`，窗口 1024×576、位置 `(40,40)`、后台且非置顶。原生地板点击使用 `windows/d3-re/probe_pointer_click.py` 从 SDL 队列注入，`verify_pointer_world.py` 观察世界目标和玩家到达；操作矩阵见 `windows/docs/KBM-INPUT-GUIDE.md`，交接边界见 `windows/docs/HANDOFF-20261104-CURRENT.md`。
 
 仓库路径含括号（例如 `Diablo(fegnjl)`）时，`settingsgen` 的 cmd 命令行会被截断。请建一个无括号 junction 并在那里构建：
 
 ```powershell
-cmd /c mklink /J D:\workspace\Diablo-kbm "D:\workspace\Diablo(fegnjl)"
-cd D:\workspace\Diablo-kbm
-.\windows\tools\Build.ps1 -Configure -SourcePath D:\workspace\Diablo-kbm\windows\source\ScarletNX-src -BuildPath D:\workspace\Diablo-kbm\out\windows\build-kbm
+New-Item -ItemType Junction -Path 'D:\workspace\Diablo-kbm' -Target 'D:\workspace\Diablo(fegnjl)'
+Set-Location D:\workspace\Diablo-kbm
+.\windows\tools\Build.ps1 -Configure
 ```
 
-OpenSSL 外部工程在 `-j18` 下可能因依赖文件竞争失败；进入 `out/windows/build-kbm/openssl-build` 用 `make -j1 build_libs` 补跑后，再执行一次 `Build.ps1` 即可。
+如 junction 已存在，先检查其目标而不要覆盖。OpenSSL 外部工程在 `-j18` 下可能因依赖文件竞争失败；进入 `out/windows/build/openssl-build` 用 `make -j1 build_libs` 补跑后，再执行一次 `Build.ps1` 即可。

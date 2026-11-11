@@ -1,14 +1,17 @@
 # Windows 当前状态与验收
 
-更新：2026-11-10。本文件只记录 Windows 路径的已验收范围与剩余工作；构建见 [BUILD.md](BUILD.md)，发行见 [RELEASE.md](RELEASE.md)，Android 见 [Android 状态](../../android/docs/STATUS.md)。
+更新：2026-11-11。本文件只记录 Windows 路径的已验收范围与剩余工作；构建见 [BUILD.md](BUILD.md)，发行见 [RELEASE.md](RELEASE.md)，Android 见 [Android 状态](../../android/docs/STATUS.md)。
 
 > **当前 Windows 安装为 0145（2026-11-10）**：运行时 SHA-256 `64EED1B0E0CDF55C970E729CE2DE159F826E1D477F932E357B9C547F1F5B5821`。场景 0.75× → 内置 FSR → 原尺寸 UI/文字的显式实验已在城镇和物品栏核对；普通启动保留既有配置。相关 6 项 CTest、深度/模板 GPU 回读与补丁链重放通过，验证日志 0 VUID/SYNC 错误（有 10 条原生深度绘制 unused-color-output 警告）。这些结果不证明省电、实际插帧或全部 KBM 行为已在 0145 重验；功能验收沿用各条注明的构建。详见 [当前交接](HANDOFF-20261104-CURRENT.md)。
 
+2026-11-11 只读核对安装 exe 哈希仍为上述值，安装 INI 为 `resolution=1.75`、`upscaler=1`、`shadows=1`；后台启动器也默认传入 1.75×。原发行包默认值是 1×。同日本机补丁链 132 阶段重放通过；末项 `0146` 仅修正测试，不改变安装运行时。`0145-scene-fsr-before-ui.patch` 和 `0146-settings-option-tests.patch` 尚未被主仓库 Git 跟踪，需与 `base.json` 一并纳入版本管理才能从提交重建完整链。
 
 Windows 路径基于 ScarletNX 固定提交 `dbf8915965367e8a9616b19e5a0c1eddafaf28f3`，与 Android 兼容层是独立构建。
 
-- 已在 Core Ultra 5 125H / Intel Arc 核显运行，驱动 `32.0.101.6078`、设备 Vulkan `1.3.293`。
-- 内部 `resolution=1`，游戏颜色源约 1600×900；阴影开启。FSR1 EASU + RCAS 替换最终双线性放大，RCAS 衰减 1.5 stops。
+**S2Arm 复用规划（2026-11-11）**：NVN→Vulkan、资源变化跟踪、批处理和 shader 缓存列为可复用候选；ADPF 属于 Android 接口，VRS 及设备缓存须按 Windows 显卡另行适配。[路线图第 10 节](../../android/docs/S2ARM-MIGRATION-ROADMAP.md#10-windows-可复用部分与独立路线) 定义独立接入、KBM 回归和能效验收。本轮仅补充规划，未修改 Windows 运行时、未实测节电，不继承 Android 的功耗结论或 4.5 W 门槛。
+
+- 早期 FSR 测试在 Core Ultra 5 125H / Intel Arc 核显、驱动 `32.0.101.6078`、设备 Vulkan `1.3.293` 上运行；后续驱动升级到 `32.0.101.9150` 的验证记录见下文。
+- 早期发行基线内部 `resolution=1`，游戏颜色源约 1600×900；阴影开启。FSR1 EASU + RCAS 替换最终双线性放大，RCAS 衰减 1.5 stops。该基线不代表当前安装 INI。
 - 3072×1920 全屏中保持纵横比，FSR 输出 3072×1728；两次启动及全屏/窗口切换的 Khronos 验证层检查通过。
 - 10 项相关设置/运行时测试、三份 FSR 着色器 SPIR-V 验证通过。描述符录制、回退图像布局、资源寿命与翻转修复已进入本地版本。
 - 简体中文与中文语音 DLC 已包含；Windows 中文语音尚未完成人工听验。Xbox A 确认、B 取消，X→X、Y→Y。
@@ -29,11 +32,11 @@ Windows 路径基于 ScarletNX 固定提交 `dbf8915965367e8a9616b19e5a0c1eddafa
 
 ### Windows 待完成
 
-1. 定位并修复当前 120Hz 卡顿，再在非验证层模式下做真实战斗画质/帧时间对照，确定稳定 60 FPS 时最高内部渲染档位。
+1. 在非验证层模式下复测 120Hz 长期表现，并做真实战斗画质/帧时间对照，定位剩余上屏间隔问题及早期严重卡顿能否复现，确定稳定 60 FPS 时最高内部渲染档位。
 2. Windows 中文对白听验和全部手柄功能、长期音画同步验收。
 3. 120Hz 的帧生成集成与测量。目前只有 FSR1 空间放大/锐化，**未启用帧生成**。
 
-构建侧已知测试失败（2026-11-11 复测，与按平台拆分目录无关）：`runtime_settings_list` 与 `gui_settings` 失败。原因是补丁 `0008-native-action-followup.patch` 把 `src/nx/runtime/settings.txt` 中触摸屏选项文案由 `Off|Fingers|Mouse too` 改成 `Off|Fingers|Fingers, mouse motion`，而上游 `tests/settings_list.cmake` 与 `tests/gui_settings.c` 仍断言旧文案；已安装 0145 运行时的 `--settings` 输出也是新文案，说明是补丁与上游测试的既有不一致。修复需让补丁同时更新这两个测试文件，不在本次目录重组范围内。其余 settings/FSR 相关 CTest 通过。
+构建侧测试已修正（2026-11-11）：`0008-native-action-followup.patch` 将触摸屏选项由 `Mouse too` 改为 `Fingers, mouse motion`，原来的 `runtime_settings_list` 与 `gui_settings` 仍断言旧文案。`0146-settings-option-tests.patch` 更新两处针对真实运行时设置的断言，保留单元测试中使用旧文案的独立 fixture；重新编译测试程序后，`settingsgen`、`gui_settings`、`runtime_settings_list`、`runtime_recompile_settings` 4/4 通过，完整补丁链重放通过。日志在 `out/windows/doc-audit/`。该修复没有修改运行时，也没有新增游戏实机验收。
 
 XeSS-SR/Native AA、FSR2/3 时域方案需要运动矢量、抖动、历史数据等渲染输入；现有最终呈现图像不具备这些集成接口。当前 XeSS-FG 路径要求 DX12、XeLL 及更新驱动，不能作为这个 Vulkan 程序的现成开关。外部 LSFG 等方案尚未在本机验收。
 

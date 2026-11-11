@@ -13,13 +13,14 @@
 | Android 固定依赖及许可 | [Android 依赖](android/docs/DEPENDENCIES.md) |
 | Android 源码接口与保留约束 | [Android 架构](android/docs/ARCHITECTURE.md) |
 | 目录约定 | [目录结构](docs/STRUCTURE.md) |
+| 两平台逆向过程、常见坑及证据入口 | [逆向过程与踩坑](docs/REVERSE-ENGINEERING.md) |
 | Windows 工具链与构建 | [Windows 构建](windows/docs/BUILD.md) |
 | Windows 成品位置及校验值 | [Windows 发行记录](windows/docs/RELEASE.md) |
 | Windows 当前 KBM 交接 | [键鼠交接](windows/docs/HANDOFF-20261104-CURRENT.md) |
 | Windows 键盘/鼠标操作 | [KBM 操作说明](windows/docs/KBM-INPUT-GUIDE.md) |
 | Windows Quick Resume | [快速恢复说明](windows/docs/QUICK-RESUME.md) |
 
-Windows 当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`（直接启动运行时，无控制台窗口），`Launch.cmd` 仍保留；完整 ZIP 归档已作为安装目录的重复副本清理，重打包时需显式指定基线 ZIP。当前版本默认 FSR1、原生 1×、阴影与中文，没有帧生成。120Hz 下严重卡顿正在诊断，FSR 最终实战验收尚未完成。Android 已进入第一章，但持续稳定 60 FPS、完整任务链和 OEM 生成帧仍未验收。
+Windows 当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`（直接启动运行时，无控制台窗口），`Launch.cmd` 仍保留；完整 ZIP 归档已作为安装目录的重复副本清理，重打包时需显式指定基线 ZIP。2026-11-11 核对的安装 INI 为 `resolution=1.75`、FSR1 和阴影开启；后台启动脚本也显式传入 1.75×。发行包制作的默认值是 1×，与现有安装配置不同，当前没有帧生成。120Hz 的长期表现与 FSR 实战仍待验收。Android 已进入第一章，但持续稳定 60 FPS、完整任务链和 OEM 生成帧仍未验收。
 
 ## 目录约定
 
@@ -38,7 +39,7 @@ Windows 当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`（直
 | `windows/patches/` | Windows 补丁链与 `base.json` 阶段索引（按序应用到上游源码） |
 | `windows/d3-re/` | Windows 逆向探针、运行时会话驱动与证据工具 |
 | `out/windows/kbm/` | Windows KBM 会话证据、候选构建与安装备份 |
-| `docs/` | 跨平台状态索引与目录约定（`STATUS.md`、`STRUCTURE.md`） |
+| `docs/` | 跨平台状态索引、目录约定和逆向踩坑索引 |
 | `assets/marketing/` | 保留的宣传图、原图与配套素材 |
 | `local/` | 本地游戏输入、guest、密钥、存档及不可重建材料，不入 Git |
 | `out/android/` | Android 各 profile、host、GPU、驱动工具和 probe 输出 |

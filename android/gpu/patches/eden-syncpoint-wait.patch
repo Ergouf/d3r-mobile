@@ -1,0 +1,32 @@
+diff --git a/src/video_core/host1x/syncpoint_manager.h b/src/video_core/host1x/syncpoint_manager.h
+index 847ed20..db2b203 100644
+--- a/src/video_core/host1x/syncpoint_manager.h
++++ b/src/video_core/host1x/syncpoint_manager.h
+@@ -5,6 +5,7 @@
+ 
+ #include <array>
+ #include <atomic>
++#include <chrono>
+ #include <condition_variable>
+ #include <functional>
+ #include <list>
+@@ -58,6 +59,19 @@ public:
+ 
+     void WaitHost(u32 syncpoint_id, u32 expected_value);
+ 
++    bool WaitHostUntil(u32 syncpoint_id, u32 expected_value,
++                       std::chrono::steady_clock::time_point deadline) {
++        const auto reached = [&] {
++            return static_cast<s32>(syncpoints_host[syncpoint_id].load(std::memory_order_acquire) -
++                                    expected_value) >= 0;
++        };
++        if (reached()) {
++            return true;
++        }
++        std::unique_lock lock{guard};
++        return wait_host_cv.wait_until(lock, deadline, reached);
++    }
++
+     bool IsReadyGuest(u32 syncpoint_id, u32 expected_value) const {
+         return syncpoints_guest[syncpoint_id].load(std::memory_order_acquire) >= expected_value;
+     }

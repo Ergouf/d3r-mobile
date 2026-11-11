@@ -176,3 +176,57 @@ d3_call_guest_one:
     ldp x19, x30, [sp], #32
     ret
     .size d3_call_guest_one, . - d3_call_guest_one
+
+    /* Run a host callback immediately before the verified guest HID update
+       returns. The original epilogue restores the guest's nonvolatile state. */
+    .p2align 4
+    .global d3_hud_frame_bridge
+    .hidden d3_hud_frame_bridge
+    .type d3_hud_frame_bridge, %function
+d3_hud_frame_bridge:
+    stp     x19, x20, [sp, #-64]!
+    stp     x21, x30, [sp, #16]
+    stp     x0, x1, [sp, #32]
+    str     x18, [sp, #48]
+    mrs     x19, tpidr_el0
+    bl      d3_host_tp_current
+    cbz     x0, 4f
+    msr     tpidr_el0, x0
+    mov     x18, x1
+    mov     x0, x19
+    ldr     x1, [sp, #48]
+    bl      d3_hud_update
+    msr     tpidr_el0, x19
+4:  ldr     x18, [sp, #48]
+    ldp     x0, x1, [sp, #32]
+    ldp     x21, x30, [sp, #16]
+    ldp     x19, x20, [sp], #64
+    add     sp, sp, #0x2a0
+    ldp     d9, d8, [sp, #0x10]
+    ldp     x29, x30, [sp, #0x70]
+    ldp     x20, x19, [sp, #0x60]
+    adrp    x16, g_hud_frame_resume
+    ldr     x16, [x16, :lo12:g_hud_frame_resume]
+    br      x16
+    .size d3_hud_frame_bridge, . - d3_hud_frame_bridge
+
+    /* Switch only this call back to the exact guest TLS and x18 saved at entry. */
+    .p2align 4
+    .global d3_call_guest_two
+    .hidden d3_call_guest_two
+    .type d3_call_guest_two, %function
+d3_call_guest_two:
+    stp     x19, x30, [sp, #-32]!
+    str     x18, [sp, #16]
+    mrs     x19, tpidr_el0
+    mov     x9, x0
+    mov     x0, x1
+    mov     x1, x2
+    msr     tpidr_el0, x3
+    mov     x18, x4
+    blr     x9
+    msr     tpidr_el0, x19
+    ldr     x18, [sp, #16]
+    ldp     x19, x30, [sp], #32
+    ret
+    .size d3_call_guest_two, . - d3_call_guest_two

@@ -1,37 +1,7 @@
-# Skill keys
+# Windows 键位
 
-The six skill slots (A B X Y L R) are bound to keyboard keys by
-`keybinds.ini` next to the game's executable, for example
-`D:\Games\DiabloIII\01001B300B9BE000\keybinds.ini`:
+当前键鼠操作和默认值见 [KBM 操作说明](KBM-INPUT-GUIDE.md)，各构建的验收范围见 [当前交接](HANDOFF-20261104-CURRENT.md)。
 
-```ini
-a=space
-b=z
-x=c
-y=v
-l=q
-r=e
-```
+在运行时的 F2 → `Keyboard bindings` 中修改 22 个动作：技能 1–4、药水、回城、背包、技能页、任务、巅峰、地图、暂停/返回、移动四向、菜单四向、确认和取消。设置保存到游戏程序旁的 `keybinds.ini`；界面会检查冲突及保留键，`Restore defaults` 可恢复默认值。`0144` 已验证修改、重启保留及恢复默认；现有 `0145` 安装的完整键鼠矩阵尚未重验。
 
-- One line per slot; the key is an SDL scancode name (case-insensitive), such
-  as `space`, `z`, `1`, `left`. Do not use `f1`-`f5`, `f8`-`f11`, `escape` or `i`:
-  the runtime already uses those for help/menu/screenshot/fullscreen/back/Plus,
-  so the key would act twice or never reach the skill. Unknown slot names and
-  duplicate keys are warned about in the log.
-- A missing file, or a missing line, keeps that slot's default:
-  `a=Space b=Z x=C y=V l=Q r=E`.
-- The file replaces the six slot keys as a whole: there is no second
-  hard-coded alias. A key that is not one of the six keeps its other meaning
-  (WASD/arrows/IJKL sticks, 1/3 ZL/ZR, Enter/Backspace, I Plus). Binding a
-  movement key (W/A/S/D) or a right-stick key (J/K/L) takes it away from the
-  stick.
-- A/B are also the menu confirm/back keys, so binding `a` to another key moves
-  menu confirm with it.
-- The runtime logs the loaded map as
-  `input: skill keys a=... b=... x=... y=... l=... r=...` on the first keyboard
-  event after start.
-
-The values are read on the first keyboard event after start. Restart the game
-after editing the file.
-
-`Tab` opens the map from the world and `Esc` returns from it through the native action path. From patch `0034`, `Tab` is ignored while another game UI is blocked, so it does not alias the menu Down action. Assigning `Tab` to a skill overrides its default map action; `Esc` remains the back key. The current-build matrix is in `KBM-INPUT-GUIDE.md`.
+旧文档仅描述 `a/b/x/y/l/r` 六个手柄槽的键盘映射，与当前 22 项原生键鼠功能不是同一套说明。现有配置文件可能仍含这些旧键，不应据此推断当前按键行为或用旧六键表替代 F2 设置。

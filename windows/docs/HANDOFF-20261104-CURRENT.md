@@ -1,13 +1,16 @@
 # Diablo III Windows 原生键鼠交接
 
-更新时间：2026-11-10。此文件是 Windows KBM 工作的唯一当前入口；历史逐轮报告已经合并删除，详细实验摘要保留在 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)，实际使用说明见 [KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md)，PC 功能差距表见 [KBM-PARITY-20261106.md](KBM-PARITY-20261106.md)。
+更新时间：2026-11-11。此文件是 Windows KBM 工作的唯一当前入口；历史逐轮报告已经合并删除，详细实验摘要保留在 [KBM-RE-EVIDENCE.md](KBM-RE-EVIDENCE.md)，实际使用说明见 [KBM-INPUT-GUIDE.md](KBM-INPUT-GUIDE.md)，PC 功能差距表见 [KBM-PARITY-20261106.md](KBM-PARITY-20261106.md)。
+
+S2Arm 图形复用的规划见 [迁移路线图第 10 节](../../android/docs/S2ARM-MIGRATION-ROADMAP.md#10-windows-可复用部分与独立路线)：须独立接入 ScarletNX、按既有补丁链落地并重验原生 KBM；当前尚未移植或测得 Windows 能效收益，以下安装基线与业务验收范围不因此改变。
 
 ## 当前基线
 
+- 补丁链另增加 `0146-settings-option-tests.patch`，只让两处测试断言跟随 `0008` 的触屏选项文案；本机补丁链 132 阶段重放、设置相关 CTest 4/4 通过。游戏安装仍为下述 `0145`。`0145` 和 `0146` 补丁目前尚未被主仓库 Git 跟踪，提交时须与 `base.json` 一并保留。
 - 当前安装 `0145`（2026-11-10），运行时 SHA-256 `64EED1B0E0CDF55C970E729CE2DE159F826E1D477F932E357B9C547F1F5B5821`，code DLL 保持 `A829DCE8AC2554A44DF087132CF9D266582010280C660D32A958642C8B7BDA51`。`0145-scene-fsr-before-ui.patch` 已注册并完成完整链重放。显式实验 `SNX_SCENE_SCALE=.75`、`SNX_SCENE_FSR=1`、`--resolution=1 --upscaler=0` 在城镇和物品栏确认场景 0.75×、UI/文字 1×；共享深度双向同步保留模板。6 项相关 CTest 通过，实际 GPU 回读覆盖 crop、附件异格式与深度/模板往返；验证日志 0 VUID/SYNC 错误、10 条 unused-color-output 警告。普通启动未默认启用场景实验。只读证据 `out/windows/scene-fsr/final-world.json`、`final-inventory.json`、`final-inventory-draws.json`、`final-validation.log`；复用探针 `windows/d3-re/probe_render_scale.py` 仅用于诊断，不作性能测量。独立上屏/GPU 计时因 PresentMon ETW access denied 未取得，不能宣称省电。0144 的 KBM 历史业务验收继续按各条标注适用。
 - 上一安装基线 `0144`（canonical 构建 `C83F70E07A1A5FC217124EE761014EC3AE2E70A34FADD40AE7CB16D4E4858520`；用户实机验收用同源码的 `CDE63F2E8E2FE1A2C5D0352232DEA730CBA71E6A38FE0757A62763ADE9515CE5`，PID `199052`，启动 `2026-11-08T20:19:46+08:00`；code DLL `A829DCE8AC2554A44DF087132CF9D266582010280C660D32A958642C8B7BDA51`）。补丁链 `0001`–`0119`、`0124`–`0129`、`0138`–`0144` 排除归档的 `0029/0030`，重放 PASS。构建副本在 `out/windows/kbm/candidates/0144/`（`scarletnx.exe` 为实机测试构建，`canonical-C83F70E0.exe` 为链构建），上一安装备份为同目录 `previous-0143.exe`。
 - `0144` 用户实机闭环证据：事件前 HUD `祭司的诅咒宝箱 / 在计时结束之前消灭所有敌人 / 剩余时间`（`hoa3-mapstate3.json`），完成后 `事件完成` 和 `11810 {icon:gold} 1450000 点经验值`（`user-test-after.json`）；宝箱实体 `0x7d2e00be`（`x1_Global_Chest`，SNO `357331`）圆柱为 `height 5.0 / radius 3.75`，与 `0143` 复现的 `365097` 同几何。`probe_map_select` 用运行时同款 guest 序列选中航点并经底栏传送到苦痛大厅三层（`0144-hoa3-teleport.json`、`sel14-ui.json`）。
-- `0144` canonical 安装与 FSR（2026-11-08 21:12）：`D:\Games\DiabloIII01B300B9BE00001B300B9BE000.exe` 已替换为 `C83F70E07A1A5FC217124EE761014EC3AE2E70A34FADD40AE7CB16D4E4858520`；`01001B300B9BE000.ini` 设置 `upscaler=1`，启动日志 `[7.09] vulkan: FSR 1 EASU + RCAS, attenuation 1.50 stops, output 867x488`。进程 PID `309292` 正常到达主菜单后正常 `Exit.`（非崩溃）；测试构建 `CDE63F2E…` 备份在 `out/windows/kbm/candidates/0144/scarletnx.exe`，canonical 备份为同目录 `canonical-C83F70E0.exe`，替换前 exe 为 `installed-before-canonical.exe`。
+- `0144` canonical 安装与 FSR（2026-11-08 21:12）：`D:\Games\DiabloIII\01001B300B9BE000\01001B300B9BE000.exe` 已替换为 `C83F70E07A1A5FC217124EE761014EC3AE2E70A34FADD40AE7CB16D4E4858520`；`01001B300B9BE000.ini` 设置 `upscaler=1`，启动日志 `[7.09] vulkan: FSR 1 EASU + RCAS, attenuation 1.50 stops, output 867x488`。进程 PID `309292` 正常到达主菜单后正常 `Exit.`（非崩溃）；测试构建 `CDE63F2E…` 备份在 `out/windows/kbm/candidates/0144/scarletnx.exe`，canonical 备份为同目录 `canonical-C83F70E0.exe`，替换前 exe 为 `installed-before-canonical.exe`。
 - `0144` 回归（2026-11-08）：顶层 `test_*.py` 20/20、相关 CTest 7/7（`network_stack,pad_map,extraction_native,loader_native,native_recompiler,native_codegen,mme_native`）、补丁链 `0001–0119, 0124–0129, 0138–0144` PASS、`git diff --check` PASS；日志在 `out/windows/kbm/session/0144-validation/`。顶层套件多为历史构建证据断言（`4F058194`/`CCFFE18C`/`723331B5` 等），不替代 `0144` 上的 F2 22 行实时矩阵与 22 动作矩阵。
 - 堆叠拆分已验收：`0127` 修正探针按住 Shift、接入原生 inventory `0x8373EB0`，并处理数量框的减少/增加及接受/取消回调。红宝石 SNO `437457` 从一叠 `3` 拆为 `2+1` 两叠，背包从 `28/60→29/60`；运行态物品位置分别为 `(0,1,1)` 和 `(0,3,1)`，存档读取同为 `stack 2/1`，退出重进仍保留。取消不改变 `2+1`，对单件 Shift 点击不打开数量框。
 - `0129` 的 12 动作重绑定矩阵已完整验过：运行中改为 `B/E/F/G/H/N/O/R/U/X/Y/5` 后 getter 一致，重启后保留；旧默认键停用、新键作用、面板同键关闭和 F2 Defaults 均通过。`test_keybind_matrix_0132.py` 79 项、`test_keybind_effects_0132.py` 43 项保留为历史基线。
@@ -191,7 +194,7 @@
 
 - 随从面板离线内容门（有证据则单独归类）；普通前台 FIFO 启动压力；复杂遮挡负例。
 
-**阶段完成标准**：所有结论来自当前安装 `0144`（`C83F70E0…`）上的原生键鼠可观察结果；未在目标构建复验的项目保持“部分/未完成”；文档、差距表与证据互相一致。
+**阶段完成标准**：本阶段的 `0144` 结论来自该构建上的原生键鼠可观察结果；现有安装为 `0145`，未在目标构建复验的项目不得写成 `0145` 已验收。文档、差距表与证据须标明各自构建。
 
 ## 必读踩坑
 

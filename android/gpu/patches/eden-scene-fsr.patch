@@ -1,0 +1,522 @@
+diff --git a/src/common/thread.h b/src/common/thread.h
+index 4a36295..e2fc6c9 100644
+--- a/src/common/thread.h
++++ b/src/common/thread.h
+@@ -77,8 +77,10 @@ public:
+             condvar.notify_all();
+             return true;
+         } else {
+-            condvar.wait(lk, token,
+-                        [this, current_generation] { return current_generation != generation; });
++            // Port note: Android libc++ has no stop_token overload, so poll the token.
++            condvar.wait(lk, [this, current_generation, token] {
++                return current_generation != generation || token.stop_requested();
++            });
+             return !token.stop_requested();
+         }
+     }
+diff --git a/src/video_core/cdma_pusher.cpp b/src/video_core/cdma_pusher.cpp
+index d04b738..0c16d46 100644
+--- a/src/video_core/cdma_pusher.cpp
++++ b/src/video_core/cdma_pusher.cpp
+@@ -33,7 +33,9 @@ CDmaPusher::CDmaPusher(Host1x::Host1x& host1x_, s32 id)
+         while (!stop_token.stop_requested()) {
+             {
+                 std::unique_lock l{command_mutex};
+-                command_cv.wait(l, stop_token, [this]() { return command_lists.size() > 0; });
++                // Port note: Android libc++ lacks the stop_token overload of
++                // condition_variable_any::wait, so stop requests are polled here instead.
++                command_cv.wait(l, [this, stop_token]() { return command_lists.size() > 0 || stop_token.stop_requested(); });
+                 if (stop_token.stop_requested()) {
+                     return;
+                 }
+diff --git a/src/video_core/renderer_vulkan/blit_image.cpp b/src/video_core/renderer_vulkan/blit_image.cpp
+index ddd52e9..b5a3a58 100644
+--- a/src/video_core/renderer_vulkan/blit_image.cpp
++++ b/src/video_core/renderer_vulkan/blit_image.cpp
+@@ -658,6 +658,39 @@ BlitImageHelper::BlitImageHelper(const Device& device_, Scheduler& scheduler_,
+ 
+ BlitImageHelper::~BlitImageHelper() = default;
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++void BlitImageHelper::BlitScaleImage(const Framebuffer* framebuffer, ImageView& source,
++                                     const Region2D& dst_region, const Region2D& src_region,
++                                     const Extent3D& src_size, VkImageAspectFlags aspects) {
++    const bool color = aspects == VK_IMAGE_ASPECT_COLOR_BIT;
++    const bool stencil = (aspects & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
++    ASSERT(!stencil || device.IsExtShaderStencilExportSupported());
++    const BlitImagePipelineKey key{framebuffer->RenderPass(),
++                                   Tegra::Engines::Fermi2D::Operation::SrcCopy};
++    const auto pipeline = color ? FindOrEmplaceColorPipeline(key)
++                        : stencil ? FindOrEmplaceDepthStencilPipeline(key)
++                                  : FindOrEmplaceBlitDepthPipeline(key.renderpass);
++    const auto layout = stencil ? *two_textures_pipeline_layout : *one_texture_pipeline_layout;
++    const auto view = color ? source.Handle(Shader::TextureType::Color2D) : source.DepthView();
++    const auto stencil_view = stencil ? source.StencilView() : VK_NULL_HANDLE;
++    const auto sampler = color ? *linear_sampler : *nearest_sampler;
++    RecordShaderReadBarrier(scheduler, source);
++    scheduler.RequestRenderpass(framebuffer);
++    scheduler.Record([=, this](vk::CommandBuffer command) {
++        const auto set = stencil ? two_textures_descriptor_allocator.Commit()
++                                 : one_texture_descriptor_allocator.Commit();
++        if (stencil) UpdateTwoTexturesDescriptorSet(device, set, sampler, view, stencil_view);
++        else UpdateOneTextureDescriptorSet(device, set, sampler, view);
++        command.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
++        command.BindDescriptorSets(VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, set, nullptr);
++        // Regions are in physical pixels, not normalized UV coordinates.
++        BindBlitState(command, layout, dst_region, src_region, src_size);
++        command.Draw(3, 1, 0, 0);
++    });
++    scheduler.InvalidateState();
++}
++#endif
++
+ void BlitImageHelper::BlitColor(const Framebuffer* dst_framebuffer, const ImageView& src_image_view,
+                                 const Region2D& dst_region, const Region2D& src_region,
+                                 Tegra::Engines::Fermi2D::Filter filter,
+diff --git a/src/video_core/renderer_vulkan/blit_image.h b/src/video_core/renderer_vulkan/blit_image.h
+index 62e6743..3639b0f 100644
+--- a/src/video_core/renderer_vulkan/blit_image.h
++++ b/src/video_core/renderer_vulkan/blit_image.h
+@@ -73,6 +73,12 @@ public:
+                              StateTracker& state_tracker, DescriptorPool& descriptor_pool);
+     ~BlitImageHelper();
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++    void BlitScaleImage(const Framebuffer* dst_framebuffer, ImageView& source,
++                         const Region2D& dst_region, const Region2D& src_region,
++                         const Extent3D& src_size, VkImageAspectFlags aspects);
++#endif
++
+     void BlitColor(const Framebuffer* dst_framebuffer, const ImageView& src_image_view,
+                    const Region2D& dst_region, const Region2D& src_region,
+                    Tegra::Engines::Fermi2D::Filter filter,
+diff --git a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+index 8b5b0bc..7edfcb5 100644
+--- a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
++++ b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+@@ -30,6 +30,11 @@
+ #include "video_core/gpu_logging/gpu_logging.h"
+ #include "common/settings.h"
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++#include "scene_policy.h"
++#include "scene_fsr.h"
++#endif
++
+ #if defined(_MSC_VER) && defined(NDEBUG)
+ #define LAMBDA_FORCEINLINE [[msvc::forceinline]]
+ #else
+@@ -450,6 +455,14 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
+     ASSERT(views.size() == num_image_elements);
+     ASSERT(samplers.size() == num_textures);
+     texture_cache.FillImageViews(std::span(views.data(), views.size()), false, Spec::has_images);
++#ifdef D3_ANDROID_SCENE_FSR
++    scene_source = {};
++    if (D3::IsSceneCompositor(key.unique_hashes[1], key.unique_hashes[5]) &&
++        views.size() == 1 && num_textures == 1 && !Spec::has_images &&
++        !key.unique_hashes[0] && !key.unique_hashes[2] && !key.unique_hashes[3] && !key.unique_hashes[4]) {
++        scene_source = views.front().id;
++    }
++#endif
+ 
+     VideoCommon::ImageViewInOut* texture_buffer_it{views.data()};
+     const auto bind_stage_info{[&](size_t stage) LAMBDA_FORCEINLINE {
+@@ -553,6 +566,10 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
+         buffer_cache.any_buffer_uploaded = false;
+     }
+     texture_cache.UpdateRenderTargets(false);
++#ifdef D3_ANDROID_SCENE_FSR
++    D3::TraceSceneDraw(key.unique_hashes[1], key.unique_hashes[5], texture_cache,
++                      *maxwell3d, *gpu_memory, std::span(views.data(), views.size()));
++#endif
+     texture_cache.CheckFeedbackLoop(std::span<const VideoCommon::ImageViewInOut>{views.data(),
+                                                                                  views.size()});
+     if (IsBuilt() && !pipeline) {
+diff --git a/src/video_core/renderer_vulkan/vk_graphics_pipeline.h b/src/video_core/renderer_vulkan/vk_graphics_pipeline.h
+index b1ac5a3..b1dcdf5 100644
+--- a/src/video_core/renderer_vulkan/vk_graphics_pipeline.h
++++ b/src/video_core/renderer_vulkan/vk_graphics_pipeline.h
+@@ -133,6 +133,10 @@ public:
+         gpu_memory = gpu_memory_;
+     }
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++    VideoCommon::ImageViewId SceneSource() const { return scene_source; }
++#endif
++
+ private:
+     template <typename Spec>
+     bool ConfigureImpl(bool is_indexed);
+@@ -145,6 +149,9 @@ private:
+     void Validate();
+ 
+     const GraphicsPipelineCacheKey key;
++#ifdef D3_ANDROID_SCENE_FSR
++    VideoCommon::ImageViewId scene_source{};
++#endif
+     Tegra::Engines::Maxwell3D* maxwell3d;
+     Tegra::MemoryManager* gpu_memory;
+     const Device& device;
+diff --git a/src/video_core/renderer_vulkan/vk_rasterizer.cpp b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+index f43bea1..4317b10 100644
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -17,6 +17,10 @@
+ #include "common/logging.h"
+ #include "common/scope_exit.h"
+ #include "common/settings.h"
++#ifdef D3_ANDROID_SCENE_FSR
++#include "scene_fsr.h"
++#include "scene_policy.h"
++#endif
+ #include "video_core/buffer_cache/buffer_cache.h"
+ #include "video_core/gpu_logging/gpu_logging.h"
+ #include "video_core/control/channel_state.h"
+@@ -251,6 +255,16 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
+     if (!pipeline->Configure(is_indexed))
+         return;
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++    if (D3::SceneModeEnabled() && pipeline->SceneSource()) {
++        if (!scene_fsr) scene_fsr = std::make_unique<D3::SceneFSR>();
++        if (scene_fsr->Draw(device, memory_allocator, scheduler, blit_image, texture_cache,
++                            *maxwell3d, *gpu_memory, pipeline->SceneSource(),
++                            GetViewportState(device, maxwell3d->regs, 0, 1.0f),
++                            GetScissorState(maxwell3d->regs, 0), is_indexed)) return;
++    }
++#endif
++
+     UpdateDynamicStates();
+ 
+     query_cache.NotifySegment(true);
+diff --git a/src/video_core/renderer_vulkan/vk_rasterizer.h b/src/video_core/renderer_vulkan/vk_rasterizer.h
+index 7470aa4..3e535c1 100644
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.h
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.h
+@@ -45,6 +45,10 @@ class Maxwell3D;
+ 
+ } // namespace Tegra
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++namespace D3 { class SceneFSR; }
++#endif
++
+ namespace Vulkan {
+ 
+ struct FramebufferTextureInfo;
+@@ -222,6 +226,10 @@ private:
+     AccelerateDMA accelerate_dma;
+     FenceManager fence_manager;
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++    std::unique_ptr<D3::SceneFSR> scene_fsr;
++#endif
++
+     vk::Event wfi_event;
+ 
+     boost::container::static_vector<u32, MAX_IMAGE_VIEWS> image_view_indices;
+diff --git a/src/video_core/renderer_vulkan/vk_texture_cache.cpp b/src/video_core/renderer_vulkan/vk_texture_cache.cpp
+index 583cb6e..a4c996a 100644
+--- a/src/video_core/renderer_vulkan/vk_texture_cache.cpp
++++ b/src/video_core/renderer_vulkan/vk_texture_cache.cpp
+@@ -17,6 +17,9 @@
+ #include <numeric>
+ #include "common/bit_util.h"
+ #include "common/settings.h"
++#ifdef D3_ANDROID_SCENE_FSR
++#include "scene_policy.h"
++#endif
+ 
+ #include "video_core/renderer_vulkan/vk_texture_cache.h"
+ #include "video_core/gpu_logging/gpu_logging.h"
+@@ -2371,6 +2374,7 @@ bool Image::ScaleUp(bool ignore) {
+     if (NeedsScaleHelper()) {
+         if (!BlitScaleHelper(true)) {
+             current_image = &Image::original_image;
++            flags &= ~ImageFlagBits::Rescaled;
+             return false;
+         }
+     } else {
+@@ -2440,6 +2444,34 @@ bool Image::BlitScaleHelper(bool scale_up) {
+         .start = {0, 0},
+         .end = {s32(dst_width), s32(dst_height)},
+     };
++#ifdef D3_ANDROID_SCENE_FSR
++    if (D3::SceneModeEnabled()) {
++        if (!SupportsSceneScale()) return false;
++        // Construct source and destination views from their respective physical images.
++        // Using blit_view for both would sample the same image that is being written.
++        const auto saved_image = current_image;
++        const auto view_info = ImageViewInfo(ImageViewType::e2D, info.format);
++        if (!normal_view) {
++            current_image = &Image::original_image;
++            normal_view = std::make_unique<ImageView>(*runtime, view_info, NULL_IMAGE_ID, *this);
++        }
++        if (!scale_view) {
++            current_image = &Image::scaled_image;
++            scale_view = std::make_unique<ImageView>(*runtime, view_info, NULL_IMAGE_ID, *this);
++        }
++        current_image = saved_image;
++        auto& source_view = scale_up ? *normal_view : *scale_view;
++        auto* destination_view = scale_up ? scale_view.get() : normal_view.get();
++        if (!blit_framebuffer) {
++            blit_framebuffer.emplace(*runtime, is_color ? destination_view : nullptr,
++                                      is_color ? nullptr : destination_view,
++                                      VkExtent2D{dst_width, dst_height}, scale_up);
++        }
++        runtime->blit_image_helper.BlitScaleImage(&*blit_framebuffer, source_view,
++            dst_region, src_region, {src_width, src_height, 1}, aspect_mask);
++        return true;
++    }
++#endif
+     const VkExtent2D extent{
+         .width = (std::max)(scaled_width, info.size.width) >> samples_x,
+         .height = (std::max)(scaled_height, info.size.height) >> samples_y,
+@@ -2494,6 +2526,16 @@ bool Image::NeedsScaleHelper() const {
+     return needs_blit_helper;
+ }
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++bool Image::SupportsSceneScale() const {
++    // A shader depth copy cannot preserve stencil without shaderStencilExport.
++    // Keep the whole attachment group native rather than silently discarding stencil.
++    const bool stencil = (ImageAspectMask(info.format) & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
++    return info.num_samples == 1 && (!NeedsScaleHelper() || !stencil ||
++                                    runtime->device.IsExtShaderStencilExportSupported());
++}
++#endif
++
+ ImageView::ImageView(TextureCacheRuntime& runtime, const VideoCommon::ImageViewInfo& info,
+                      ImageId image_id_, Image& image)
+     : VideoCommon::ImageViewBase{info, image.info, image_id_, image.gpu_addr},
+diff --git a/src/video_core/renderer_vulkan/vk_texture_cache.h b/src/video_core/renderer_vulkan/vk_texture_cache.h
+index 2e9736f..8f957b9 100644
+--- a/src/video_core/renderer_vulkan/vk_texture_cache.h
++++ b/src/video_core/renderer_vulkan/vk_texture_cache.h
+@@ -361,6 +361,10 @@ public:
+ 
+     bool ScaleDown(bool ignore = false);
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++    bool SupportsSceneScale() const;
++#endif
++
+     u64 allocation_tick;
+ 
+     friend class BlockLinearUnswizzle3DPass;
+diff --git a/src/video_core/texture_cache/texture_cache.h b/src/video_core/texture_cache/texture_cache.h
+index e92e54f..a46f731 100644
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -6,6 +6,10 @@
+ 
+ #pragma once
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++#include "scene_policy.h"
++#endif
++
+ #include <limits>
+ #include <optional>
+ #include <bit>
+@@ -388,6 +392,13 @@ bool TextureCache<P>::RescaleRenderTargets() {
+                 id_save = image_id;
+                 auto& image = slot_images[image_id];
+                 can_rescale &= ImageCanRescale(image);
++#ifdef D3_ANDROID_SCENE_FSR
++                // Native UI attachments synchronize shared scene depth to native size, too.
++                if (D3::SceneModeEnabled()) {
++                    can_rescale &= D3::IsSceneTarget(image.info.size.width, image.info.size.height) &&
++                                   image.SupportsSceneScale();
++                }
++#endif
+                 any_rescaled |= True(image.flags & ImageFlagBits::Rescaled) ||
+                                 GetFormatType(image.info.format) != SurfaceType::ColorTexture;
+                 scale_rating = std::max<u32>(scale_rating, image.scale_tick <= frame_tick
+diff --git a/src/video_core/texture_cache/texture_cache_base.h b/src/video_core/texture_cache/texture_cache_base.h
+index 8a2318c..dddded7 100644
+--- a/src/video_core/texture_cache/texture_cache_base.h
++++ b/src/video_core/texture_cache/texture_cache_base.h
+@@ -200,6 +200,10 @@ public:
+     /// UpdateRenderTargets should be called before this
+     Framebuffer* GetFramebuffer();
+ 
++#ifdef D3_ANDROID_SCENE_FSR
++    const RenderTargets& SceneRenderTargets() const { return render_targets; }
++#endif
++
+     /// Mark images in a range as modified from the CPU
+     void WriteMemory(DAddr cpu_addr, size_t size);
+ 
+diff --git a/src/video_core/renderer_vulkan/present/util.cpp b/src/video_core/renderer_vulkan/present/util.cpp
+index 2ea7870..7953592 100644
+--- a/src/video_core/renderer_vulkan/present/util.cpp
++++ b/src/video_core/renderer_vulkan/present/util.cpp
+@@ -25,7 +25,8 @@ vk::Buffer CreateWrappedBuffer(MemoryAllocator& allocator, VkDeviceSize size, Me
+     return allocator.CreateBuffer(dst_buffer_info, usage);
+ }
+ 
+-vk::Image CreateWrappedImage(MemoryAllocator& allocator, VkExtent2D dimensions, VkFormat format) {
++vk::Image CreateWrappedImage(MemoryAllocator& allocator, VkExtent2D dimensions, VkFormat format,
++                             VkImageUsageFlags extra_usage) {
+     const VkImageCreateInfo image_ci{
+         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+         .pNext = nullptr,
+@@ -38,7 +39,7 @@ vk::Image CreateWrappedImage(MemoryAllocator& allocator, VkExtent2D dimensions,
+         .samples = VK_SAMPLE_COUNT_1_BIT,
+         .tiling = VK_IMAGE_TILING_OPTIMAL,
+         .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+-                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
++                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | extra_usage,
+         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+         .queueFamilyIndexCount = 0,
+         .pQueueFamilyIndices = nullptr,
+diff --git a/src/video_core/renderer_vulkan/present/util.h b/src/video_core/renderer_vulkan/present/util.h
+index ecc2632..45e10b2 100644
+--- a/src/video_core/renderer_vulkan/present/util.h
++++ b/src/video_core/renderer_vulkan/present/util.h
+@@ -16,7 +16,8 @@ namespace Vulkan {
+ 
+ vk::Buffer CreateWrappedBuffer(MemoryAllocator& allocator, VkDeviceSize size, MemoryUsage usage);
+ 
+-vk::Image CreateWrappedImage(MemoryAllocator& allocator, VkExtent2D dimensions, VkFormat format);
++vk::Image CreateWrappedImage(MemoryAllocator& allocator, VkExtent2D dimensions, VkFormat format,
++                             VkImageUsageFlags extra_usage = 0);
+ void TransitionImageLayout(vk::CommandBuffer& cmdbuf, VkImage image, VkImageLayout target_layout,
+                            VkImageLayout source_layout = VK_IMAGE_LAYOUT_GENERAL);
+ void UploadImage(const Device& device, MemoryAllocator& allocator, Scheduler& scheduler,
+diff --git a/src/video_core/host_shaders/fidelityfx_fsr.frag b/src/video_core/host_shaders/fidelityfx_fsr.frag
+index 54eedb4..f487e26 100644
+--- a/src/video_core/host_shaders/fidelityfx_fsr.frag
++++ b/src/video_core/host_shaders/fidelityfx_fsr.frag
+@@ -101,6 +101,16 @@ void CurrFilter(AU2 pos) {
+ }
+ 
+ void main() {
++#if USE_EASU
++    if (Const3.w == 0xd3000001u) {
++        frag_color = vec4(0.125, 0.5, 1.0, 1.0);
++        return;
++    }
++    if (Const3.w == 0xd3000002u) {
++        frag_color = texture(InputTexture, frag_texcoord);
++        return;
++    }
++#endif
+ #if USE_RCAS
+     CurrFilter(AU2(frag_texcoord * vec2(textureSize(InputTexture, 0))));
+ #else
+diff --git a/src/video_core/renderer_vulkan/present/fsr.cpp b/src/video_core/renderer_vulkan/present/fsr.cpp
+index 894fb14..39bf0da 100644
+--- a/src/video_core/renderer_vulkan/present/fsr.cpp
++++ b/src/video_core/renderer_vulkan/present/fsr.cpp
+@@ -25,7 +25,8 @@ using namespace FSR;
+ 
+ using PushConstants = std::array<u32, 4 * 4>;
+ 
+-FSR::FSR(const Device& device, MemoryAllocator& memory_allocator, size_t image_count, VkExtent2D extent)
++FSR::FSR(const Device& device, MemoryAllocator& memory_allocator, size_t image_count,
++         VkExtent2D extent, bool force_fp32)
+     : m_memory_allocator{memory_allocator}
+     , m_image_count{image_count}
+     , m_extent{extent}
+@@ -33,7 +34,7 @@ FSR::FSR(const Device& device, MemoryAllocator& memory_allocator, size_t image_c
+     CreateImages(device);
+     CreateRenderPasses(device);
+     CreateSampler(device);
+-    CreateShaders(device);
++    CreateShaders(device, force_fp32);
+     CreateDescriptorPool(device);
+     CreateDescriptorSetLayout(device);
+     CreateDescriptorSets(device);
+@@ -44,15 +45,18 @@ FSR::FSR(const Device& device, MemoryAllocator& memory_allocator, size_t image_c
+ void FSR::CreateImages(const Device& device) {
+     m_dynamic_images.resize(m_image_count);
+     for (auto& images : m_dynamic_images) {
+-        images.images[Easu] = CreateWrappedImage(m_memory_allocator, m_extent, VK_FORMAT_R16G16B16A16_SFLOAT);
+-        images.images[Rcas] = CreateWrappedImage(m_memory_allocator, m_extent, VK_FORMAT_R16G16B16A16_SFLOAT);
+-        images.image_views[Easu] = CreateWrappedImageView(device, images.images[Easu], VK_FORMAT_R16G16B16A16_SFLOAT);
+-        images.image_views[Rcas] = CreateWrappedImageView(device, images.images[Rcas], VK_FORMAT_R16G16B16A16_SFLOAT);
++        // Scene composition can blit either stage back into the guest framebuffer.
++        images.images[Easu] = CreateWrappedImage(m_memory_allocator, m_extent, VK_FORMAT_R8G8B8A8_UNORM,
++                                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
++        images.images[Rcas] = CreateWrappedImage(m_memory_allocator, m_extent, VK_FORMAT_R8G8B8A8_UNORM,
++                                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
++        images.image_views[Easu] = CreateWrappedImageView(device, images.images[Easu], VK_FORMAT_R8G8B8A8_UNORM);
++        images.image_views[Rcas] = CreateWrappedImageView(device, images.images[Rcas], VK_FORMAT_R8G8B8A8_UNORM);
+     }
+ }
+ 
+ void FSR::CreateRenderPasses(const Device& device) {
+-    m_renderpass = CreateWrappedRenderPass(device, VK_FORMAT_R16G16B16A16_SFLOAT);
++    m_renderpass = CreateWrappedRenderPass(device, VK_FORMAT_R8G8B8A8_UNORM);
+     for (auto& images : m_dynamic_images) {
+         images.framebuffers[Easu] = CreateWrappedFramebuffer(device, m_renderpass, images.image_views[Easu], m_extent);
+         images.framebuffers[Rcas] = CreateWrappedFramebuffer(device, m_renderpass, images.image_views[Rcas], m_extent);
+@@ -63,10 +67,10 @@ void FSR::CreateSampler(const Device& device) {
+     m_sampler = CreateBilinearSampler(device);
+ }
+ 
+-void FSR::CreateShaders(const Device& device) {
++void FSR::CreateShaders(const Device& device, bool force_fp32) {
+     m_vert_shader = BuildShader(device, VULKAN_FIDELITYFX_FSR_VERT_SPV);
+ 
+-    if (device.IsFloat16Supported()) {
++    if (device.IsFloat16Supported() && !force_fp32) {
+         m_easu_shader = BuildShader(device, VULKAN_FIDELITYFX_FSR_EASU_FP16_FRAG_SPV);
+         m_rcas_shader = BuildShader(device, VULKAN_FIDELITYFX_FSR_RCAS_FP16_FRAG_SPV);
+     } else {
+@@ -144,7 +148,7 @@ void FSR::UploadImages(const Device& device, Scheduler& scheduler) {
+ 
+ VkImageView FSR::Draw(const Device& device, Scheduler& scheduler, size_t image_index, VkImage source_image,
+                       VkImageView source_image_view, VkExtent2D input_image_extent,
+-                      const Common::Rectangle<f32>& crop_rect) {
++                      const Common::Rectangle<f32>& crop_rect, Probe probe) {
+     Images& images = m_dynamic_images[image_index];
+ 
+     VkImage easu_image = *images.images[Easu];
+@@ -174,6 +178,8 @@ VkImageView FSR::Draw(const Device& device, Scheduler& scheduler, size_t image_i
+                      easu_con.data() + 12, viewport_width, viewport_height, input_image_width,
+                      input_image_height, output_image_width, output_image_height, viewport_x,
+                      viewport_y);
++    // FsrEasuConOffset leaves Const3.zw unused. The normal path keeps them zero.
++    easu_con[15] = static_cast<u32>(probe);
+ 
+     const float sharpening =
+         static_cast<float>(Settings::values.fsr_sharpening_slider.GetValue()) / 100.0f;
+diff --git a/src/video_core/renderer_vulkan/present/fsr.h b/src/video_core/renderer_vulkan/present/fsr.h
+index 7762480..14eff0a 100644
+--- a/src/video_core/renderer_vulkan/present/fsr.h
++++ b/src/video_core/renderer_vulkan/present/fsr.h
+@@ -17,16 +17,27 @@ class Scheduler;
+ 
+ class FSR {
+ public:
+-    explicit FSR(const Device& device, MemoryAllocator& memory_allocator, size_t image_count, VkExtent2D extent);
++    enum class Probe : u32 { Disabled = 0, Solid = 0xd3000001, Sample = 0xd3000002 };
++    explicit FSR(const Device& device, MemoryAllocator& memory_allocator, size_t image_count,
++                 VkExtent2D extent, bool force_fp32 = false);
+     VkImageView Draw(const Device& device, Scheduler& scheduler, size_t image_index, VkImage source_image,
+                      VkImageView source_image_view, VkExtent2D input_image_extent,
+-                     const Common::Rectangle<f32>& crop_rect);
++                     const Common::Rectangle<f32>& crop_rect, Probe probe = Probe::Disabled);
++
++    VkImage OutputImage(size_t index) const { return *m_dynamic_images[index].images[Rcas]; }
++    VkImageView OutputView(size_t index) const { return *m_dynamic_images[index].image_views[Rcas]; }
++    VkSampler OutputSampler() const { return *m_sampler; }
++    // Debug: lets the host blit the intermediate EASU image to isolate a stage.
++    VkImage StageImage(size_t index, size_t stage) const {
++        return *m_dynamic_images[index].images[stage == 0 ? Easu : Rcas];
++    }
++    size_t StageCount() const { return MaxFsrStage; }
+ 
+ private:
+     void CreateImages(const Device& device);
+     void CreateRenderPasses(const Device& device);
+     void CreateSampler(const Device& device);
+-    void CreateShaders(const Device& device);
++    void CreateShaders(const Device& device, bool force_fp32);
+     void CreateDescriptorPool(const Device& device);
+     void CreateDescriptorSetLayout(const Device& device);
+     void CreateDescriptorSets(const Device& device);

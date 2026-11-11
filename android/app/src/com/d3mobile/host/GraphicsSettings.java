@@ -21,9 +21,8 @@ final class GraphicsSettings {
     GraphicsSettings(MainActivity activity) {
         this.activity = activity;
         prefs = activity.getSharedPreferences("graphics", 0);
-        if (prefs.getInt("scale", 10) == 7) {
-            prefs.edit().putInt("scale", 10).commit();
-            android.util.Log.i("D3Recovery", "restored 1.0x rendering to preserve game text");
+        if (GraphicsDefaults.migrate(prefs, new File(activity.getFilesDir(), "runtime"))) {
+            android.util.Log.i("D3Recovery", "using native 1.0x rendering and 45 fps cap by default");
         }
         if (prefs.getBoolean("custom", false) && prefs.getString("driver", "").equals(prefs.getString("launchedDriver", "-"))) {
             ActivityManager manager = (ActivityManager)activity.getSystemService(Activity.ACTIVITY_SERVICE);
@@ -37,21 +36,21 @@ final class GraphicsSettings {
         prefs.edit().putString("launchedDriver", driverName().isEmpty() ? "" : prefs.getString("driver", ""))
             .putInt("launchedPid", android.os.Process.myPid()).commit();
     }
-    int scale() { return PresentationPolicy.textSafeScale(prefs.getInt("scale", 10)); }
-    int frameCap() { return PresentationPolicy.frameCap(prefs.getInt("frameCap", 60)); }
+    int scale() { return PresentationPolicy.textSafeScale(prefs.getInt("scale", PresentationPolicy.DEFAULT_SCALE)); }
+    int frameCap() { return PresentationPolicy.frameCap(prefs.getInt("frameCap", PresentationPolicy.DEFAULT_FRAME_CAP)); }
     int refreshRate() {
-        int value = prefs.getInt("refreshRate", PresentationPolicy.refreshForCap(frameCap()));
-        return value == 72 || value == 90 || value == 120 ? value : 60;
+        return PresentationPolicy.refreshRate(prefs.getInt("refreshRate", PresentationPolicy.AUTO_REFRESH_RATE));
     }
     boolean widescreen() { return prefs.getBoolean("widescreen", true); }
     String driverName() { return prefs.getBoolean("custom", false) ? prefs.getString("library", "") : ""; }
     String driverDirectory() { return new File(activity.getFilesDir(), prefs.getString("driver", "drivers/none")).getAbsolutePath(); }
 
     void show() {
-        final String[] renderNames = {"1.0×（标准）", "1.5×（更清晰，GPU 负载更高）",
-                "场景 87.5% 线性，界面与文字 1×", "场景 75% 线性，界面与文字 1×",
+        final String[] renderNames = {"1.0×（原生）", "1.5×（更清晰，GPU 负载更高）",
+                "场景 87.5% 线性，界面与文字 1×", "场景 80% 线性，界面与文字 1×",
+                "场景 75% 线性，界面与文字 1×",
                 "场景 62.5% 线性，界面与文字 1×"};
-        final int[] renderModes = {10, 15, PresentationPolicy.SCENE_7_8,
+        final int[] renderModes = {10, 15, PresentationPolicy.SCENE_7_8, PresentationPolicy.SCENE_4_5,
                 PresentationPolicy.SCENE_FSR, PresentationPolicy.SCENE_5_8};
         int selectedRender = 0;
         for (int i = 0; i < renderModes.length; ++i) if (scale() == renderModes[i]) selectedRender = i;
@@ -61,7 +60,7 @@ final class GraphicsSettings {
             "导入 GPU 驱动 ZIP（Adreno / Turnip / Mali）", "虚拟手柄与界面",
             "本次驱动状态：" + activity.nativeDriverStatus(),
             "原生宽屏：" + (widescreen() ? "开启" : "16:9 基线") + "（重启生效）", "渲染倍数和驱动重启生效",
-            "屏幕刷新率请求：" + refreshRate() + " Hz（重启生效）",
+            "屏幕刷新率：" + (refreshRate() == 0 ? "跟随系统" : refreshRate() + " Hz 请求") + "（重启生效）",
             "游戏帧率上限：" + frameCap() + " fps（重启生效）"};
         new AlertDialog.Builder(activity).setTitle("画面与 GPU")
             .setItems(items, (dialog, which) -> {
@@ -86,17 +85,16 @@ final class GraphicsSettings {
                     show();
                 }
                 if (which == 7) new AlertDialog.Builder(activity).setTitle("屏幕刷新率请求")
-                    .setSingleChoiceItems(new String[]{"60 Hz", "72 Hz", "90 Hz", "120 Hz"},
-                        refreshRate() == 60 ? 0 : refreshRate() == 72 ? 1 : refreshRate() == 90 ? 2 : 3,
-                        (d, n) -> { prefs.edit().putInt("refreshRate", new int[]{60, 72, 90, 120}[n]).apply(); d.dismiss(); show(); }).show();
+                    .setSingleChoiceItems(new String[]{"跟随系统", "60 Hz", "72 Hz", "90 Hz", "120 Hz"},
+                        refreshRate() == 0 ? 0 : refreshRate() == 60 ? 1 : refreshRate() == 72 ? 2 : refreshRate() == 90 ? 3 : 4,
+                        (d, n) -> { prefs.edit().putInt("refreshRate", new int[]{0, 60, 72, 90, 120}[n]).apply(); d.dismiss(); show(); }).show();
                 if (which == 8) {
                     final int[] caps = {60, 45, 40, 36, 30};
                     int selectedCap = 0;
                     for (int i = 0; i < caps.length; ++i) if (frameCap() == caps[i]) selectedCap = i;
                     new AlertDialog.Builder(activity).setTitle("游戏帧率上限")
                         .setSingleChoiceItems(new String[]{"60 fps", "45 fps", "40 fps", "36 fps", "30 fps"}, selectedCap,
-                            (d, n) -> { prefs.edit().putInt("frameCap", caps[n])
-                                .putInt("refreshRate", PresentationPolicy.refreshForCap(caps[n])).apply();
+                            (d, n) -> { prefs.edit().putInt("frameCap", caps[n]).apply();
                                 d.dismiss(); show(); }).show();
                 }
             }).setNegativeButton("返回游戏", null).show();

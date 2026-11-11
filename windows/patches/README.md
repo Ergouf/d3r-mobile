@@ -4,9 +4,11 @@
 
 - 上游：<https://github.com/scarletnx/ScarletNX>
 - 基线提交：`dbf8915965367e8a9616b19e5a0c1eddafaf28f3`
-- 有效链：`0001–0078`，其中 `0029`、`0030` 不在链内
+- 当前清单为 `0001–0119`、`0124–0129`、`0138–0146`，其中 `0029`、`0030` 不在链内；具体顺序以 `base.json` 为准
 - `0029`、`0030` 是已放弃的实验，不进入当前链，也不能按目录全量应用
 - 每一步的补丁 SHA-256 和结果文件 LF 规范化 SHA-256 都记录在 `base.json`
+
+2026-11-11 本机按清单重放 132 个阶段通过。`0146-settings-option-tests.patch` 仅修正两个测试中的触屏选项文案，不改变运行时；设置相关 CTest 4/4 通过。`0145-scene-fsr-before-ui.patch` 和 `0146-settings-option-tests.patch` 当前均未被主仓库 Git 跟踪，提交或迁移前须把它们与 `base.json` 一并纳入版本管理。仅克隆已有提交不能重放完整链。
 
 ## 应用与验证
 
@@ -23,6 +25,8 @@ python .\windows\tools\verify_patch_chain.py
 Windows 仓库路径含括号时，构建使用无括号 junction（例如 `D:\workspace\Diablo-kbm`），避免 cmd/CMake 参数截断。构建说明见 [Windows 工具说明](../../windows/tools/README.md)，当前验收与已知缺口见 [当前交接](../../windows/docs/HANDOFF-20261104-CURRENT.md)。
 
 ## 补丁分组
+
+下列 `0001–0078` 条目保留各补丁当时的设计与验证记录；其中“候选”“未安装”等措辞是历史状态，不代表当前安装。`0079` 以后及当前验收见 [代码地图](../docs/KBM-CODE-MAP.md) 和 [当前交接](../docs/HANDOFF-20261104-CURRENT.md)。
 
 - `0001`：FSR1 EASU/RCAS、Vulkan 图像布局与资源寿命、全屏启动，以及默认关闭的呈现统计。
 - `0002`：可配置的鼠标/触摸/摇杆兼容行为。
@@ -73,7 +77,9 @@ Windows 仓库路径含括号时，构建使用无括号 junction（例如 `D:\w
 - `0077`：物品行悬停调用绑定 `native ItemList` 选择 setter `0x838A6E0`，不调用 accept/equip；UI 内按住 `Alt` 先发布指针悬停，再进入原生 Compare 分支 `0x8373750`，仅允许上下文 9/10，松键经 `0x81FC220` 恢复原模式。保存库存 owner 和用户原比较态，模态覆盖时隔离，双 Alt 键与失焦释放。候选已构建、未安装，真实详情比较显示待用户验收。
 - `0078`：world HUD 自己的 Skill KeyBinding 标签改由虚拟 setter `0x83AD9D0` 参数实现左键/右键/`1`–`4`；严格核对返回地址、玩家 0、label `+0x3E0` 与 `*(player+0xDB74)` 一致、vtable 方法和 binding 范围，再用 `0x840C650` 反查实际 loadout 槽。`guest_call` 原子 depth 防止 HUD hook 嵌套共用栈。候选已构建、未安装，真实 HUD 显示待用户验收。
 
-## 已知边界
+## 历史边界记录
+
+以下是对应阶段的边界，后续补丁可能已经处理其中部分问题；当前未完成项以 [当前交接](../docs/HANDOFF-20261104-CURRENT.md) 为准。
 
 - `0074`：世界页五幕选择走专用原生动作；补 `hearthPortal` 与常见拱门的无碰撞柱命中和近距离触发；底栏走原生文本 setter 重建排版，缓存原图例以保持点击动作。18 项文案、26 项地图、30 项门命中与 631 项悬停检查通过；等待用户统一实机验收。
 - `0075`：世界内 `1–4` 读取英雄当前零基槽 2–5，按鼠标位置走原生 actor/ground 技能路径；八项独立队列避免连续按键或移动覆盖技能，有 UI 时清除待处理世界技能。31 项技能指针、638 项悬停/队列检查通过，73 阶段重放 PASS。候选已构建，未安装，真实效果待用户验收。

@@ -6,6 +6,7 @@
 #include "guest_relocs.h"
 #include "d3_content.h"
 #include "d3_display.h"
+#include "d3_hud.h"
 #ifdef D3_WITH_GPU
 #include "../gpu/host/gpu_bridge.h"
 #endif
@@ -2985,7 +2986,11 @@ static uint64_t hook_guest_tp(void) {
 #define HOOK_MAX 256
 uint64_t g_hook_bodies[HOOK_MAX];
 uint64_t g_veneer_resume;
+uint64_t g_hud_frame_resume;
 extern void d3_veneer_bridge(void);
+extern void d3_hud_frame_bridge(void);
+extern void d3_call_guest_two(uint64_t function, uint64_t first, uint64_t second,
+                              uint64_t guest_tp, uint64_t guest_x18);
 
 /* d3_hook_page lives in hook_stub.S: HOOK_MAX entries of "b d3_hook_stub".  A
    site stub branches to &d3_hook_page[index], which is what tells the stub which
@@ -3019,7 +3024,101 @@ static void restore_hook(uint64_t vaddr) {
     }
 }
 
+typedef struct {
+    uint64_t object, vtable, key, parent_key;
+    uint32_t flags;
+    D3HudRect rect;
+} HudObject;
+
+static int hud_read_u64(uint64_t address, uint64_t *value) {
+    return safe_read(address, value, sizeof *value);
+}
+
+static int hud_object(uint64_t address, uint64_t key, uint64_t parent, HudObject *out) {
+    uint64_t header[8];
+    if (!address || !safe_read(address, header, sizeof header) ||
+        header[0] != g_bias + 0x20aa208u || header[6] != key || header[7] != parent ||
+        !safe_read(address + 0x88, &out->rect, sizeof out->rect)) return 0;
+    out->object = address; out->vtable = header[0]; out->flags = (uint32_t)header[3];
+    out->key = header[6]; out->parent_key = header[7];
+    return (out->flags & 4u) != 0;
+}
+
+/* The registry uses 32-bit FNV-1a over the low four bytes of its 64-bit key. */
+static uint64_t hud_lookup(uint64_t map, uint64_t key) {
+    uint32_t mask, hash = 2166136261u;
+    uint64_t buckets, node;
+    if (!safe_read(map, &mask, sizeof mask) || mask > 262143u ||
+        (mask & (mask + 1u)) != 0 || !hud_read_u64(map + 0x10, &buckets) || !buckets)
+        return 0;
+    for (unsigned i = 0; i < 4; i++) { hash ^= (uint8_t)(key >> (i * 8)); hash *= 16777619u; }
+    if (!hud_read_u64(buckets + (uint64_t)(hash & mask) * 8, &node)) return 0;
+    for (unsigned i = 0; node && i < 1024; i++) {
+        uint64_t record[3];
+        if (!safe_read(node, record, sizeof record)) return 0;
+        if (record[1] == key) return record[2];
+        node = record[0];
+    }
+    return 0;
+}
+
+/* Invoked on the original guest input thread. Never retain widget pointers
+   across frames: scene transitions destroy and recreate the registry. */
+void d3_hud_update(uint64_t guest_tp, uint64_t guest_x18) {
+    static int running, logged;
+    static uint64_t last_time;
+    if (__atomic_exchange_n(&running, 1, __ATOMIC_ACQUIRE)) return;
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now)) goto done;
+    const uint64_t ms = (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u;
+    if (last_time && ms - last_time < 100u) goto done;
+    last_time = ms;
+    uint64_t root, world, manager, map;
+    if (!hud_read_u64(g_bias + 0x214a840u, &root) || !root ||
+        !hud_read_u64(root + 0x10, &world) || !world ||
+        !hud_read_u64(world + 0xb80, &manager) || !manager ||
+        !hud_read_u64(manager, &map) || !map) goto done;
+    HudObject map_root, map_anchor, player_root, group;
+    if (!hud_object(hud_lookup(map, D3_HUD_MAP_PARENT_KEY), D3_HUD_MAP_PARENT_KEY, 1, &map_root) ||
+        !hud_object(hud_lookup(map, D3_HUD_MAP_KEY), D3_HUD_MAP_KEY, D3_HUD_MAP_PARENT_KEY, &map_anchor) ||
+        !hud_object(hud_lookup(map, D3_HUD_PLAYER_KEY), D3_HUD_PLAYER_KEY,
+                    UINT64_C(4801268128208691105), &player_root) ||
+        !hud_object(hud_lookup(map, D3_HUD_GROUP_KEY), D3_HUD_GROUP_KEY, D3_HUD_PLAYER_KEY, &group)) goto done;
+    float map_delta[2], group_delta[2];
+    if (!d3_hud_delta(&map_root.rect, &map_anchor.rect, 1, map_delta) ||
+        !d3_hud_delta(&player_root.rect, &group.rect, 0, group_delta)) goto done;
+    const uint64_t translate = g_bias + 0x13b2fc0u;
+    if (fabsf(map_delta[0]) > 0.1f || fabsf(map_delta[1]) > 0.1f)
+        d3_call_guest_two(translate, map_anchor.object, (uint64_t)(uintptr_t)map_delta, guest_tp, guest_x18);
+    if (fabsf(group_delta[0]) > 0.1f || fabsf(group_delta[1]) > 0.1f)
+        d3_call_guest_two(translate, group.object, (uint64_t)(uintptr_t)group_delta, guest_tp, guest_x18);
+    if (!logged) {
+        info("HUD layout: map delta %.1f,%.1f; bottom group delta %.1f,%.1f",
+             (double)map_delta[0], (double)map_delta[1], (double)group_delta[0], (double)group_delta[1]);
+        logged = 1;
+    }
+done:
+    __atomic_store_n(&running, 0, __ATOMIC_RELEASE);
+}
+
 static void install_guest_hooks(uint64_t base, uint64_t image_size) {
+    {
+        /* Replace four instructions in the only epilogue; the bridge replays
+           them before resuming. Reject another game image before any write. */
+        const uint64_t offset = 0x10f846c;
+        const uint32_t expected[4] = {0x910a83ffu, 0x6d4123e9u, 0xa9477bfdu, 0xa9464ff4u};
+        const uint32_t translate_expected[4] = {0xbd400020u, 0xd00057e8u, 0xbd4bc901u, 0x1e20c002u};
+        if (offset + 16 > image_size || 0x13b2fc0u + 16 > image_size ||
+            memcmp((void *)(uintptr_t)(base + offset), expected, sizeof expected) ||
+            memcmp((void *)(uintptr_t)(base + 0x13b2fc0u), translate_expected, sizeof translate_expected))
+            fail("HUD layout: unsupported guest update image");
+        uint32_t *site = (uint32_t *)(uintptr_t)(base + offset);
+        const uint64_t bridge = (uint64_t)(uintptr_t)d3_hud_frame_bridge;
+        g_hud_frame_resume = base + offset + 16;
+        site[0] = 0x58000050u; site[1] = 0xd61f0200u;
+        memcpy(site + 2, &bridge, sizeof bridge);
+        __builtin___clear_cache((char *)site, (char *)site + 16);
+    }
     if (g_display_width != 1600) {
         const uint64_t offset = 0x10e7858;
         const uint64_t letterbox_offset = 0x1eb0b10;

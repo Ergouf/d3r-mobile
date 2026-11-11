@@ -6,6 +6,7 @@
 
 - Android SDK Platform 36、Build-Tools 36.0.0、NDK `28.2.13676358`、OpenJDK 17、Python 3.12、PowerShell 7、Git、CMake/Ninja。
 - 当前机器 SDK 为 `D:\workspace\Gdict\android_sdk`。脚本仍有本机默认路径，迁移时使用 `--sdk`、`--ndk` 参数或调整脚本路径。
+- `android/gpu/build_gpu.ps1` 和 `android/gpu/probe/coverage.ps1` 当前将项目根固定为 `D:\workspace\Diablo`；本机这是指向实际仓库的 junction。迁移时须先检查该路径的目标或调整脚本，不能仅从新目录启动就假定 GPU 代码会读取新目录。
 - 保留原始 `libd3guest.so`、与目标安装身份匹配的 keystore、游戏资源和存档。这些输入放在本地专用目录，不能依赖临时构建目录，也不纳入 Git。
 - 已验证 guest SHA-256：`dd050ef63cbaeaaeae9f7c842b26456a05d7482aaf9b91103a9bf0e0188625a2`。
 
@@ -46,23 +47,27 @@ python -I android/tools/build_android_profile.py --profile validation --guest lo
 
 它构建 adrenotools、GPU、host 和 APK，不安装。产物统一放在 `out/android/`：profile 包放在 `{profile}/host` 与 `{profile}/apk`，独立 host 放 `host/`，GPU 放 `gpu/`，驱动工具放 `adrenotools/`，诊断输出放 `probes/`。这些目录均为可重建产物。
 
+当前工作树的 `GraphicsDefaults.java`、`PresentationPolicy.java`、`app/res/`、场景相关 host 源码、Eden 场景/同步补丁和部分回归测试尚未被主仓库 Git 跟踪；保留或迁移当前源码时应连同已修改文件检查 `git status --short`。仅检出已有提交不能保证重建当前候选。
+
 可选 `--profile genshin`、`genshin-bilibili` 分别使用 `com.miHoYo.Yuanshen`、`com.miHoYo.ys.bilibili`。身份选项不等于 OEM 插帧已经工作。不要覆盖设备上的真实原神或使用不匹配签名更新既有包。
 
 APK 现使用本机既有暗黑 3 启动图标（`D:\Games\DiabloIII\diablo3.ico`），五档 launcher PNG 位于 `android/app/res/mipmap-*/`，来源说明为 `android/app/ICON-SOURCE.txt`；未生成或重新设计图案。打包器先用 aapt2 编译资源，再链接 Manifest。
 
 ### 场景分层与画质实验
 
-画面设置现将场景线性放大与实验 FSR 分开标示。场景偏好值 `625/75/875` 分别对应 0.625×、0.75×、0.875×，逻辑 `1600×720` 场景的物理尺寸分别为 `1000×450`、`1200×540`、`1400×630`；UI/文字保持 `2000×900`。`10` 为原生 1×，旧全局低分辨率值 `7` 仍迁移到 1×。这些选项不代表已找到推荐配置。默认使用传输线性放大；私有 `profile-scene-fsr` marker 保留 EASU + RCAS 实验入口。用户已确认修正版仍是“UI 正常，场景全黑”，FSR 世界画面验收失败；原生 1× 城镇的场景与文字已获用户确认正常。
+画面设置现将场景线性放大与实验 FSR 分开标示。场景偏好值 `625/75/80/875` 分别对应 0.625×、0.75×、0.8×、0.875×，UI/文字保持 `2000×900`。`10` 为原生 1×；新候选首次启动将旧偏好统一迁移到 1×，之后保留用户手动选择。这些缩放选项不代表已找到推荐配置。选用场景缩放时默认使用传输线性放大；私有 `profile-scene-fsr` marker 保留 EASU + RCAS 实验入口。用户已确认修正版仍是“UI 正常，场景全黑”，FSR 世界画面验收失败；原生 1× 城镇的场景与文字已获用户确认正常。
 
 诊断时在目标包私有 `files/runtime/` 创建 `profile-scene` 后冷启动，生成 `scene-draws.jsonl`，包括 shader 指纹、真实 framebuffer 范围、纹理/深度缩放状态、常量缓冲 crop 和成功执行的 FSR 记录。移除 marker 并重启即可关闭。记录是诊断数据，不能用于性能对比。原尺寸基线与测试模式均需分别在城镇和物品栏采集；编译成功不能替代 UI、深度/模板、方向、裁剪、性能或功耗验收。
 
 2026-11-10 复核发现两个 Vulkan 用法错误并已修正：FSR 的 EASU/RCAS 中间图用于 blit 源时缺少 `TRANSFER_SRC` usage（VUID `vkCmdBlitImage-srcImage-00219`、`VkImageMemoryBarrier-oldLayout-01212`）；线性分支把逻辑 `1600×720` 当作物理 `1200×540` 源图范围，且未应用 crop。现在中间图显式声明传输源用途，线性 blit 按物理像素与 crop 取图。`scene-draws-ingame.jsonl` 已有 `09346d588c3f3203` compositor、`uv` 和 `source_size`；draw 日志会去重，不能根据后续行缺少这些字段推断未识别 compositor。另已移除场景补丁中重复的 syncpoint 改动，干净基线按构建顺序重放及逐文件比对通过。
 
-当前设备安装的 validation 候选 APK SHA-256 为 `7439ED1A6323A666B9AB4DE86B393B8E963FFB7C9F6C3DF677C86A0DBE7AA500`，运行库为 `F7DC1B49A019393A6324301BD755FCE74796D33F011B46C72F244AD279469D1F`。已恢复既有自定义 Mali 驱动，并按用户要求从 Windows 当前安装导入 70 级英雄存档（4 文件逐项 SHA-256 一致）；稳定快照与清单在 `local/android/imports/windows-20261110-153338/`。validation 进程未映射 GameLib/VSR；早前 `4C1FA41A…` 的 `60.13/60.15` 短窗没有证明世界画面恢复或长时锁帧。两个安装候选的回退包分别保存在 `out/android/fsr-contract/rollback-7439ed1a.apk` 与 `rollback-4c1fa41a.apk`，覆盖安装须保留原签名和应用数据。
+2026-11-10 的 validation 候选 APK SHA-256 为 `7439ED1A6323A666B9AB4DE86B393B8E963FFB7C9F6C3DF677C86A0DBE7AA500`，运行库为 `F7DC1B49A019393A6324301BD755FCE74796D33F011B46C72F244AD279469D1F`。当时使用自定义 Mali 驱动，并按用户要求从 Windows 当前安装导入 70 级英雄存档；稳定快照与清单在 `local/android/imports/windows-20261110-153338/`。2026-11-11 在设备旧包已不存在后重装相同 APK、恢复并核对四个存档文件，当前短时启动使用系统 Vulkan，未恢复旧自定义驱动配置。早前 `4C1FA41A…` 的 `60.13/60.15` 短窗没有证明世界画面恢复或长时锁帧。回退包分别保存在 `out/android/fsr-contract/rollback-7439ed1a.apk` 与 `rollback-4c1fa41a.apk`，覆盖安装须保留原签名和应用数据。
 
 `7439ED1A…` 增加了可在线切换的 `profile-scene-fsr-fp32` 和 `profile-scene-fsr-easu` 标记；与 `profile-scene-fsr` 配合，在 GPU 线程每 32 次接受的合成中检查一次。`profile-scene-passthrough` 优先回到线性传输。另在 `profile-scene` 下启用 `profile-scene-pixels`，可将输入、EASU、RCAS、合成目标的 16×9 点像素统计写入 `scene-pixels.jsonl`（前 8 次，随后每 600 次）。像素采集强制 GPU 完成并回读，只用于定位全黑阶段，不参与功耗/帧率比较。这些诊断已构建，尚未在世界场景执行 FP32/像素对照。
 
-宿主现实现 30/36/40/45/60 FPS 软件上限，无追赶式突发；对应屏幕刷新请求为 60/72/120/90/60 Hz。帧率上限与刷新请求分别控制提交节奏和显示模式，设置变化须冷启动。私有 `profile-frame-cap` 可临时覆盖上限，不能把屏幕模式请求或短窗均值当作稳定上屏帧率。
+宿主现实现 30/36/40/45/60 FPS 软件上限，无追赶式突发。新版本首次启动迁移为 45 FPS 上限及系统控制的刷新率，并移除旧的私有 `profile-frame-cap` 诊断覆盖。默认不设置窗口刷新率/模式，也不调用 Surface 帧率提示；仅在用户显式选择刷新率时请求对应模式。后续可在设置中修改，帧率上限的修改不再自动改变刷新率；重新创建该文件仍可用于诊断覆盖。设置变化须冷启动。不能把离线期限测试或短窗均值当作稳定上屏帧率。
+
+2026-11-11 的已安装包为 `out/android/45fps-vsr/apk/d3host-recovery-debug.apk`（SHA-256 `B397B77317D473191A617167948BC418D36E50F2A53BE2D54C7ADBC615C8812E`），身份 `com.miHoYo.Yuanshen`。为避免引入额外原生变更，该包显式复用手机安装前 `7A2A6999…` 包所含宿主库 `ABB41E19…`；guest、驱动 hook、资源和 Manifest 也与该包一致，ZIP 条目仅 Java 字节码和签名文件有变化，手柄相关字节码核对一致。完整源码另已构建成功，但生成的原生库不是此安装包所使用的版本。签名证书与旧包一致，ZIP 完整性和 16KB 对齐检查通过；设备 APK 与宿主库哈希一致。用户操作后的采样未达到持续稳定 45 FPS，也未证明 VSR 的最终生成输出，窗口与边界见 [状态](STATUS.md)。
 
 历史 genshin APK 位于 `out/android/genshin/apk/d3host-recovery-debug.apk`，当时设备拉取副本 SHA-256 为 `53D8E825D6E3E48EE31F210A01D68A7CBE409338699718281EC6D0E9E64DE99C`。先前 validation 存档、配置和驱动备份在 `local/android/backups/validation-20261110-105524/data.tar`。用户随后卸载过 validation，本轮已重装和导入存档；历史安装状态不作为当前安装身份。
 
@@ -82,6 +87,10 @@ python -I android/tools/build_apk.py --host out/android/host/libd3host.so --gues
 APK 不包含主游戏或约 5.2GiB 中文 DLC。主资源默认位于设备 `/data/local/tmp/d3romfs`；资源检查工具见 [resource_recovery](../../android/tools/resource_recovery/README.md)。
 
 中文 title ID 为 `01001b300b9bf00b`，DLC index 为 `11`。完整部署位置为 `/data/local/tmp/d3romfs/AddOnContent/11/`，14 个 `ztCN_*.cpk` 总计 5,609,750,528 bytes。逐文件校验后写 `.d3-content-complete`，内容为 title ID 加换行；不完整安装不得写完成标记。主资源须使用匹配更新版本的 CoreCommon/ServerCommon。
+
+另有 DLC index `100`、`101`、`102`，对应 title ID `01001b300b9bf064`、`01001b300b9bf065`、`01001b300b9bf066`。2026-11-11 从保留 XCI 提取的 NCA 和文件存于 `local/assets/android/s2arm-dlc/`；设备对应目录各含一个 `.data` 文件和校验后写入的完成标记。三份文件的大小与 SHA-256 均匹配 `out/android/s2arm/artifact.json`；validation 应用身份下的生产内容枚举探针可找到 `11, 100, 101, 102` 并打开新增文件，真实游戏启动日志也显示全部四项被枚举和挂载。游戏内奖励效果尚未验证。
+
+留存 S2Arm 包的 789 项资源已按 `out/android/s2arm/artifact.json` 恢复到 `local/assets/android/s2arm-restoration/resources/`，逐项校验 SHA-256；直接图形描述符的工具校验通过（无离线 program 文件）。其导入回执与 APK 哈希、内容根和 artifact 哈希匹配，安装流程日志保存在 `out/android/s2arm/m0-native-tests/s2arm-import.log`。设备原有大资源按哈希校验后在本机复制进暂存目录，其余文件由 ADB 推送；经应用安装事务完整验证后，暂存副本已删除。该资源绑定证明不等于可复现构建或正确出图。
 
 应用存档位于相应包的 `files/runtime/saves/`。备份整个存档目录；复用原签名执行更新，保留应用数据。不同 profile 的私有路径和存档互相独立。
 
@@ -129,4 +138,4 @@ python android/tools/summarize_android_runtime.py --logcat out/android/performan
 
 `gpu-write-watch` 是未完成实机验收的实验开关，不能作为默认优化。安装前确认设备序列号、包名和签名，避免卸载、清数据或混用 profile 存档。
 
-离线缓存候选将 `CpuWriteTracker` 的每页 4120 字节混排项改为 24 字节元数据与连续快照两组数组。干净 watch 遍历不再逐页跨越快照；精确 `memcmp/memcpy`、连续快照、256 轮全量审计和交换删除语义保留。仅在最近比较页数、新缓存页或审计需要时唤醒两个工作线程。GPU 库 355/355、宿主链接及 ARM64 tracker/布防测试程序编译通过，新增非尾页删除后的地址/快照一致性回归；**未安装、未在手机执行这些新测试，也未证明帧率或节电改善**。候选 APK 为 `out/android/fsr-contract/cache-layout/apk/d3host-recovery-debug.apk`，SHA-256 `ABE30F018960FB1C87F04162067D2465943B4D63967B79D9D5A3BA1C1FCE1DF9`；签名与 `7439ED1A…` 一致，ZIP 项目完整，含四个 driver hook，payload 只有 `libd3host.so` 改变。构建和测试程序在 `out/android/fsr-contract/cache-layout/`，旧头文件与 `7439ED1A…` 回退包均已保留。
+离线缓存候选将 `CpuWriteTracker` 的每页 4120 字节混排项改为 24 字节元数据与连续快照两组数组。干净 watch 遍历不再逐页跨越快照；精确 `memcmp/memcpy`、连续快照、256 轮全量审计和交换删除语义保留。仅在最近比较页数、新缓存页或审计需要时唤醒两个工作线程。GPU 库 355/355、宿主链接及 ARM64 tracker/布防测试程序编译通过；2026-11-11 用当前源码重新编译后在手机串行执行 tracker、布防、内存区域、stack、HID 和 guest TLS 测试，均退出 0，证据在 `out/android/s2arm/m0-native-tests/device-results.json`。**候选 APK 尚未安装，也未证明帧率或节电改善**。候选 APK 为 `out/android/fsr-contract/cache-layout/apk/d3host-recovery-debug.apk`，SHA-256 `ABE30F018960FB1C87F04162067D2465943B4D63967B79D9D5A3BA1C1FCE1DF9`；签名与 `7439ED1A…` 一致，ZIP 项目完整，含四个 driver hook，payload 只有 `libd3host.so` 改变。旧头文件与 `7439ED1A…` 回退包均已保留。

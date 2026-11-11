@@ -86,7 +86,7 @@ public class MainActivity extends Activity {
     private static int activeGuestWidth = 1600;
     private static int activeRenderScale = 10;
     private static int activeFrameCap = 60;
-    private static int activeRefreshRate = 60;
+    private static int activeRefreshRate = PresentationPolicy.AUTO_REFRESH_RATE;
 
     private native void nativeStart(String path);
     private native void nativePresent(android.view.Surface surface);
@@ -125,19 +125,23 @@ public class MainActivity extends Activity {
             Log.i(TAG, "reattaching to the running guest; pending graphics settings require process restart");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setDecorFitsSystemWindows(false);
-        WindowManager.LayoutParams windowAttributes = getWindow().getAttributes();
-        android.view.Display display = getWindowManager().getDefaultDisplay();
-        android.view.Display.Mode currentMode = display.getMode();
-        for (android.view.Display.Mode mode : display.getSupportedModes()) {
-            if (Math.abs(mode.getRefreshRate() - activeRefreshRate) < 1f
-                    && mode.getPhysicalWidth() == currentMode.getPhysicalWidth()
-                    && mode.getPhysicalHeight() == currentMode.getPhysicalHeight()) {
-                windowAttributes.preferredDisplayModeId = mode.getModeId();
-                break;
+        if (activeRefreshRate != PresentationPolicy.AUTO_REFRESH_RATE) {
+            WindowManager.LayoutParams windowAttributes = getWindow().getAttributes();
+            android.view.Display display = getWindowManager().getDefaultDisplay();
+            android.view.Display.Mode currentMode = display.getMode();
+            for (android.view.Display.Mode mode : display.getSupportedModes()) {
+                if (Math.abs(mode.getRefreshRate() - activeRefreshRate) < 1f
+                        && mode.getPhysicalWidth() == currentMode.getPhysicalWidth()
+                        && mode.getPhysicalHeight() == currentMode.getPhysicalHeight()) {
+                    windowAttributes.preferredDisplayModeId = mode.getModeId();
+                    break;
+                }
             }
+            windowAttributes.preferredRefreshRate = activeRefreshRate;
+            getWindow().setAttributes(windowAttributes);
+        } else {
+            Log.i(TAG, "display refresh: system controlled; surface frame-rate hint disabled");
         }
-        windowAttributes.preferredRefreshRate = activeRefreshRate;
-        getWindow().setAttributes(windowAttributes);
         getWindow().getAttributes().layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
@@ -199,8 +203,10 @@ public class MainActivity extends Activity {
                 Log.i(TAG, "surfaceCreated; handing the window to the GPU bridge");
                 activeSurface = holder.getSurface();
                 nativePresent(holder.getSurface());
-                holder.getSurface().setFrameRate(activeFrameCap, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
-                        android.view.Surface.CHANGE_FRAME_RATE_ALWAYS);
+                if (activeRefreshRate != PresentationPolicy.AUTO_REFRESH_RATE) {
+                    holder.getSurface().setFrameRate(activeFrameCap, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                            android.view.Surface.CHANGE_FRAME_RATE_ALWAYS);
+                }
             }
 
             @Override
@@ -217,19 +223,7 @@ public class MainActivity extends Activity {
         root.addView(preview, new FrameLayout.LayoutParams(-1, -1));
         controls = new GameControlsView(this);
         root.addView(controls, new FrameLayout.LayoutParams(-1, -1));
-        Button settings = new Button(this);
-        settings.setText("画面"); settings.setAlpha(0.65f);
-        settings.setTextSize(12);
-        settings.setPadding(0, 0, 0, 0);
-        settings.setMinWidth(0); settings.setMinimumWidth(0);
-        settings.setMinHeight(0); settings.setMinimumHeight(0);
-        settings.setOnClickListener(v -> { controls.releaseAll(); graphics.show(); });
-        root.addView(settings);
-        overlay = new OverlaySettings(this, controls, settings);
-        root.setOnApplyWindowInsetsListener((view, insets) -> {
-            overlay.setInsets(insets);
-            return insets;
-        });
+        overlay = new OverlaySettings(this, controls);
         root.addView(statusView, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
         startButton = new Button(this);
         startButton.setText("启动游戏");

@@ -2,12 +2,6 @@ package com.d3mobile.host;
 
 import android.app.AlertDialog;
 import android.content.SharedPreferences;
-import android.graphics.Insets;
-import android.view.Gravity;
-import android.view.View;
-import android.view.WindowInsets;
-import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -18,21 +12,12 @@ import android.widget.Toast;
 final class OverlaySettings {
     private final MainActivity activity;
     private final GameControlsView controls;
-    private final Button settingsButton;
     private final SharedPreferences prefs;
-    private Insets safe = Insets.NONE;
 
-    OverlaySettings(MainActivity activity, GameControlsView controls, Button settingsButton) {
+    OverlaySettings(MainActivity activity, GameControlsView controls) {
         this.activity = activity;
         this.controls = controls;
-        this.settingsButton = settingsButton;
         prefs = activity.getSharedPreferences("overlay", 0);
-        controls.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> placeButton());
-        apply();
-    }
-
-    void setInsets(WindowInsets insets) {
-        safe = insets.getInsets(WindowInsets.Type.displayCutout());
         apply();
     }
 
@@ -44,23 +29,6 @@ final class OverlaySettings {
         controls.configureOverlay(prefs.getBoolean("controlsVisible", true),
             prefs.getInt("leftHorizontal", 0), prefs.getInt("leftVertical", 0),
             prefs.getBoolean("floatingMovement", true), prefs.getInt("movementWidth", 42), prefs.getInt("movementHeight", 60));
-        placeButton();
-        settingsButton.setVisibility(prefs.getBoolean("buttonVisible", true) ? View.VISIBLE : View.INVISIBLE);
-    }
-
-    private void placeButton() {
-        int position = prefs.getInt("buttonPosition", 1);
-        int gravity = position == 0 ? Gravity.LEFT : position == 2 ? Gravity.RIGHT : Gravity.CENTER_HORIZONTAL;
-        FrameLayout.LayoutParams layout = new FrameLayout.LayoutParams(pixels(52), pixels(32), Gravity.TOP | gravity);
-        layout.leftMargin = safe.left + pixels(8);
-        layout.rightMargin = safe.right + pixels(8);
-        layout.topMargin = safe.top + pixels(8);
-        if (position == 2 && prefs.getBoolean("controlsVisible", true))
-            layout.topMargin = Math.max(layout.topMargin, controls.menuBottom() + pixels(8));
-        FrameLayout.LayoutParams current = (FrameLayout.LayoutParams)settingsButton.getLayoutParams();
-        if (current.width != layout.width || current.height != layout.height || current.gravity != layout.gravity
-                || current.leftMargin != layout.leftMargin || current.rightMargin != layout.rightMargin
-                || current.topMargin != layout.topMargin) settingsButton.setLayoutParams(layout);
     }
 
     void show() {
@@ -69,7 +37,6 @@ final class OverlaySettings {
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(pixels(20), pixels(8), pixels(20), pixels(8));
         addToggle(content, "显示虚拟手柄", "controlsVisible");
-        addToggle(content, "显示画面按钮", "buttonVisible");
         addToggle(content, "浮动移动摇杆", "floatingMovement");
         TextView hint = new TextView(activity);
         hint.setText("隐藏后按系统返回键恢复。左侧安全区内落指生成摇杆，满速只需短行程；继续拖动时基座有限跟随，松手归零；按键区域优先。");
@@ -79,16 +46,6 @@ final class OverlaySettings {
         addSlider(content, "左侧移动区高度（屏幕百分比）", "movementHeight", 40, 80, 60);
         addSlider(content, "左侧横向（负值靠左）", "leftHorizontal", -80, 100);
         addSlider(content, "左侧纵向（负值向上）", "leftVertical", -120, 40);
-        Button position = new Button(activity);
-        position.setText("画面按钮位置：" + new String[]{"左上", "上中", "右上"}[prefs.getInt("buttonPosition", 1)]);
-        position.setOnClickListener(view -> new AlertDialog.Builder(activity).setTitle("画面按钮位置")
-            .setSingleChoiceItems(new String[]{"左上", "上中", "右上"}, prefs.getInt("buttonPosition", 1), (dialog, selected) -> {
-                prefs.edit().putInt("buttonPosition", selected).apply();
-                apply();
-                position.setText("画面按钮位置：" + new String[]{"左上", "上中", "右上"}[selected]);
-                dialog.dismiss();
-            }).show());
-        content.addView(position);
         ScrollView scroll = new ScrollView(activity);
         scroll.addView(content);
         new AlertDialog.Builder(activity).setTitle("虚拟手柄与界面").setView(scroll)

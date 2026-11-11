@@ -3,6 +3,8 @@
 /local/
 /out/
 /dist/
+# Runtime-generated shader cache from launches in the repository root.
+/shader_cache/
 
 # Local metering/game assets, docs and tooling cached locally.
 .DS_Store
@@ -82,3 +84,7 @@ android/gpu/probe/.spv_tmp/
 
 # Serena local project state.
 /.serena/
+
+# Nested Serena state and machine-specific clangd config (absolute local paths).
+**/.serena/
+android/gpu/.clangd

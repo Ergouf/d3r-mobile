@@ -269,7 +269,7 @@ def main():
         metadata = {
             "package": args.package,
             "driver_hooks": [{"name": os.path.basename(p), "sha256": sha256_file(p)} for p in driver_hooks],
-            "label": "Diablo III",
+            "label": "Diablo3",
             "launcher_icon": "mipmap/ic_launcher (existing Diablo III icon)",
             "main_class": MAIN_CLASS,
             "abi": ABI,

@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-EDEN = ROOT / 'reference' / 'eden'
+EDEN = ROOT / 'android' / 'third_party' / 'eden'
 SHADER_SRC = EDEN / 'src' / 'video_core' / 'host_shaders'
 FFX = EDEN / 'externals' / 'FidelityFX-FSR' / 'ffx-fsr'
 OUT = ROOT / 'out' / 'android' / 'generated' / 'include' / 'video_core' / 'host_shaders'

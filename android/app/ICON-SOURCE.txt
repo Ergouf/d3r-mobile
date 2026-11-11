@@ -1,0 +1,3 @@
+Existing Diablo III Windows launcher icon, from D:/Games/DiabloIII/diablo3.ico.
+Original input preserved at local/android/icon/diablo3.ico.
+Only raster size conversion; no generated artwork.

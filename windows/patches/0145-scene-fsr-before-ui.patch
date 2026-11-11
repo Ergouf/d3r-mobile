@@ -1,0 +1,1412 @@
+diff --git a/src/nx/CMakeLists.txt b/src/nx/CMakeLists.txt
+index 23cf569..a4413c6 100644
+--- a/src/nx/CMakeLists.txt
++++ b/src/nx/CMakeLists.txt
+@@ -223,6 +223,10 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
+     endif()
+     target_link_libraries(snx-test-vulkan PRIVATE SDL3::SDL3)
+     add_test(NAME vulkan_headless COMMAND snx-test-vulkan -H)
++    add_test(NAME vulkan_scene_scale COMMAND "${CMAKE_COMMAND}" -E env SNX_SCENE_SCALE=0.75 SNX_SCENE_WIDTH=1280
++        "$<TARGET_FILE:snx-test-vulkan>" -H)
++    set_tests_properties(vulkan_scene_scale PROPERTIES TIMEOUT 60
++        FAIL_REGULAR_EXPRESSION "vulkan validation:;failed: VK_ERROR")
+     set_tests_properties(vulkan_headless PROPERTIES TIMEOUT 60
+         FAIL_REGULAR_EXPRESSION "vulkan validation:;failed: VK_ERROR")
+     # the ASTC upload against the CPU decoder, with the backend's own frames, staging and allocations and the SPIR-V
+diff --git a/src/nx/gpu/vk/depth_scale_spv.h b/src/nx/gpu/vk/depth_scale_spv.h
+new file mode 100644
+index 0000000..d2bf4b8
+--- /dev/null
++++ b/src/nx/gpu/vk/depth_scale_spv.h
+@@ -0,0 +1,34 @@
++/* Generated from shaders/depth_scale.frag with glslangValidator -V --target-env vulkan1.3. */
++#pragma once
++static const u32 depth_scale_spv[] = {
++    0x07230203u, 0x00010600u, 0x0008000bu, 0x00000022u, 0x00000000u, 0x00020011u, 0x00000001u, 0x0006000bu,
++    0x00000001u, 0x4c534c47u, 0x6474732eu, 0x3035342eu, 0x00000000u, 0x0003000eu, 0x00000000u, 0x00000001u,
++    0x0009000fu, 0x00000004u, 0x00000004u, 0x6e69616du, 0x00000000u, 0x00000008u, 0x0000000cu, 0x00000010u,
++    0x00000016u, 0x00030010u, 0x00000004u, 0x00000007u, 0x00030010u, 0x00000004u, 0x0000000cu, 0x00030003u,
++    0x00000002u, 0x000001c2u, 0x00040005u, 0x00000004u, 0x6e69616du, 0x00000000u, 0x00060005u, 0x00000008u,
++    0x465f6c67u, 0x44676172u, 0x68747065u, 0x00000000u, 0x00050005u, 0x0000000cu, 0x72756f73u, 0x65446563u,
++    0x00687470u, 0x00060005u, 0x00000010u, 0x465f6c67u, 0x43676172u, 0x64726f6fu, 0x00000000u, 0x00040005u,
++    0x00000014u, 0x657a6953u, 0x00000000u, 0x00060006u, 0x00000014u, 0x00000000u, 0x7074756fu, 0x69537475u,
++    0x0000657au, 0x00030005u, 0x00000016u, 0x00006370u, 0x00040047u, 0x00000008u, 0x0000000bu, 0x00000016u,
++    0x00040047u, 0x0000000cu, 0x00000021u, 0x00000000u, 0x00040047u, 0x0000000cu, 0x00000022u, 0x00000000u,
++    0x00040047u, 0x00000010u, 0x0000000bu, 0x0000000fu, 0x00030047u, 0x00000014u, 0x00000002u, 0x00050048u,
++    0x00000014u, 0x00000000u, 0x00000023u, 0x00000000u, 0x00020013u, 0x00000002u, 0x00030021u, 0x00000003u,
++    0x00000002u, 0x00030016u, 0x00000006u, 0x00000020u, 0x00040020u, 0x00000007u, 0x00000003u, 0x00000006u,
++    0x0004003bu, 0x00000007u, 0x00000008u, 0x00000003u, 0x00090019u, 0x00000009u, 0x00000006u, 0x00000001u,
++    0x00000000u, 0x00000000u, 0x00000000u, 0x00000001u, 0x00000000u, 0x0003001bu, 0x0000000au, 0x00000009u,
++    0x00040020u, 0x0000000bu, 0x00000000u, 0x0000000au, 0x0004003bu, 0x0000000bu, 0x0000000cu, 0x00000000u,
++    0x00040017u, 0x0000000eu, 0x00000006u, 0x00000004u, 0x00040020u, 0x0000000fu, 0x00000001u, 0x0000000eu,
++    0x0004003bu, 0x0000000fu, 0x00000010u, 0x00000001u, 0x00040017u, 0x00000011u, 0x00000006u, 0x00000002u,
++    0x0003001eu, 0x00000014u, 0x0000000eu, 0x00040020u, 0x00000015u, 0x00000009u, 0x00000014u, 0x0004003bu,
++    0x00000015u, 0x00000016u, 0x00000009u, 0x00040015u, 0x00000017u, 0x00000020u, 0x00000001u, 0x0004002bu,
++    0x00000017u, 0x00000018u, 0x00000000u, 0x00040020u, 0x00000019u, 0x00000009u, 0x0000000eu, 0x00040015u,
++    0x0000001fu, 0x00000020u, 0x00000000u, 0x0004002bu, 0x0000001fu, 0x00000020u, 0x00000000u, 0x00050036u,
++    0x00000002u, 0x00000004u, 0x00000000u, 0x00000003u, 0x000200f8u, 0x00000005u, 0x0004003du, 0x0000000au,
++    0x0000000du, 0x0000000cu, 0x0004003du, 0x0000000eu, 0x00000012u, 0x00000010u, 0x0007004fu, 0x00000011u,
++    0x00000013u, 0x00000012u, 0x00000012u, 0x00000000u, 0x00000001u, 0x00050041u, 0x00000019u, 0x0000001au,
++    0x00000016u, 0x00000018u, 0x0004003du, 0x0000000eu, 0x0000001bu, 0x0000001au, 0x0007004fu, 0x00000011u,
++    0x0000001cu, 0x0000001bu, 0x0000001bu, 0x00000000u, 0x00000001u, 0x00050088u, 0x00000011u, 0x0000001du,
++    0x00000013u, 0x0000001cu, 0x00050057u, 0x0000000eu, 0x0000001eu, 0x0000000du, 0x0000001du, 0x00050051u,
++    0x00000006u, 0x00000021u, 0x0000001eu, 0x00000000u, 0x0003003eu, 0x00000008u, 0x00000021u, 0x000100fdu,
++    0x00010038u,
++};
+diff --git a/src/nx/gpu/vk/fsr.c b/src/nx/gpu/vk/fsr.c
+index b418c94..3cc644c 100644
+--- a/src/nx/gpu/vk/fsr.c
++++ b/src/nx/gpu/vk/fsr.c
+@@ -7,9 +7,11 @@
+    draws. Under vk_lock, from renderer.c's show(): the swapchain image is in TRANSFER_DST_OPTIMAL, the frame in
+    SHADER_READ_ONLY_OPTIMAL. */
+ #include <math.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "nx/gpu/vk/vk.h"
+ #include "nx/gpu/vk/fsr_spv.h"
++#include "nx/gpu/vk/depth_scale_spv.h"
+ #include "nx/runtime/platform/log.h"
+ 
+ /* the EASU shader's push constants, in its order: vec4s of floats */
+@@ -37,11 +39,23 @@ static VkDescriptorSetLayout g_easu_dsl, g_rcas_dsl;
+ static VkPipelineLayout g_easu_layout, g_rcas_layout;
+ static VkPipeline g_easu_pipe, g_rcas_pipe;
+ static VkFormat g_pipe_format;
++/* A scene target and a swapchain may use different formats in the same submit.
++   Keep both pipelines alive; changing format must never destroy an in-flight pipeline. */
++typedef struct FsrPipes {
++    VkFormat format;
++    VkPipeline easu, rcas;
++    struct FsrPipes* next;
++} FsrPipes;
++static FsrPipes* g_pipes;
++static VkPipeline g_depth_scale_pipe;
++static VkFormat g_depth_scale_format;
++static FsrPipes* g_depth_pipes;
+ static VkSampler g_samp;
+ static VkImage g_tmp;
+ static VmaAllocation g_tmp_mem;
+ static VkImageView g_tmp_view;
+ static VkImageLayout g_tmp_layout;
++static VkFormat g_tmp_format;
+ static u32 g_tmp_w, g_tmp_h;
+ 
+ static int layout_make(void) {
+@@ -90,10 +104,10 @@ static VkDescriptorSet set_new(VkDescriptorSetLayout layout, VkImageView view) {
+ }
+ 
+ /* The EASU output can change size when the frame's aspect changes, even within the same swapchain. */
+-static int tmp_make(u32 w, u32 h) {
++static int tmp_make(u32 w, u32 h, VkFormat format) {
+     VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                             .imageType = VK_IMAGE_TYPE_2D,
+-                            .format = g_vk.sc_format,
++                            .format = format,
+                             .extent = {w, h, 1},
+                             .mipLevels = 1,
+                             .arrayLayers = 1,
+@@ -104,14 +118,15 @@ static int tmp_make(u32 w, u32 h) {
+     VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+     VkImageViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                  .viewType = VK_IMAGE_VIEW_TYPE_2D,
+-                                 .format = g_vk.sc_format,
++                                 .format = format,
+                                  .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+-    if (g_tmp && g_tmp_w == w && g_tmp_h == h) return 1;
++    if (g_tmp && g_tmp_w == w && g_tmp_h == h && g_tmp_format == format) return 1;
+     if (g_tmp) {
+         vk_defer_image(g_tmp, g_tmp_mem, g_tmp_view, VK_NULL_HANDLE);
+         g_tmp = VK_NULL_HANDLE;
+         g_tmp_view = VK_NULL_HANDLE;
+         g_tmp_w = g_tmp_h = 0;
++        g_tmp_format = VK_FORMAT_UNDEFINED;
+     }
+     if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &g_tmp, &g_tmp_mem, NULL))) return 0;
+     vci.image = g_tmp;
+@@ -122,11 +137,102 @@ static int tmp_make(u32 w, u32 h) {
+     }
+     g_tmp_w = w;
+     g_tmp_h = h;
++    g_tmp_format = format;
+     g_tmp_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+     LOG("vulkan: FSR 1 EASU + RCAS, attenuation %.2f stops, output %ux%u\n", FSR_SHARPNESS, w, h);
+     return 1;
+ }
+ 
++/* Depth/stencil blit destinations are optional. A point-sampled depth-only
++   draw keeps UI depth testing correct on devices without D24S8 blit support. */
++int vk_depth_scale_draw(VkCommandBuffer cb, VkImageView source, Surf* target) {
++    if (!layout_make()) return 0;
++    if (g_depth_scale_format != target->f.vk) {
++        g_depth_scale_pipe = VK_NULL_HANDLE;
++        for (FsrPipes* p = g_depth_pipes; p; p = p->next)
++            if (p->format == target->f.vk) { g_depth_scale_pipe = p->easu; break; }
++        g_depth_scale_format = target->f.vk;
++    }
++    if (!g_depth_scale_pipe) {
++        VkShaderModule vs = vk_module_spv(fsr_vert_spv, fsr_vert_spv_size / 4);
++        VkShaderModule fs = vk_module_spv(depth_scale_spv, sizeof depth_scale_spv / sizeof *depth_scale_spv);
++        VkPipelineShaderStageCreateInfo stages[2] = {{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
++                                                      .stage = VK_SHADER_STAGE_VERTEX_BIT,
++                                                      .module = vs,
++                                                      .pName = "main"},
++                                                     {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
++                                                      .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
++                                                      .module = fs,
++                                                      .pName = "main"}};
++        VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
++        VkPipelineInputAssemblyStateCreateInfo ia = {.sType =
++                                                         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
++                                                     .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
++        VkPipelineViewportStateCreateInfo vp = {
++            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
++        VkPipelineRasterizationStateCreateInfo rs = {.sType =
++                                                         VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
++                                                     .polygonMode = VK_POLYGON_MODE_FILL,
++                                                     .lineWidth = 1};
++        VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
++                                                   .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
++        VkPipelineDepthStencilStateCreateInfo zs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
++                                                    .depthTestEnable = VK_TRUE,
++                                                    .depthWriteEnable = VK_TRUE,
++                                                    .depthCompareOp = VK_COMPARE_OP_ALWAYS};
++        VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
++        VkPipelineDynamicStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
++                                               .dynamicStateCount = 2,
++                                               .pDynamicStates = dyn};
++        VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
++                                            .depthAttachmentFormat = target->f.vk};
++        VkGraphicsPipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
++                                           .pNext = &ri,
++                                           .stageCount = 2,
++                                           .pStages = stages,
++                                           .pVertexInputState = &vi,
++                                           .pInputAssemblyState = &ia,
++                                           .pViewportState = &vp,
++                                           .pRasterizationState = &rs,
++                                           .pMultisampleState = &ms,
++                                           .pDepthStencilState = &zs,
++                                           .pDynamicState = &ds,
++                                           .layout = g_easu_layout};
++        int ok = vs && fs &&
++                 VK_OK(vkCreateGraphicsPipelines(g_vk.dev, vk_pipeline_cache(), 1, &ci, NULL, &g_depth_scale_pipe));
++        if (vs) vkDestroyShaderModule(g_vk.dev, vs, NULL);
++        if (fs) vkDestroyShaderModule(g_vk.dev, fs, NULL);
++        if (!ok) return 0;
++        FsrPipes* cached = calloc(1, sizeof *cached);
++        if (!cached) { vkDestroyPipeline(g_vk.dev,g_depth_scale_pipe,NULL); g_depth_scale_pipe=VK_NULL_HANDLE; return 0; }
++        cached->format=target->f.vk; cached->easu=g_depth_scale_pipe;
++        cached->next=g_depth_pipes; g_depth_pipes=cached;
++    }
++    VkDescriptorSet set = set_new(g_easu_dsl, source);
++    if (!set) return 0;
++    VkRenderingAttachmentInfo at = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
++                                    .imageView = target->att,
++                                    .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
++                                    .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
++                                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
++    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
++                          .renderArea = {{0, 0}, {target->sw, target->sh}},
++                          .layerCount = 1,
++                          .pDepthAttachment = &at};
++    VkViewport vp = {0, 0, (float)target->sw, (float)target->sh, 0, 1};
++    float size[4] = {(float)target->sw, (float)target->sh, 0, 0};
++    rec_CmdBeginRendering(cb, &ri);
++    vk_render_forget_state();
++    rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_depth_scale_pipe);
++    rec_CmdSetViewport(cb, 0, 1, &vp);
++    rec_CmdSetScissor(cb, 0, 1, &ri.renderArea);
++    rec_CmdPushConstants(cb, g_easu_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof size, size);
++    rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_easu_layout, 0, 1, &set, 0, NULL);
++    rec_CmdDraw(cb, 3, 1, 0, 0);
++    rec_CmdEndRendering(cb);
++    return 1;
++}
++
+ static int pipeline_make(VkFormat format) {
+     VkShaderModule vs, fs_easu, fs_rcas;
+     VkPipelineShaderStageCreateInfo st[2] = {{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+@@ -170,8 +276,15 @@ static int pipeline_make(VkFormat format) {
+                                         .layout = g_easu_layout};
+     int ok;
+     if (g_easu_pipe && g_rcas_pipe && g_pipe_format == format) return 1;
+-    if (g_easu_pipe) vkDestroyPipeline(g_vk.dev, g_easu_pipe, NULL); /* vk_finish ran when the swapchain changed */
+-    if (g_rcas_pipe) vkDestroyPipeline(g_vk.dev, g_rcas_pipe, NULL);
++    for (FsrPipes* p = g_pipes; p; p = p->next)
++        if (p->format == format) {
++            g_easu_pipe = p->easu;
++            g_rcas_pipe = p->rcas;
++            g_pipe_format = format;
++            return 1;
++        }
++    FsrPipes* entry = calloc(1, sizeof *entry);
++    if (!entry) return 0;
+     g_easu_pipe = g_rcas_pipe = VK_NULL_HANDLE;
+     vs = vk_module_spv(fsr_vert_spv, fsr_vert_spv_size / 4);
+     fs_easu = vk_module_spv(fsr_frag_spv, fsr_frag_spv_size / 4);
+@@ -193,6 +306,13 @@ static int pipeline_make(VkFormat format) {
+         if (g_easu_pipe) vkDestroyPipeline(g_vk.dev, g_easu_pipe, NULL);
+         if (g_rcas_pipe) vkDestroyPipeline(g_vk.dev, g_rcas_pipe, NULL);
+         g_easu_pipe = g_rcas_pipe = VK_NULL_HANDLE;
++        free(entry);
++    } else {
++        entry->format = format;
++        entry->easu = g_easu_pipe;
++        entry->rcas = g_rcas_pipe;
++        entry->next = g_pipes;
++        g_pipes = entry;
+     }
+     return ok;
+ }
+@@ -212,16 +332,15 @@ void vk_fsr_swapchain_gone(void) {
+    image's UV; iw, ih: that rectangle in texels; dst: the rectangle (x, y, width, height) in the swapchain image,
+    which is in TRANSFER_DST_OPTIMAL and is left in it. flip: the frame is stored bottom-up. 0: the pass did not run,
+    and the caller blits instead. */
+-int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih, VkImage sc,
+-                const i32 dst[4]) {
++static int fsr_draw_impl(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih,
++                         VkImage image, VkImageView image_view, VkFormat format, const i32 dst[4]) {
+     EasuPush ep;
+     RcasPush rp;
+     VkDescriptorSet set, tset;
+-    VkImageView scv = vk_sc_view(sc);
+     float iwr, ihr, owr, ohr, ix, iy;
+-    if (!view || !scv || !iw || !ih || dst[2] <= 0 || dst[3] <= 0) return 0;
+-    if (!layout_make() || !pipeline_make(g_vk.sc_format)) return 0;
+-    if (!tmp_make((u32)dst[2], (u32)dst[3])) return 0;
++    if (!view || !image_view || !iw || !ih || dst[2] <= 0 || dst[3] <= 0) return 0;
++    if (!layout_make() || !pipeline_make(format)) return 0;
++    if (!tmp_make((u32)dst[2], (u32)dst[3], format)) return 0;
+     set = set_new(g_easu_dsl, view);
+     tset = set_new(g_rcas_dsl, g_tmp_view);
+     if (!set || !tset) return 0;
+@@ -262,7 +381,10 @@ int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4
+     rp.dst[1] = (float)dst[1];
+     rp.dst[2] = rp.dst[3] = 0.0f;
+     /* EASU into the intermediate image: the frame's pixels to the window rectangle's */
+-    vk_barrier(cb, g_tmp, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_NONE, 0, g_tmp_layout,
++    vk_barrier(cb, g_tmp, VK_IMAGE_ASPECT_COLOR_BIT,
++               g_tmp_layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_2_NONE
++                                                         : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
++               g_tmp_layout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, g_tmp_layout,
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+     g_tmp_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+@@ -300,13 +422,13 @@ int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4
+         VkRenderingInfo ri;
+         VkRect2D area = {{dst[0], dst[1]}, {(u32)dst[2], (u32)dst[3]}};
+         VkViewport vp = {(float)dst[0], (float)dst[1], owr, ohr, 0, 1};
+-        vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
++        vk_barrier(cb, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+         at = (VkRenderingAttachmentInfo){.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+-                                         .imageView = scv,
++                                         .imageView = image_view,
+                                          .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+-                                         .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
++                                         .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                                          .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+         ri = (VkRenderingInfo){.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                                .renderArea = area,
+@@ -323,7 +445,7 @@ int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4
+         rec_CmdDraw(cb, 3, 1, 0, 0);
+         rec_CmdEndRendering(cb);
+     }
+-    vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
++    vk_barrier(cb, image, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+     /* back for the next frame's EASU */
+@@ -334,3 +456,13 @@ int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4
+     g_tmp_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+     return 1;
+ }
++
++int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih, VkImage sc,
++                const i32 dst[4]) {
++    return fsr_draw_impl(cb, view, flip, uv, iw, ih, sc, vk_sc_view(sc), g_vk.sc_format, dst);
++}
++
++int vk_fsr_draw_target(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih,
++                       VkImage image, VkImageView image_view, VkFormat format, const i32 dst[4]) {
++    return fsr_draw_impl(cb, view, flip, uv, iw, ih, image, image_view, format, dst);
++}
+diff --git a/src/nx/gpu/vk/query.c b/src/nx/gpu/vk/query.c
+index 20de20e..36e587a 100644
+--- a/src/nx/gpu/vk/query.c
++++ b/src/nx/gpu/vk/query.c
+@@ -41,6 +41,7 @@ static u64* g_qres;   /* segment s's count at s % QN, once its copy has run */
+ static int g_qfailed; /* the pool couldn't be made: reports keep the made-up value */
+ /* each slot's segment: its counter (1 + its index in g_qc, 0 none) and its guest sample count */
+ static u8 g_qown[QN], g_qmul[QN];
++static float g_qscale[QN];
+ static struct {
+     u64 next;   /* segments begun */
+     u64 copied; /* segments whose results have their copy recorded */
+@@ -132,7 +133,7 @@ void vk_query_draw(VkCommandBuffer cb, u32 chan, u32 msaa_mode) {
+     int own = c ? (int)(c - g_qc) + 1 : 0;
+     if (g_q.open) {
+         u32 at = (u32)((g_q.next - 1) % QN);
+-        if (g_qown[at] == own && g_qmul[at] == mul) return; /* the segment open now counts this draw too */
++        if (g_qown[at] == own && g_qmul[at] == mul && g_qscale[at] == vk_render_target_scale()) return;
+         vk_query_pass_end(cb);
+     }
+     if (!c || !c->started || c->disabled || c->bad) return;
+@@ -145,6 +146,7 @@ void vk_query_draw(VkCommandBuffer cb, u32 chan, u32 msaa_mode) {
+     u32 at = (u32)(g_q.next % QN);
+     g_qown[at] = (u8)own;
+     g_qmul[at] = (u8)mul;
++    g_qscale[at] = vk_render_target_scale();
+     rec_CmdBeginQuery(cb, g_qpool, at, g_vk.feat.occlusionQueryPrecise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
+     g_q.next++;
+     g_q.open = 1;
+@@ -221,10 +223,14 @@ u64 vk_query_value(u32 ci, u64 first, u64 end) {
+         c->sum = 0;
+     }
+     for (u64 s = c->sum_end; s < end; s++)
+-        if (g_qown[s % QN] == ci % QCH + 1) c->sum += g_qres[s % QN] * g_qmul[s % QN];
++        if (g_qown[s % QN] == ci % QCH + 1) {
++            u32 at = s % QN;
++            u64 samples = g_qres[at] * g_qmul[at];
++            double area = (double)g_qscale[at] * g_qscale[at];
++            u64 guest = area == 1.0 ? samples : (u64)((double)samples / area + 0.5);
++            c->sum += samples && !guest ? 1 : guest;
++        }
+     if (end > c->sum_end) c->sum_end = end;
+     if (c->whead != c->wtail) c->wtail++;
+-    double area = (double)g_vk_scale * (double)g_vk_scale;
+-    u64 v = area == 1.0 ? c->sum : (u64)((double)c->sum / area + 0.5);
+-    return c->sum && !v ? 1 : v;
++    return c->sum;
+ }
+diff --git a/src/nx/gpu/vk/render.c b/src/nx/gpu/vk/render.c
+index 5164e7b..06783c9 100644
+--- a/src/nx/gpu/vk/render.c
++++ b/src/nx/gpu/vk/render.c
+@@ -8,6 +8,7 @@
+    A draw reads the 3D engine's registers for its state. Signed viewport scales and coordinate swizzles map the
+    guest's position. Window-origin bit 4 controls triangle facing independently of that mapping. */
+ #include <stdio.h>
++#include <math.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include "nx/runtime/options.h"
+@@ -33,6 +34,11 @@ static struct {
+     u32 fb, fb_written, fb_read;
+ } g_rp;
+ u64 g_vk_fb_draws, g_vk_fb_barriers, g_vk_fb_restarts, g_vk_rt_copies;
++/* GPU work is serialized by vk_lock. This follows the current draw's attachments,
++   independently of the global resolution used by presentation and other targets. */
++static float g_draw_scale = 1.0f;
++float vk_render_target_scale(void) { return g_draw_scale; }
++static float draw_scf(float v) { return v * g_draw_scale; }
+ 
+ void vk_render_end(void) {
+     if (!g_rp.open) return;
+@@ -76,6 +82,10 @@ static void read_targets(GpuChannel* ch, Surf** rt, Surf** zt, u32* n) {
+             *zt = vk_zt_array(za, r[0x48A], r[0x48B], r[0x3FA], r[0x3FB], layers, (u64)r[0x3FC] * 4);
+         }
+     }
++    g_draw_scale = g_vk_base_scale;
++    for (u32 i = 0; i < *n; i++)
++        if (rt[i]) { g_draw_scale = rt[i]->scale; return; }
++    if (*zt) g_draw_scale = (*zt)->scale;
+ }
+ 
+ /* opens a rendering pass on these targets, or keeps the open one if it is the same set. zt_ro: the depth target is
+@@ -168,6 +178,7 @@ static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro, int srgb_write, u
+ }
+ static void target_written(Surf* s) {
+     s->wgen++;
++    if (s->ui_depth_owner) { s->ui_depth_owner->ui_depth_dirty = 1; return; }
+     vk_rt_drawn(s);
+ }
+ 
+@@ -338,6 +349,19 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
+     Surf* zt;
+     u32 n;
+     read_targets(ch, rt, &zt, &n);      /* may record uploads: before anything is opened */
++    if (!mask) n = 0;
++    if (!(v & 3)) zt = NULL;
++    if (mask && zt && n && rt[0] && rt[0]->scale != zt->scale) {
++        /* A combined clear does not require matching color/depth allocations. */
++        vk_render_clear(ch, v & ~3u);
++        vk_render_clear(ch, v & ~(15u << 2));
++        return;
++    }
++    if (!n && zt) g_draw_scale = zt->scale;
++    if (zt && (v & 1) && zt->ui_depth_dirty) {
++        if (!r3d_clear_scissored(r) && !layer && zt->layers == 1) zt->ui_depth_dirty = 0;
++        else if (!vk_depth_restore(zt)) return;
++    }
+     for (u32 i = 0; mask && i < n; i++) /* the slot the clear takes is resolved below: every bound one is listed */
+         if (trace_target(rt[i]))
+             LOG_LIMIT(64,
+@@ -364,10 +388,10 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
+     VkClearRect rect = {{{0, 0}, g_rp.ext}, layer, 1};
+     if (r3d_clear_scissored(r)) {
+         u32 xs = r[0x381], ys = r[0x382];
+-        i32 x0 = (i32)vk_scf(xs & 0xFFFF), x1 = (i32)vk_scf(xs >> 16), y0 = (i32)vk_scf(ys & 0xFFFF),
+-            y1 = (i32)vk_scf(ys >> 16);
++        i32 x0 = (i32)draw_scf(xs & 0xFFFF), x1 = (i32)draw_scf(xs >> 16), y0 = (i32)draw_scf(ys & 0xFFFF),
++            y1 = (i32)draw_scf(ys >> 16);
+         if (r[0x4EB] & 1) {
+-            i32 clip_height = (i32)vk_scf((float)(r[0x3FE] >> 16));
++            i32 clip_height = (i32)draw_scf((float)(r[0x3FE] >> 16));
+             i32 old_y0 = y0;
+             y0 = clip_height - y1;
+             y1 = clip_height - old_y0;
+@@ -894,15 +918,17 @@ static int cb_get(const GpuChannel* ch, int stage, int i, u32 sz, VkBuffer* buf,
+ static int frame_consts(VkBuffer* buf, u64* off) {
+     static u64 frame = ~0ull, o;
+     static VkBuffer b;
+-    if (frame != vk_submit_number()) {
++    static float scale;
++    if (frame != vk_submit_number() || scale != g_draw_scale) {
+         u8* p = vk_stage(64, vk_stage_align(), &b, &o);
+         if (!p) return 0;
+-        float rs[4] = {1 / g_vk_scale, 1 / g_vk_scale, g_vk_scale, 0}, fa[4] = {0, 0, 0, 1};
++        float rs[4] = {1 / g_draw_scale, 1 / g_draw_scale, g_draw_scale, 0}, fa[4] = {0, 0, 0, 1};
+         u32 ia[4] = {0, 0, 0, 1};
+         memcpy(p, rs, 16);
+         memcpy(p + 16, fa, 16);
+         memcpy(p + 32, ia, 16);
+         frame = vk_submit_number();
++        scale = g_draw_scale;
+     }
+     *buf = b;
+     *off = o;
+@@ -1487,7 +1513,7 @@ u64 g_vk_drawn, g_vk_skipped;
+ /* NVB197_SET_VIEWPORT_COORDINATE_SWIZZLE (0x0A18) can negate Y before the scale and offset. A negative Vulkan
+    height implements the same mapping without changing texture coordinates or guest render-target contents.
+    Reference: NVIDIA open-gpu-doc/classes/3d/clb197.h. */
+-VkViewport vk_render_viewport(const u32* r) {
++VkViewport vk_render_viewport_scaled(const u32* r, float scale) {
+     float vt[6];
+     memcpy(vt, &r[0x280], sizeof vt);
+     float sx = vt[0], sy = vt[1], tx = vt[3], ty = vt[4], ax = sx < 0 ? -sx : sx, ay = sy < 0 ? -sy : sy;
+@@ -1497,12 +1523,12 @@ VkViewport vk_render_viewport(const u32* r) {
+         LOG_LIMIT(1, "vulkan: viewport scale %g x %g with transform enable %x\n", sx, sy, r[0x64B]);
+     if (small) {
+         u32 vx = r[0x300], vy = r[0x301];
+-        vp = (VkViewport){vk_scf(vx & 0xFFFF), vk_scf(vy & 0xFFFF), vk_scf(vx >> 16), vk_scf(vy >> 16), 0, 1};
++        vp = (VkViewport){(vx & 0xFFFF) * scale, (vy & 0xFFFF) * scale, (vx >> 16) * scale, (vy >> 16) * scale, 0, 1};
+     } else
+-        vp = (VkViewport){vk_scf(tx - ax), vk_scf(ty - sy), vk_scf(2 * ax), vk_scf(2 * sy), 0, 1};
++        vp = (VkViewport){(tx - ax) * scale, (ty - sy) * scale, 2 * ax * scale, 2 * sy * scale, 0, 1};
+     /* A lower-left window measures y from the surface clip's bottom. Match the 3D blit path's conversion. */
+     if (r[0x4EB] & 1) {
+-        vp.y += vk_scf((float)(r[0x3FE] >> 16));
++        vp.y += (float)(r[0x3FE] >> 16) * scale;
+         vp.height = -vp.height;
+     }
+     if (((r[0x286] >> 4) & 7) == 3) {
+@@ -1520,6 +1546,7 @@ VkViewport vk_render_viewport(const u32* r) {
+     vp.maxDepth = zf < 0 ? 0 : zf > 1 ? 1 : zf;
+     return vp;
+ }
++VkViewport vk_render_viewport(const u32* r) { return vk_render_viewport_scaled(r, g_vk_scale); }
+ /* the vertices of the geometry program's input primitive: the tessellator's output primitive (0xC8: the domain in
+    bits 0-1, isolines 0, and the output in bits 8-9, points 0), or the draw's topology */
+ static u32 gs_input_vertices(u32 topology, int tes_on, u32 params) {
+@@ -1546,6 +1573,64 @@ int vk_render_depth_clamp(const u32* r) {
+ 
+ VkFrontFace vk_render_front_face(const u32* r) { return front_face_at_viewport(r, vk_render_viewport(r).height); }
+ 
++static int scene_fsr_composite(GpuChannel* ch, TexRes* tex, Surf* dst) {
++    Surf* scene = tex->t;
++    u32* r = ch->r3d;
++    u64 constants = ch->cbind[4][3];
++    if (!constants || ch->cbind_size[4][3] < 0x690 || scene->layers != 1 || dst->layers != 1 || scene->f.depth ||
++        scene->f.is_int || dst->f.depth || dst->f.is_int || (r[0x4EB] & 1) || ((r[0x286] >> 4) & 7) != 2 || r[0x4D8])
++        return 0;
++    /* The game's dynamic resolution can use only part of the scene allocation.
++       This is the same UV remap and logical texture size read by its upscale shader. */
++    float remap[4], size[4];
++    gmem_read(constants + 0x430, remap, sizeof remap);
++    gmem_read(constants + 0x680, size, sizeof size);
++    if (size[0] != scene->w || size[1] != scene->h) return 0;
++    for (u32 i = 0; i < 4; i++)
++        if (!isfinite(remap[i])) return 0;
++    float uv[4] = {remap[1], remap[3], remap[0], remap[2]};
++    if (uv[0] < 0 || uv[1] < 0 || uv[2] <= 0 || uv[3] <= 0 || uv[0] + uv[2] > 1.00001f || uv[1] + uv[3] > 1.00001f)
++        return 0;
++    VkViewport vp = vk_render_viewport_scaled(r, dst->scale);
++    if (vp.width <= 0 || vp.height >= 0) return 0;
++    float rect[4] = {vp.x, vp.y + vp.height, vp.width, -vp.height};
++    i32 out[4];
++    for (u32 i = 0; i < 4; i++) {
++        if (!isfinite(rect[i]) || rect[i] < 0 || rect[i] > 32768) return 0;
++        out[i] = (i32)roundf(rect[i]);
++        if (fabsf(rect[i] - out[i]) > 0.01f) return 0;
++    }
++    if (!out[2] || !out[3] || out[0] + out[2] > (i32)dst->sw || out[1] + out[3] > (i32)dst->sh) return 0;
++    if (r[0x380] & 1) {
++        u32 xs = r[0x381], ys = r[0x382];
++        if ((xs & 0xFFFF) * dst->scale > out[0] || (xs >> 16) * dst->scale < out[0] + out[2] ||
++            (ys & 0xFFFF) * dst->scale > out[1] || (ys >> 16) * dst->scale < out[1] + out[3])
++            return 0;
++    }
++    u32 iw = (u32)roundf(scene->sw * uv[2]), ih = (u32)roundf(scene->sh * uv[3]);
++    if (!iw || !ih || iw > (u32)out[2] || ih > (u32)out[3]) return 0;
++    vk_render_end();
++    vk_rt_note_read(scene);
++    VkImageView view = vk_tex_bind_view(scene, VK_IMAGE_VIEW_TYPE_2D, tex->tic, tex->tsc, 0);
++    int srgb = r[0x56E] & 1;
++    VkImageView attachment = vk_rt_attachment(dst, srgb);
++    if (!view || !attachment) return 0;
++    VkCommandBuffer cb = vk_cmd();
++    vk_surf_use(cb, scene, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
++                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
++    vk_surf_use(cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
++                VK_ACCESS_2_TRANSFER_WRITE_BIT);
++    VkFormat format = srgb ? dst->f.vk : vk_srgb_as(dst->f.vk, 0); /* same format as vk_rt_attachment */
++    if (!vk_fsr_draw_target(cb, view, 0, uv, iw, ih, dst->img, attachment, format, out)) return 0;
++    dst->wgen++;
++    dst->last_used = g_vk_present;
++    vk_rt_drawn(dst);
++    g_vk_drawn++;
++    LOG_LIMIT(8, "scene-fsr: input=%ux%u crop=%.4f,%.4f,%.4f,%.4f output=%d,%d,%dx%d ui=%ux%u\n", iw, ih, uv[0], uv[1],
++              uv[2], uv[3], out[0], out[1], out[2], out[3], dst->sw, dst->sh);
++    return 1;
++}
++
+ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
+                     u32 instances) {
+     u32* r = ch->r3d;
+@@ -1624,6 +1709,62 @@ retry:
+     Surf* zt;
+     u32 n;
+     read_targets(ch, rt, &zt, &n);
++    if (zt && !r[0x4B3] && !r[0x4BA] && !r[0x4E0]) zt = NULL;
++    int ui_depth_read_only = 0;
++    if (zt && zt->scale == g_draw_scale && !vk_depth_restore(zt)) { g_vk_skipped++; return; }
++    if (zt && zt->scale != g_draw_scale &&
++        !(zt->f.stencil && r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF))))) {
++        Surf* copy = vk_depth_for_scale(zt, g_draw_scale, zt->f.stencil && r[0x4E0]);
++        if (!copy) { g_vk_skipped++; return; }
++        zt = copy;
++        ui_depth_read_only = !r[0x4BA];
++    }
++    {
++        static int pre_ui_fsr = -1;
++        if (pre_ui_fsr < 0) {
++            const char* value = getenv("SNX_SCENE_FSR");
++            pre_ui_fsr = value && *value && strcmp(value, "0") != 0;
++        }
++        Surf* scene = fs && fs->si.ntex == 1 && fres[0].have ? fres[0].t : NULL;
++        if (pre_ui_fsr && n == 1 && !zt && rt[0] && scene && scene != rt[0] &&
++            scene->scale < rt[0]->scale && count == 3)
++            LOG_LIMIT(12, "scene-fsr-candidate: vs=%llx fs=%llx src=%ux%u physical=%ux%u dst=%ux%u physical=%ux%u\n",
++                      (unsigned long long)vs->hash, (unsigned long long)fs->hash,
++                      scene->w, scene->h, scene->sw, scene->sh, rt[0]->w, rt[0]->h, rt[0]->sw, rt[0]->sh);
++        /* D3's spatial upscale, before UI/text. Its fragment program only remaps
++           UV and samples the scene. Other post effects must keep their shaders. */
++        const u64 scene_vs_hash = 0x95eca37b1dd5f530ull, scene_fs_hash = 0xb2e316e8ae6c08d5ull;
++        if (pre_ui_fsr && n == 1 && !zt && rt[0] && scene && rt[0] != scene && rt[0]->w > scene->w &&
++            rt[0]->h > scene->h && (u64)rt[0]->w * scene->h == (u64)rt[0]->h * scene->w &&
++            scene->scale < g_vk_base_scale && scene->att && count == 3 && (topology == 4 || topology == 5) &&
++            vs->hash == scene_vs_hash && fs->hash == scene_fs_hash && !tcs && !tes && !gs &&
++            fs->si.ngbuf == 0 && fs->si.nimg == 0 && scene_fsr_composite(ch, &fres[0], rt[0])) return;
++    }
++    {
++        static int trace_draw;
++        static int trace_ready;
++        static u32 trace_count;
++        if (!trace_ready) {
++            const char* trace = getenv("SNX_GPU_TRACE_RT");
++            trace_draw = trace && *trace && strcmp(trace, "0");
++            trace_ready = 1;
++        }
++        if (trace_draw && trace_count++ < 1400) {
++            VkViewport vp = vk_render_viewport_scaled(r, g_draw_scale);
++            Surf* tx[3] = {0, 0, 0};
++            for (u32 ti = 0; ti < 3; ti++)
++                if (fs && ti < (u32)fs->si.ntex && ti < SH_MAXTEX && fres[ti].have) tx[ti] = fres[ti].t;
++            LOG("gpu-rt-draw: #%u frame=%llu color0=%llx %ux%u depth=%llx %ux%u vp=%d,%d,%ux%u count=%u indexed=%d vs=%llx fs=%llx tex=%llx:%ux%u,%llx:%ux%u,%llx:%ux%u\n",
++                trace_count - 1, (unsigned long long)setup_frame,
++                (unsigned long long)(n && rt[0] ? rt[0]->gva : 0), n && rt[0] ? rt[0]->w : 0,
++                n && rt[0] ? rt[0]->h : 0, (unsigned long long)(zt ? zt->gva : 0), zt ? zt->w : 0,
++                zt ? zt->h : 0, (int)vp.x, (int)vp.y, (u32)vp.width, (u32)vp.height, count, indexed,
++                (unsigned long long)(code + r[0x811]), (unsigned long long)(code + r[0x851]),
++                (unsigned long long)(tx[0] ? tx[0]->gva : 0), tx[0] ? tx[0]->w : 0, tx[0] ? tx[0]->h : 0,
++                (unsigned long long)(tx[1] ? tx[1]->gva : 0), tx[1] ? tx[1]->w : 0, tx[1] ? tx[1]->h : 0,
++                (unsigned long long)(tx[2] ? tx[2]->gva : 0), tx[2] ? tx[2]->w : 0, tx[2] ? tx[2]->h : 0);
++        }
++    }
+     for (u32 i = 0; i < n; i++)
+         if (trace_target(rt[i]))
+             LOG_LIMIT(64,
+@@ -1861,7 +2002,7 @@ retry:
+         g_vk_skipped++;
+         return;
+     }
+-    int zt_ro = 0;
++    int zt_ro = ui_depth_read_only;
+     u32 fb = 0;
+     DrawImages images = {0};
+     VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, NULL, &storage, NULL);
+@@ -2062,7 +2203,7 @@ retry:
+         }
+     if (k.nbind) rec_CmdBindVertexBuffers2(cb, 0, k.nbind, vbuf, voff, NULL, vstride);
+ 
+-    VkViewport vp = vk_render_viewport(r);
++    VkViewport vp = vk_render_viewport_scaled(r, g_draw_scale);
+     if (!(vp.width > 0) || !(vp.height != 0)) {
+         draw_images_discard(&images);
+         return; /* no area: nothing is drawn (and Vulkan takes none) */
+@@ -2071,10 +2212,10 @@ retry:
+     VkRect2D sc = {{0, 0}, g_rp.ext};
+     if (r[0x380] & 1) {
+         u32 xs = r[0x381], ys = r[0x382];
+-        i32 x0 = (i32)vk_scf(xs & 0xFFFF), x1 = (i32)vk_scf(xs >> 16), y0 = (i32)vk_scf(ys & 0xFFFF),
+-            y1 = (i32)vk_scf(ys >> 16);
++        i32 x0 = (i32)draw_scf(xs & 0xFFFF), x1 = (i32)draw_scf(xs >> 16), y0 = (i32)draw_scf(ys & 0xFFFF),
++            y1 = (i32)draw_scf(ys >> 16);
+         if (r[0x4EB] & 1) {
+-            i32 clip_height = (i32)vk_scf((float)(r[0x3FE] >> 16));
++            i32 clip_height = (i32)draw_scf((float)(r[0x3FE] >> 16));
+             i32 old_y0 = y0;
+             y0 = clip_height - y1;
+             y1 = clip_height - old_y0;
+@@ -2244,9 +2385,22 @@ void vk_render_draw_texture(GpuChannel* ch) {
+         .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+         .srcOffsets = {{(i32)(sx0 * tsx), (i32)(sy0 * tsy), 0}, {(i32)(sx1 * tsx), (i32)(sy1 * tsy), 1}},
+         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+-        .dstOffsets = {{(i32)vk_scf(x0), (i32)vk_scf(y0), 0}, {(i32)vk_scf(x0 + w), (i32)vk_scf(y0 + h), 1}}};
++        .dstOffsets = {{(i32)draw_scf(x0), (i32)draw_scf(y0), 0}, {(i32)draw_scf(x0 + w), (i32)draw_scf(y0 + h), 1}}};
+     int linear =
+         (x.tsc[1] & 3) == 2 && !t->f.is_int && format_has(t->f.vk, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
++    {
++        static int trace_rt_blit;
++        static int trace_ready;
++        if (!trace_ready) {
++            const char* trace = getenv("SNX_GPU_TRACE_RT");
++            trace_rt_blit = trace && *trace && strcmp(trace, "0");
++            trace_ready = 1;
++        }
++        if (trace_rt_blit)
++            LOG_LIMIT(256, "gpu-rt-blit: src=%llx %ux%u -> dst=%llx %ux%u rect=%.1f,%.1f,%.1f,%.1f linear=%d\n",
++                      (unsigned long long)t->gva, t->w, t->h, (unsigned long long)d->gva, d->w, d->h,
++                      x0, y0, w, h, linear);
++    }
+     vk_render_end(); /* blits happen outside rendering passes */
+     vk_rt_note_read(t);
+     if (t->layout == VK_IMAGE_LAYOUT_UNDEFINED) return;
+diff --git a/src/nx/gpu/vk/renderer.c b/src/nx/gpu/vk/renderer.c
+index e6c3fb9..4be031f 100644
+--- a/src/nx/gpu/vk/renderer.c
++++ b/src/nx/gpu/vk/renderer.c
+@@ -137,7 +137,8 @@ static void vkr_mapping_end(void) { vk_unlock(); }
+ /* 0 when Vulkan can't run here */
+ static int vkr_start(void) {
+     if (!vk_init()) return 0;
+-    g_vk_scale = g_settings.resolution_scale;       /* the .ini keeps resolution within 0.25 to 4 (options.c) */
++    g_vk_base_scale = g_settings.resolution_scale;  /* the .ini keeps resolution within 0.25 to 4 (options.c) */
++    g_vk_scale = g_vk_base_scale;
+     g_vk_anisotropy = g_settings.anisotropic_filtering; /* the sampler table keeps what it makes: anisotropy applies at start */
+     if (g_vk_anisotropy > 1 && !g_vk.feat.samplerAnisotropy)
+         LOG("vulkan: this GPU has no anisotropic filtering, so anisotropy=%d does nothing\n", g_vk_anisotropy);
+@@ -330,12 +331,20 @@ static void flip_src(VkImageBlit* b, u32 transform) {
+    black alone, with the on-screen controls and the game's menu over it; then the frame's commands are submitted and
+    the image presented. A game's frame (game) also moves the per-present bookkeeping, and without src shows nothing.
+    Under vk_lock */
++static int scene_fsr_enabled(void) {
++    static int enabled = -1;
++    if (enabled < 0) {
++        const char* value = getenv("SNX_SCENE_FSR");
++        enabled = value && *value && strcmp(value, "0") != 0;
++    }
++    return enabled && vk_scene_scale() > 0 && vk_scene_scale() < g_vk_base_scale;
++}
+ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
+     int stats = game && present_stats_on();
+     /* the size the swapchain was made for, not the extent the surface clamped it to: that can stay different */
+     int ww, wh, srgb = src ? is_srgb(src->f.vk) : g_sc_srgb, shown = backend_window_shown();
+     /* upscaler=1: FSR 1 EASU + RCAS in place of the blit's bilinear tap */
+-    int fsr = __atomic_load_n(&g_settings.upscaler, __ATOMIC_RELAXED) != 0;
++    int fsr = __atomic_load_n(&g_settings.upscaler, __ATOMIC_RELAXED) != 0 && !scene_fsr_enabled();
+     backend_window_size(&ww, &wh);
+     if (shown && (g_lost || backend_window_generation() != g_generation)) {
+         vk_finish();
+diff --git a/src/nx/gpu/vk/shaders/depth_scale.frag b/src/nx/gpu/vk/shaders/depth_scale.frag
+new file mode 100644
+index 0000000..f749b4f
+--- /dev/null
++++ b/src/nx/gpu/vk/shaders/depth_scale.frag
+@@ -0,0 +1,7 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#version 450
++layout(set = 0, binding = 0) uniform sampler2D sourceDepth;
++layout(push_constant) uniform Size { vec4 outputSize; } pc;
++void main() {
++    gl_FragDepth = texture(sourceDepth, gl_FragCoord.xy / pc.outputSize.xy).r;
++}
+diff --git a/src/nx/gpu/vk/surface.c b/src/nx/gpu/vk/surface.c
+index 5dbb7a4..a9e74e4 100644
+--- a/src/nx/gpu/vk/surface.c
++++ b/src/nx/gpu/vk/surface.c
+@@ -69,6 +69,37 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
+ }
+ 
+ float g_vk_scale = 1.0f;
++float g_vk_base_scale = 1.0f;
++float vk_scene_scale(void) {
++    static float scene_scale = -1;
++    if (scene_scale < 0) {
++        scene_scale = 0; /* no explicit override */
++        const char* scale = getenv("SNX_SCENE_SCALE");
++        if (scale && *scale) {
++            char* end;
++            float parsed = strtof(scale, &end);
++            if (*end == 0 && parsed >= 0.5f && parsed <= 1.0f) scene_scale = parsed;
++        }
++    }
++    return scene_scale;
++}
++static float rt_target_scale(u32 w, u32 h) {
++    static int ready;
++    static u32 scene_width = 1280;
++    if (!ready) {
++        const char* width = getenv("SNX_SCENE_WIDTH");
++        if (width && *width) {
++            char* end;
++            unsigned long parsed = strtoul(width, &end, 0);
++            if (*end == 0 && parsed >= 320 && parsed <= 8192) scene_width = (u32)parsed;
++        }
++        ready = 1;
++    }
++    float scene_scale = vk_scene_scale();
++    return scene_scale > 0 && scene_scale < g_vk_base_scale && w == scene_width && h && (u64)h * 16 == (u64)w * 9
++               ? scene_scale
++               : g_vk_base_scale;
++}
+ u32 vk_sc(u32 v) {
+     u32 r = (u32)((float)v * g_vk_scale + 0.5f);
+     return r ? r : 1;
+@@ -83,8 +114,11 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
+     s->gva = gva;
+     s->w = w;
+     s->h = h;
+-    s->sw = is_rt ? vk_sc(w) : w;
+-    s->sh = is_rt ? vk_sc(h) : h;
++    s->scale = is_rt ? rt_target_scale(w, h) : 1.0f;
++    s->sw = is_rt ? (u32)((float)w * s->scale + 0.5f) : w;
++    s->sh = is_rt ? (u32)((float)h * s->scale + 0.5f) : h;
++    if (s->sw == 0) s->sw = 1;
++    if (s->sh == 0) s->sh = 1;
+     s->layers = layers;
+     s->levels = 1;
+     s->fkey = fkey;
+@@ -94,6 +128,18 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
+     s->pitch = pitch;
+     s->is_rt = is_rt;
+     if (is_rt) g_rt_made++;
++    if (is_rt) {
++        static int trace_rt;
++        static int trace_ready;
++        if (!trace_ready) {
++            const char* trace = getenv("SNX_GPU_TRACE_RT");
++            trace_rt = trace && *trace && strcmp(trace, "0");
++            trace_ready = 1;
++        }
++        if (trace_rt)
++            LOG("gpu-rt: new gva=%llx %ux%u physical=%ux%u fmt=%x depth=%d layers=%u volume=%d pitch=%u\n",
++                (unsigned long long)gva, w, h, s->sw, s->sh, fkey, f.depth, layers, 0, pitch);
++    }
+     if (is_rt) s->layer_size = bl ? bl_size(w * f.bpp, h, bh) : (u64)pitch * h;
+     s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+     VkImageUsageFlags usage =
+@@ -203,6 +249,125 @@ static int blit_ok(VkFormat f, VkFormatFeatureFlags need) {
+ }
+ /* a scaled target's contents move between its image and guest memory by blits: 0 when its format can't be blitted
+    (said once) */
++static u64 rt_bytes(const Surf* s);
++static VkImageView depth_sample_view(Surf* s) {
++    if (!s->f.stencil) return s->att;
++    if (!s->ui_depth_view) {
++        VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
++            .image = s->img, .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = s->f.vk,
++            .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1}};
++        if (!VK_OK(vkCreateImageView(g_vk.dev, &vi, NULL, &s->ui_depth_view))) return VK_NULL_HANDLE;
++    }
++    return s->ui_depth_view;
++}
++
++/* UI depth has an independent physical size. Writes are retained in the UI
++   image until the guest next needs the scene depth (or clears it completely). */
++Surf* vk_depth_for_scale(Surf* s, float scale, int stencil) {
++    if (!s || !s->f.depth || s->layers != 1 || !(scale > 0)) return NULL;
++    if (s->scale == scale) return vk_depth_restore(s) ? s : NULL;
++    int blit = blit_ok(s->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT);
++    if (!blit && stencil) return NULL; /* the depth-only fallback cannot invent stencil */
++    if (s->ui_depth && s->ui_depth->scale == scale && s->ui_depth_dirty &&
++        !gpu_mem_dirty_since(s->gw,s->gva,rt_bytes(s))) {
++        s->gw = gpu_mem_generation();
++        return s->ui_depth;
++    }
++    vk_rt_note_read(s);
++    if (s->layout == VK_IMAGE_LAYOUT_UNDEFINED) return NULL;
++    Surf* copy = s->ui_depth;
++    if (copy && copy->scale != scale) {
++        vk_defer_image(copy->img, copy->mem, copy->att, copy->ui_depth_view);
++        free(copy);
++        copy = s->ui_depth = NULL;
++    }
++    if (!copy) {
++        copy = calloc(1, sizeof *copy);
++        if (!copy) return NULL;
++        copy->gva = s->gva;
++        copy->w = s->w;
++        copy->h = s->h;
++        copy->sw = (u32)(s->w * scale + 0.5f);
++        copy->sh = (u32)(s->h * scale + 0.5f);
++        copy->layers = copy->levels = 1;
++        copy->scale = scale;
++        copy->ui_depth_owner = s;
++        copy->f = blit ? s->f : vk_zt_format(0x0A);
++        copy->type = VK_IMAGE_VIEW_TYPE_2D;
++        VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
++                                .imageType = VK_IMAGE_TYPE_2D,
++                                .format = copy->f.vk,
++                                .extent = {copy->sw, copy->sh, 1},
++                                .mipLevels = 1,
++                                .arrayLayers = 1,
++                                .samples = VK_SAMPLE_COUNT_1_BIT,
++                                .tiling = VK_IMAGE_TILING_OPTIMAL,
++                                .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
++                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
++                                .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
++        if (!copy->sw || !copy->sh || !vk_image_create(&ii, &copy->img, &copy->mem)) {
++            free(copy);
++            return NULL;
++        }
++        VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
++                                    .image = copy->img,
++                                    .viewType = VK_IMAGE_VIEW_TYPE_2D,
++                                    .format = copy->f.vk,
++                                    .subresourceRange = {vk_aspect(&copy->f), 0, 1, 0, 1}};
++        if (!VK_OK(vkCreateImageView(g_vk.dev, &vi, NULL, &copy->att))) {
++            vk_defer_image(copy->img, copy->mem, VK_NULL_HANDLE, VK_NULL_HANDLE);
++            free(copy);
++            return NULL;
++        }
++        s->ui_depth = copy;
++    }
++    if (copy->layout == VK_IMAGE_LAYOUT_UNDEFINED || s->ui_depth_gen != s->wgen) {
++        vk_render_end();
++        VkCommandBuffer cb = vk_cmd();
++        if (blit) {
++            vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
++                        VK_ACCESS_2_TRANSFER_READ_BIT);
++            vk_surf_use(cb, copy, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
++                        VK_ACCESS_2_TRANSFER_WRITE_BIT);
++            VkImageBlit region = {.srcSubresource = {vk_aspect(&s->f), 0, 0, 1},
++                                  .srcOffsets = {{0, 0, 0}, {(i32)s->sw, (i32)s->sh, 1}},
++                                  .dstSubresource = {vk_aspect(&s->f), 0, 0, 1},
++                                  .dstOffsets = {{0, 0, 0}, {(i32)copy->sw, (i32)copy->sh, 1}}};
++            rec_CmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, copy->img,
++                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region, VK_FILTER_NEAREST);
++        } else {
++            VkImageView view = depth_sample_view(s);
++            if (!view) return NULL;
++            vk_surf_use(cb, s, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
++                        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
++            vk_surf_use(cb, copy, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
++                        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
++                        VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
++            if (!vk_depth_scale_draw(cb, view, copy)) return NULL;
++        }
++        s->ui_depth_gen = s->wgen;
++    }
++    return copy;
++}
++
++int vk_depth_restore(Surf* s) {
++    if (!s || !s->ui_depth_dirty || !s->ui_depth) return 1;
++    Surf* copy = s->ui_depth;
++    VkImageView view = depth_sample_view(copy);
++    if (!view) return 0;
++    vk_render_end();
++    VkCommandBuffer cb = vk_cmd();
++    vk_surf_use(cb,copy,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
++    vk_surf_use(cb,s,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
++                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT|VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
++    if (!vk_depth_scale_draw(cb,view,s)) return 0;
++    s->wgen++;
++    vk_rt_drawn(s);
++    s->ui_depth_gen=s->wgen;
++    s->ui_depth_dirty=0;
++    return 1;
++}
++
+ static int moves_scaled(const Surf* s) {
+     if (s->sw == s->w && s->sh == s->h) return 1;
+     if (blit_ok(s->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT)) return 1;
+@@ -439,6 +604,7 @@ static void flush_land(Surf* s, const u8* p, const u8* original) {
+     }
+ }
+ static void surf_flush(Surf* s, const u8* original) {
++    if (s && !vk_depth_restore(s)) return;
+     u64 size = flush_bytes(s);
+     VkBuffer buf;
+     if (!size) return;
+@@ -539,6 +705,7 @@ Surf* vk_zt_array(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, u32 layers, u64 laye
+ }
+ 
+ void vk_rt_note_read(Surf* s) {
++    if (!vk_depth_restore(s)) return;
+     s->last_used = g_vk_present;
+     if (!s->is_rt) return;
+     /* writes the 3D engine's draws don't see: I2M uploads, constant updates and compute results landing there go
+@@ -659,6 +826,12 @@ int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
+ /* a surface's image and views go when the frame being recorded is done (descriptors in it may name them) */
+ static void surf_free(Surf* s) {
+     g_vk_surf_epoch++;
++    if (s->ui_depth) {
++        Surf* copy = s->ui_depth;
++        vk_defer_image(copy->img, copy->mem, copy->att, copy->ui_depth_view);
++        free(copy);
++    }
++    if (s->ui_depth_view) vk_defer_image(VK_NULL_HANDLE,VK_NULL_HANDLE,s->ui_depth_view,VK_NULL_HANDLE);
+     if (s->is_rt) {
+         rt_pages(s, -1);
+         for (Surf** pp = &g_rt_first; *pp; pp = &(*pp)->rt_next)
+@@ -723,12 +896,12 @@ int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh,
+     if (!blit_ok(st->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT) || !blit_ok(dt->f.vk, VK_FORMAT_FEATURE_BLIT_DST_BIT))
+         return 0;
+     /* in the images' pixels: targets are scaled */
+-    float S = g_vk_scale;
++    float S = st->scale, D = dt->scale;
+     i32 x0 = (i32)(sx * S), y0 = (i32)(sy * S), x1 = (i32)((sx + sdx * dw) * S + 0.5),
+         y1 = (i32)((sy + sdy * dh) * S + 0.5);
+-    i32 X1 = (i32)((dx + dw) * S + 0.5f), Y1 = (i32)((dy + dh) * S + 0.5f);
+-    dx = (i32)(dx * S);
+-    dy = (i32)(dy * S);
++    i32 X1 = (i32)((dx + dw) * D + 0.5f), Y1 = (i32)((dy + dh) * D + 0.5f);
++    dx = (i32)(dx * D);
++    dy = (i32)(dy * D);
+     if (x1 > (i32)st->sw) x1 = (i32)st->sw;
+     if (y1 > (i32)st->sh) y1 = (i32)st->sh;
+     if (X1 > (i32)dt->sw) X1 = (i32)dt->sw;
+@@ -748,6 +921,19 @@ int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh,
+                      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                      .dstOffsets = {{dx, dy, 0}, {X1, Y1, 1}}};
+     int linear = scaled && !st->f.is_int && blit_ok(st->f.vk, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
++    {
++        static int trace_blit2d;
++        static int trace_ready;
++        if (!trace_ready) {
++            const char* trace = getenv("SNX_GPU_TRACE_RT");
++            trace_blit2d = trace && *trace && strcmp(trace, "0");
++            trace_ready = 1;
++        }
++        if (trace_blit2d)
++            LOG_LIMIT(256, "gpu-rt-2d: src=%llx %ux%u -> dst=%llx %ux%u rect=%d,%d-%d,%d dstrect=%d,%d-%d,%d linear=%d\n",
++                      (unsigned long long)st->gva, st->w, st->h, (unsigned long long)dt->gva, dt->w, dt->h,
++                      x0, y0, x1, y1, dx, dy, X1, Y1, linear);
++    }
+     rec_CmdBlitImage(cb, st->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dt->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                    &b, linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+     dt->wgen++;
+diff --git a/src/nx/gpu/vk/texture.c b/src/nx/gpu/vk/texture.c
+index 3c8cc53..ceeb243 100644
+--- a/src/nx/gpu/vk/texture.c
++++ b/src/nx/gpu/vk/texture.c
+@@ -411,8 +411,13 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h, const VkFmt* as) {
+         c->gva = rt->gva;
+         c->w = w;
+         c->h = h;
+-        c->sw = vk_sc(w) < rt->sw ? vk_sc(w) : rt->sw; /* the same region of the scaled target */
+-        c->sh = vk_sc(h) < rt->sh ? vk_sc(h) : rt->sh;
++        c->scale = rt->scale;
++        c->sw = (u32)(w * rt->scale + 0.5f);
++        c->sh = (u32)(h * rt->scale + 0.5f);
++        if (!c->sw) c->sw = 1;
++        if (!c->sh) c->sh = 1;
++        if (c->sw > rt->sw) c->sw = rt->sw;
++        if (c->sh > rt->sh) c->sh = rt->sh;
+         c->layers = rt->layers;
+         c->levels = c->depth3d = 1;
+         c->f = f;
+@@ -995,7 +1000,7 @@ static void copy_layers(VkCommandBuffer cb, Surf* s, Surf* t, u32 l, u32 dst, u3
+         return;
+     }
+     VkImageBlit b = {.srcSubresource = from,
+-                     .srcOffsets = {{0, 0, 0}, {(i32)vk_sc(w), (i32)vk_sc(h), 1}},
++                     .srcOffsets = {{0, 0, 0}, {(i32)(w * s->scale + 0.5f), (i32)(h * s->scale + 0.5f), 1}},
+                      .dstSubresource = to,
+                      .dstOffsets = {{0, 0, dz}, {(i32)w, (i32)h, dz + 1}}};
+     rec_CmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+@@ -1047,7 +1052,7 @@ static void tex_take_drawn(Surf* t) {
+                 if (scaled) {
+                     VkImageSubresourceLayers all = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, t->depth3d};
+                     VkImageBlit b = {.srcSubresource = all,
+-                                     .srcOffsets = {{0, 0, 0}, {(i32)vk_sc(t->w), (i32)vk_sc(t->h), 1}},
++                                     .srcOffsets = {{0, 0, 0}, {(i32)s->sw, (i32)s->sh, 1}},
+                                      .dstSubresource = all,
+                                      .dstOffsets = {{0, 0, 0}, {(i32)t->w, (i32)t->h, 1}}};
+                     vk_barrier(cb, mid, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_NONE, 0,
+diff --git a/src/nx/gpu/vk/vk.h b/src/nx/gpu/vk/vk.h
+index 8e0280a..412cc7a 100644
+--- a/src/nx/gpu/vk/vk.h
++++ b/src/nx/gpu/vk/vk.h
+@@ -283,7 +283,8 @@ typedef struct {
+ typedef struct Surf {
+     u64 gva;
+     u32 w, h, layers, levels;
+-    u32 sw, sh;  /* the image's size: render targets are w x h times the resolution scale */
++    u32 sw, sh;  /* the image's size: render targets are w x h times the target scale */
++    float scale; /* render targets: physical/logical scale used by their viewport and scissor */
+     u32 depth3d; /* 3D textures: depth (layers is 1) */
+     u32 fkey;    /* render targets: guest format | 0x10000 for depth. Textures: TIC word 0's format bits (0x7FFFF), sRGB
+                     in bit 31, raw (vk_tex_from_tic_raw) in bit 30 */
+@@ -332,11 +333,18 @@ typedef struct Surf {
+        (gpu/vk/texture.c rt_crop) */
+     struct Surf* crop;
+     u32 crop_gen;
++    struct Surf* ui_depth; /* read-only depth at UI scale, not registered as guest memory */
++    VkImageView ui_depth_view; /* depth-only sampling view of this source */
++    u32 ui_depth_gen;
++    struct Surf* ui_depth_owner;
++    int ui_depth_dirty;
+     struct Surf* next;
+     struct Surf* rt_next; /* real render targets, for overlapping guest-memory writes */
+ } Surf;
+ /* resolution= in the .ini: render targets are made this much bigger (read once, at startup) */
+ extern float g_vk_scale;
++extern float g_vk_base_scale;
++float vk_scene_scale(void); /* explicit experiment override, zero when disabled */
+ u32 vk_sc(u32 v);      /* a size or coordinate scaled, at least 1 */
+ float vk_scf(float v); /* the same for viewport values */
+ /* w in pixels; pitch: bytes per row of a pitch-linear target (the register holds it in place of the width) */
+@@ -623,9 +631,16 @@ VkImageView vk_sc_view(VkImage sc); /* a swapchain image's view, made once per i
+ /* gpu/vk/fsr.c: FSR 1 EASU, the frame enlarged into the swapchain image in place of the blit (upscaler=1) */
+ int vk_fsr_draw(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih, VkImage sc,
+                 const i32 dst[4]);
++int vk_fsr_draw_target(VkCommandBuffer cb, VkImageView view, int flip, const float uv[4], u32 iw, u32 ih,
++                       VkImage image, VkImageView image_view, VkFormat format, const i32 dst[4]);
+ void vk_fsr_swapchain_gone(void); /* its sets name the old images' views: made again */
+ void vk_render_clear(GpuChannel* ch, u32 v);
+ VkViewport vk_render_viewport(const u32* r);
++VkViewport vk_render_viewport_scaled(const u32* r, float scale);
++float vk_render_target_scale(void);
++Surf* vk_depth_for_scale(Surf* source, float scale, int stencil);
++int vk_depth_restore(Surf* source);
++int vk_depth_scale_draw(VkCommandBuffer cb, VkImageView source, Surf* target);
+ int vk_render_depth_clamp(const u32* r);
+ VkFrontFace vk_render_front_face(const u32* r);
+ void vk_render_draw_texture(GpuChannel* ch);
+diff --git a/src/nx/runtime/platform/backend/sdl3.c b/src/nx/runtime/platform/backend/sdl3.c
+index 06841c7..f85735b 100644
+--- a/src/nx/runtime/platform/backend/sdl3.c
++++ b/src/nx/runtime/platform/backend/sdl3.c
+@@ -354,9 +354,19 @@ void video_init(const char* title) {
+     /* an interactive fullscreen start: stay hidden until fullscreen, so the 1280x720 window the renderer starts
+        with (the .ini's size, before the game presents) is never seen */
+     int start_fullscreen = g_settings.fullscreen && !unattended_active();
+-    g_win = SDL_CreateWindow(header, w, h,
+-                             SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | (start_fullscreen ? SDL_WINDOW_HIDDEN : 0));
++    const char* background = getenv("SNX_WINDOW_BACKGROUND");
++    int start_background = background && *background && strcmp(background, "0");
++    Uint64 window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
++                          ((start_fullscreen || start_background) ? SDL_WINDOW_HIDDEN : 0);
++    if (start_background)
++        window_flags |= SDL_WINDOW_NOT_FOCUSABLE;
++    g_win = SDL_CreateWindow(header, w, h, window_flags);
+     if (!g_win) fatal("SDL could not open a Vulkan window: %s", SDL_GetError());
++    if (start_background) {
++        SDL_DisplayID primary = SDL_GetPrimaryDisplay();
++        SDL_SetWindowSize(g_win, 1024, 576);
++        SDL_SetWindowPosition(g_win, SDL_WINDOWPOS_CENTERED_DISPLAY(primary), SDL_WINDOWPOS_CENTERED_DISPLAY(primary));
++    }
+     snx_window_icon(g_win);
+     pc_cursor_init();
+     overlay_set_display_scale(SDL_GetWindowDisplayScale(g_win));
+@@ -373,6 +383,8 @@ void video_init(const char* title) {
+     if (start_fullscreen) {
+         set_fullscreen(1);
+         if (!SDL_ShowWindow(g_win)) WARN("video: could not show the window: %s\n", SDL_GetError());
++    } else if (start_background) {
++        if (!SDL_ShowWindow(g_win)) WARN("video: could not show the background window: %s\n", SDL_GetError());
+     }
+ #ifdef _WIN32
+     /* keep the display and the system awake while playing (it was set with the crash handler, headless runs too) */
+diff --git a/tests/vulkan_headless.c b/tests/vulkan_headless.c
+index a56caab..837964e 100644
+--- a/tests/vulkan_headless.c
++++ b/tests/vulkan_headless.c
+@@ -11,6 +11,7 @@
+ #include "nx/runtime/platform/backend.h"
+ #include "spirv_emitter_fixture.h"
+ #include <stdio.h>
++#include <math.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -110,6 +111,254 @@ static int check_packed_depth(void) {
+     return 0;
+ }
+ 
++/* Exercise the real register/clear/blit paths with two scales in one submit.
++   A smaller allocation alone is insufficient: scissor, copies and FSR must use
++   the corresponding image's coordinates, while the UI keeps the global scale. */
++static int check_scene_scale(void) {
++    GpuChannel* ch = calloc(1, sizeof *ch);
++    CHECK(ch);
++    u32* r = ch->r3d;
++    float saved = g_vk_scale, saved_base = g_vk_base_scale;
++    g_vk_scale = g_vk_base_scale = 1.75f;
++    r[0x487] = 1;
++    r[0x201] = 0x600000;
++    r[0x202] = 1280 * 4;
++    r[0x203] = 720;
++    r[0x204] = 0xD5;
++    r[0x205] = 0x1000;
++    r[0x206] = 1;
++    float color[4] = {1, 0, 0, 1};
++    memcpy(&r[0x360], color, sizeof color);
++    vk_render_clear(ch, 15 << 2);
++    Surf* scene = vk_rt_find(0x600000);
++    CHECK(scene);
++    float expected = getenv("SNX_SCENE_SCALE") ? 0.75f : 1.75f;
++    CHECK(scene->scale == expected && scene->sw == (u32)(1280 * expected) && scene->sh == (u32)(720 * expected));
++    r[0x43E] = 0x100;
++    r[0x380] = 1;
++    r[0x381] = (1280u << 16) | 640;
++    r[0x382] = (720u << 16) | 360;
++    color[0] = 0;
++    color[1] = 1;
++    memcpy(&r[0x360], color, sizeof color);
++    vk_render_clear(ch, 15 << 2);
++    float transform[6] = {640, 360, 0.5f, 640, 360, 0.5f};
++    memcpy(&r[0x280], transform, sizeof transform);
++    r[0x64B] = 1;
++    r[0x286] = 0x6420;
++    VkViewport vp = vk_render_viewport_scaled(r, vk_render_target_scale());
++    CHECK(vp.x == 0 && vp.y == 0 && vp.width == scene->sw && vp.height == scene->sh);
++    r[0x43E] = r[0x380] = 0;
++    r[0x201] = 0xA00000;
++    r[0x202] = 1600 * 4;
++    r[0x203] = 900;
++    color[1] = 0;
++    color[2] = 1;
++    memcpy(&r[0x360], color, sizeof color);
++    vk_render_clear(ch, 15 << 2);
++    Surf* ui = vk_rt_find(0xA00000);
++    CHECK(ui && ui->scale == 1.75f && ui->sw == 2800 && ui->sh == 1575);
++    vk_render_end();
++    Surf2D from = {.addr = scene->gva, .width = 1280, .height = 720, .format = 0xD5, .linear = 1, .pitch = 1280 * 4};
++    Surf2D to = {.addr = ui->gva, .width = 1600, .height = 900, .format = 0xD5, .linear = 1, .pitch = 1600 * 4};
++    CHECK(vk_blit2d(&from, &to, 0, 0, 1280, 720, 0, 0, 1, 1));
++    VkBuffer buffer;
++    u8* data = vk_readback_buffer(16, &buffer);
++    CHECK(data);
++    VkCommandBuffer cb = vk_cmd();
++    vk_surf_use(cb, scene, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
++                VK_ACCESS_2_TRANSFER_READ_BIT);
++    vk_surf_use(cb, ui, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
++                VK_ACCESS_2_TRANSFER_READ_BIT);
++    VkBufferImageCopy copies[4] = {0};
++    for (u32 i = 0; i < 4; i++) {
++        copies[i].bufferOffset = i * 4;
++        copies[i].imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++        copies[i].imageExtent = (VkExtent3D){1, 1, 1};
++    }
++    copies[0].imageOffset = (VkOffset3D){0, 0, 0};
++    copies[1].imageOffset = (VkOffset3D){(i32)scene->sw - 1, (i32)scene->sh - 1, 0};
++    copies[2].imageOffset = (VkOffset3D){2239, 1259, 0};
++    copies[3].imageOffset = (VkOffset3D){2799, 1574, 0};
++    rec_CmdCopyImageToBuffer(cb, scene->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies);
++    rec_CmdCopyImageToBuffer(cb, ui->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies + 2);
++    vk_finish();
++    vk_readback_ready();
++    const u8 want[16] = {255, 0, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255};
++    CHECK(!memcmp(data, want, sizeof want));
++
++    /* Alternating output formats in one command buffer must retain live pipelines.
++       FSR's rectangle also preserves the clear outside it. */
++    r[0x201] = 0x1000000;
++    r[0x202] = 16 * 4;
++    r[0x203] = 16;
++    color[0] = 1;
++    color[2] = 0;
++    memcpy(&r[0x360], color, sizeof color);
++    vk_render_clear(ch, 15 << 2);
++    Surf* small = vk_rt_find(0x1000000);
++    r[0x43E] = 0x100;
++    r[0x380] = 1;
++    r[0x381] = (16u << 16) | 8;
++    r[0x382] = 16u << 16;
++    color[0] = 0;
++    color[1] = 1;
++    memcpy(&r[0x360], color, sizeof color);
++    vk_render_clear(ch, 15 << 2);
++    r[0x43E] = r[0x380] = 0;
++    r[0x201] = 0x1100000;
++    r[0x202] = 128 * 4;
++    r[0x203] = 64;
++    r[0x204] = 0xE6;
++    color[0] = color[1] = 0;
++    color[2] = 1;
++    memcpy(&r[0x360], color, sizeof color);
++    vk_render_clear(ch, 15 << 2);
++    Surf* bgra = vk_rt_find(0x1100000);
++    CHECK(small && bgra && bgra->f.vk == VK_FORMAT_B8G8R8A8_UNORM);
++    vk_render_end();
++    const float uv[4] = {0, 0, 0.5f, 1}; /* only the red half is active, as with dynamic scene resolution */
++    const i32 crop[4] = {8, 8, 32, 32};
++    for (u32 i = 0; i < 3; i++) {
++        Surf* dst = i == 1 ? bgra : ui;
++        cb = vk_cmd();
++        vk_surf_use(cb, small, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
++                    VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
++        vk_surf_use(cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
++                    VK_ACCESS_2_TRANSFER_WRITE_BIT);
++        CHECK(vk_fsr_draw_target(cb, small->att, 0, uv, small->sw / 2, small->sh, dst->img, dst->att, dst->f.vk, crop));
++        dst->layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
++        dst->stage = VK_PIPELINE_STAGE_2_BLIT_BIT;
++        dst->access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
++    }
++    data = vk_readback_buffer(12, &buffer);
++    CHECK(data);
++    cb = vk_cmd();
++    vk_surf_use(cb, bgra, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
++                VK_ACCESS_2_TRANSFER_READ_BIT);
++    copies[0].imageOffset = (VkOffset3D){0, 0, 0};
++    copies[1].imageOffset = (VkOffset3D){24, 24, 0};
++    rec_CmdCopyImageToBuffer(cb, bgra->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies);
++    vk_surf_use(cb, ui, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
++                VK_ACCESS_2_TRANSFER_READ_BIT);
++    copies[2].imageOffset = (VkOffset3D){24, 24, 0};
++    rec_CmdCopyImageToBuffer(cb, ui->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, copies + 2);
++    vk_finish();
++    vk_readback_ready();
++    const u8 fsr_want[12] = {255, 0, 0, 255, 0, 0, 255, 255, 255, 0, 0, 255};
++    for (u32 i = 0; i < 12; i++) CHECK(abs((int)data[i] - fsr_want[i]) <= 1);
++    g_vk_scale = saved;
++    g_vk_base_scale = saved_base;
++    free(ch);
++    return 0;
++}
++
++static int check_ui_depth_scale(void) {
++    float saved = g_vk_scale, saved_base = g_vk_base_scale;
++    g_vk_scale = g_vk_base_scale = 1.75f;
++    for (u32 kind = 0; kind < 2; kind++) {
++        GpuChannel* ch = calloc(1, sizeof *ch);
++        CHECK(ch);
++        u32* r = ch->r3d;
++        r[0x54E] = 1;
++        r[0x3F9] = 0x1400000 + kind * 0x500000;
++        r[0x3FA] = kind ? 0x14 : 0x0A;
++        r[0x3FB] = 0x1000;
++        r[0x48A] = 1280;
++        r[0x48B] = 720;
++        r[0x48C] = 1;
++        float depth = 0.25f;
++        memcpy(&r[0x364], &depth, 4);
++        r[0x368] = 0x53;
++        vk_render_clear(ch, kind ? 3 : 1);
++        Surf* scene = vk_rt_find(r[0x3F9]);
++        CHECK(scene);
++        r[0x43E] = 0x100;
++        r[0x380] = 1;
++        r[0x381] = (1280u << 16) | 640;
++        r[0x382] = (720u << 16) | 360;
++        depth = 0.75f;
++        memcpy(&r[0x364], &depth, 4);
++        r[0x368] = 0x71;
++        vk_render_clear(ch, kind ? 3 : 1);
++        vk_render_end();
++        Surf* ui = vk_depth_for_scale(scene, 1.75f, 0);
++        if (!ui) {
++            VkFormatProperties props;
++            vkGetPhysicalDeviceFormatProperties(g_vk.phys, scene->f.vk, &props);
++            fprintf(stderr, "depth copy declined: kind=%u fmt=%d layout=%d features=%x src=%ux%u scale=%g\n", kind,
++                    scene->f.vk, scene->layout, props.optimalTilingFeatures, scene->sw, scene->sh, scene->scale);
++        }
++        CHECK(ui && ui->sw == 2240 && ui->sh == 1260);
++        CHECK(ui == vk_depth_for_scale(scene, 1.75f, 0));
++        if (scene->f.stencil && !ui->f.stencil) CHECK(!vk_depth_for_scale(scene, 1.75f, 1));
++        VkBuffer buffer;
++        u8* data = vk_readback_buffer(16, &buffer);
++        CHECK(data);
++        VkCommandBuffer cb = vk_cmd();
++        vk_surf_use(cb, ui, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
++                    VK_ACCESS_2_TRANSFER_READ_BIT);
++        VkBufferImageCopy copies[4] = {0};
++        for (u32 i = 0; i < 4; i++) {
++            copies[i].bufferOffset = i * 4;
++            copies[i].imageSubresource =
++                (VkImageSubresourceLayers){i < 2 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, 1};
++            copies[i].imageExtent = (VkExtent3D){1, 1, 1};
++            if (i & 1) copies[i].imageOffset = (VkOffset3D){2239, 1259, 0};
++        }
++        rec_CmdCopyImageToBuffer(cb, ui->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies);
++        if (kind) {
++            vk_surf_use(cb, scene, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
++                        VK_ACCESS_2_TRANSFER_READ_BIT);
++            copies[3].imageOffset = (VkOffset3D){(i32)scene->sw - 1, (i32)scene->sh - 1, 0};
++            rec_CmdCopyImageToBuffer(cb, scene->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies + 2);
++        }
++        vk_finish();
++        vk_readback_ready();
++        for (u32 i = 0; i < 2; i++) {
++            float got;
++            if (ui->f.vk == VK_FORMAT_D24_UNORM_S8_UINT) {
++                u32 raw;
++                memcpy(&raw, data + i * 4, 4);
++                got = (raw & 0xffffff) / 16777215.0f;
++            } else
++                memcpy(&got, data + i * 4, 4);
++            CHECK(fabsf(got - (i ? 0.75f : 0.25f)) < 0.00001f);
++        }
++        if (kind) CHECK(data[8] == 0x53 && data[12] == 0x71);
++        if (ui != scene) {
++            /* Simulate a native-size UI depth write and its target_written notification.
++               Reading the guest depth must resample it back without changing stencil. */
++            cb = vk_cmd();
++            vk_surf_use(cb,ui,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_2_CLEAR_BIT,VK_ACCESS_2_TRANSFER_WRITE_BIT);
++            VkClearDepthStencilValue value = {0.5f,0};
++            VkImageSubresourceRange range = {VK_IMAGE_ASPECT_DEPTH_BIT,0,1,0,1};
++            rec_CmdClearDepthStencilImage(cb,ui->img,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,&value,1,&range);
++            scene->ui_depth_dirty=1;
++            CHECK(vk_depth_restore(scene));
++            CHECK(!scene->ui_depth_dirty);
++            data=vk_readback_buffer(16,&buffer); CHECK(data);
++            cb=vk_cmd();
++            vk_surf_use(cb,scene,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_PIPELINE_STAGE_2_COPY_BIT,VK_ACCESS_2_TRANSFER_READ_BIT);
++            copies[1].imageOffset=(VkOffset3D){(i32)scene->sw-1,(i32)scene->sh-1,0};
++            rec_CmdCopyImageToBuffer(cb,scene->img,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,buffer,kind?4:2,copies);
++            vk_finish(); vk_readback_ready();
++            for (u32 i=0;i<2;i++) {
++                float got;
++                if (scene->f.vk==VK_FORMAT_D24_UNORM_S8_UINT) {
++                    u32 raw;memcpy(&raw,data+i*4,4);got=(raw&0xffffff)/16777215.0f;
++                } else memcpy(&got,data+i*4,4);
++                CHECK(fabsf(got-0.5f)<0.00001f);
++            }
++            if (kind) CHECK(data[8]==0x53 && data[12]==0x71);
++        }
++        free(ch);
++    }
++    g_vk_scale = saved;
++    g_vk_base_scale = saved_base;
++    return 0;
++}
++
+ /* Clear separate shadow cascades through the real register path, then read each depth layer back. */
+ static int check_depth_array(void) {
+     GpuChannel* ch = calloc(1, sizeof *ch);
+@@ -458,6 +707,8 @@ int main(int argc, char** argv) {
+     video_init("Headless Vulkan fixture");
+     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
+     CHECK(!check_viewport_orientation());
++    CHECK(!check_scene_scale());
++    CHECK(!check_ui_depth_scale());
+     CHECK(!check_packed_depth());
+     CHECK(!check_depth_array());
+     CHECK(!check_srgb_write());

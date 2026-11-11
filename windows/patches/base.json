@@ -1021,6 +1021,14 @@
         "src/nx/runtime/platform/backend/sdl3.c": "27fdf9b28fb6aaf18d29a01e639526c069ad7eea515d09b6ad4a2647f2905b10",
         "tests/vulkan_headless.c": "18176fd6ee898e227e4371b6f76355229d1153764a7ea8836fee073190708dc3"
       }
+    },
+    {
+      "patch": "0146-settings-option-tests.patch",
+      "patch_sha256": "2418436c8778d5922483d51664bfd7b140cab573ed4d025cb189853ddf44ce30",
+      "changed_files_lf_sha256": {
+        "tests/gui_settings.c": "ff2aec3750bea79faca7b307242125035c53695e7d943c3eb4c829e204e994ac",
+        "tests/settings_list.cmake": "1faa06c5ccc7c8e285ce16d85b388abf8567aa55137090b9b9a07b0a455384bd"
+      }
     }
   ]
 }

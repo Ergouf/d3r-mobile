@@ -17,9 +17,10 @@ Windows 使用本地修改的 ScarletNX 源码，位置为 `windows/source/Scarl
 
 ## 构建与依赖验收
 
-在项目根 PowerShell 运行：
+在无括号 junction 下的项目根 PowerShell 运行（不存在时按 [工具说明](../tools/README.md) 创建）：
 
 ```powershell
+Set-Location D:\workspace\Diablo-kbm
 . .\windows\tools\Activate.ps1
 .\windows\tools\Test-Dependencies.ps1 -OutputPath .\out\windows\dependencies
 .\windows\tools\Build.ps1 -Configure
@@ -31,6 +32,8 @@ Windows 使用本地修改的 ScarletNX 源码，位置为 `windows/source/Scarl
 
 构建入口通过真正的 CLANG64 登录 shell 调用上游 `default` preset。CPM 下载固定依赖，配置和缓存由上游 CMake 管理。首次构建或清理生成目录后，按上游 [Windows 构建说明](../source/ScarletNX-src/docs/BUILD.md) 重新配置。
 
+补丁按 `windows/patches/base.json` 顺序恢复并校验，不能直接遍历目录。2026-11-11 本机重放 132 阶段通过；新增 `0146` 只更新测试断言，安装运行时仍为 `0145`。`0145-scene-fsr-before-ui.patch` 和 `0146-settings-option-tests.patch` 均为未跟踪文件：在将它们纳入 Git 之前，单独克隆已有提交不能重建完整链。
+
 构建和测试产物统一集中在 `out/windows/`，主程序为 `out/windows/build/scarletnx.exe`；`dependencies/` 放依赖验收输出、`packages/` 放打包过程文件、`releases/` 放发行输出。不要把 guest 资源、密钥或唯一存档放在这些可清理目录。
 
 依赖验收编译并链接 Vulkan C 程序，编译 GLSL、执行 `spirv-val`，显式启用 Khronos 验证层并创建 Intel Arc 逻辑设备及着色器模块。它不执行计算着色器，也不测游戏帧率。
@@ -41,7 +44,7 @@ Windows 使用本地修改的 ScarletNX 源码，位置为 `windows/source/Scarl
 
 当前安装入口为 `D:\Games\DiabloIII\暗黑破坏神 III.lnk`，直接启动运行时；`Launch.cmd` 仍保留。旧 `D:\Program Files` 安装已迁移删除。重新部署时使用完整解压的便携运行目录，通过其中 `Launch.cmd` 启动；仅复制 `scarletnx.exe` 不会携带游戏资源或导入库。
 
-发行默认值：
+发行打包器默认值（不是现有安装的当前 INI）：
 
 ```ini
 [Display]
@@ -64,7 +67,7 @@ profile=0
 diag=0
 ```
 
-FSR1 EASU 放大后使用 RCAS，衰减 1.5 stops；0 最强，数值增大则减弱。内部 1×和阴影保持原设置。`upscaler=0` 可切回双线性做同场景对照。
+FSR1 EASU 放大后使用 RCAS，衰减 1.5 stops；0 最强，数值增大则减弱。2026-11-11 核对的现有安装 INI 为 `resolution=1.75`、`upscaler=1`、`shadows=1`；后台启动器也通过命令行指定 1.75×。发行包的 1× 默认值不会自动覆盖现有安装。`upscaler=0` 可切回双线性做同场景对照。
 
 F11 / Alt+Enter 切换全屏，F2 打开运行时菜单；游戏内 `Esc` 是返回/关闭当前界面，退出程序通过 F2 菜单。键鼠与手柄映射见 [KBM 操作说明](KBM-INPUT-GUIDE.md)。
 
@@ -72,7 +75,7 @@ F11 / Alt+Enter 切换全屏，F2 打开运行时菜单；游戏内 `Esc` 是返
 
 已完成相关 10 项 CTest、三份 FSR SPIR-V 验证、两次 3K 全屏及窗口切换验证。实战性能测试应关闭验证层，分别记录原生/guest 提交与独立上屏帧率。当前版本没有帧生成，不把 120Hz 当作 120 个不同帧。
 
-当前 120Hz 下严重卡顿仍在诊断，FSR 最终实战验收未完成。既有构建、启动和验证层检查不能作为卡顿已修复的证据，最新短窗口对照见 [状态](STATUS.md)。
+120Hz 长期表现和 FSR 最终实战验收未完成。重启及驱动更新后的短窗未复现此前严重卡顿，但不足以证明长期问题已解决；对照见 [状态](STATUS.md)。
 
 游戏资源和提取输入只放本地目录；发布包省略日志、JIT/着色器缓存、原始 XCI/NCA 和密钥。重新打包后应全量检查 ZIP CRC、文件 SHA-256、整体 SHA-256，并从干净解压副本验证启动。
 

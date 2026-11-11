@@ -9,7 +9,7 @@
 
     <!-- arm64 guest + host: no x86/armeabi fallbacks on purpose. -->
     <application
-        android:label="Diablo III"
+        android:label="Diablo3"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
@@ -21,7 +21,7 @@
 
         <activity
             android:name="com.d3mobile.host.MainActivity"
-            android:label="Diablo III"
+            android:label="Diablo3"
             android:screenOrientation="sensorLandscape"
             android:resizeableActivity="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"
