@@ -42,7 +42,7 @@ bool DriverHasDevice(void* handle) {
 
 extern "C" void d3_gpu_driver_status(char* output, size_t size) {
     std::lock_guard lock(config_mutex);
-    std::snprintf(output, size, "%s", driver_status.c_str());
+    std::snprintf(output, size, "backend=eden-maxwell-vulkan; %s", driver_status.c_str());
 }
 
 extern "C" int d3_gpu_configure(int scale, int widescreen, const char* libraries, const char* directory,
