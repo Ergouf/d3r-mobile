@@ -26,6 +26,7 @@
 #include "emu_window_d3.h"
 #include "graphics_config.h"
 #include "frame_pacing.h"
+#include "gpu_backend_policy.h"
 #include "video_core/gpu.h"
 #include "video_core/host1x/host1x.h"
 #include "video_core/control/channel_state.h"
@@ -648,6 +649,14 @@ extern "C" __attribute__((visibility("default"))) int d3_gpu_renderer_init(void*
     }
 }
 extern "C" int d3_gpu_bridge_start(void* native_window) {
+    const char* requested = std::getenv("D3_GPU_BACKEND");
+    const D3GpuBackendRequest backend = d3_gpu_backend_request(requested);
+    if (backend != D3_GPU_BACKEND_EDEN) {
+        RendererReport("gpu-backend: requested=%s unavailable; linked=eden-maxwell-vulkan; refusing silent fallback",
+                       requested ? requested : "");
+        return -95;
+    }
+    RendererReport("gpu-backend: selected=eden-maxwell-vulkan");
     const int renderer_status = d3_gpu_renderer_init(native_window);
     if (renderer_status != 0) {
         return renderer_status;
